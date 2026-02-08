@@ -204,6 +204,90 @@ export async function getFundingHistory(coin: string, startTime: number) {
   return await info.fundingHistory({ coin, startTime });
 }
 
+/**
+ * Fetch historical candle data for a coin
+ * @param coin - The coin symbol (e.g., "SOL", "ETH")
+ * @param interval - The candle interval
+ * @param startTime - Start timestamp in milliseconds
+ * @param endTime - End timestamp in milliseconds (optional, defaults to now)
+ * @returns Array of candles with [timestamp, open, high, low, close, volume]
+ */
+export async function getCandleData(
+  coin: string,
+  interval: "1m" | "3m" | "5m" | "15m" | "30m" | "1h" | "2h" | "4h" | "8h" | "12h" | "1d" | "3d" | "1w" | "1M" = "1h",
+  startTime?: number,
+  endTime?: number
+) {
+  const info = getInfoClient();
+  
+  // Default to last 100 candles if no time specified
+  if (!startTime) {
+    const intervalMs = parseInterval(interval);
+    endTime = Date.now();
+    startTime = endTime - (intervalMs * 100);
+  }
+  
+  return await info.candleSnapshot({
+    coin,
+    interval,
+    startTime: startTime,
+    endTime: endTime || Date.now(),
+  });
+}
+
+/**
+ * Parse interval string to milliseconds
+ */
+function parseInterval(interval: string): number {
+  const match = interval.match(/^(\d+)([mhd])$/);
+  if (!match) return 60 * 60 * 1000; // default 1h
+  
+  const value = parseInt(match[1]);
+  const unit = match[2];
+  
+  switch (unit) {
+    case 'm': return value * 60 * 1000;
+    case 'h': return value * 60 * 60 * 1000;
+    case 'd': return value * 24 * 60 * 60 * 1000;
+    default: return 60 * 60 * 1000;
+  }
+}
+
+/**
+ * Get historical prices from candle data
+ * @param coin - The coin symbol
+ * @param interval - Candle interval (default "15m" for good RSI calculation)
+ * @param count - Number of candles to fetch (default 50, enough for 14-period RSI with history)
+ */
+export async function getHistoricalPrices(
+  coin: string,
+  interval: "1m" | "3m" | "5m" | "15m" | "30m" | "1h" | "2h" | "4h" | "8h" | "12h" | "1d" | "3d" | "1w" | "1M" = "15m",
+  count: number = 50
+): Promise<{ prices: number[]; highs: number[]; lows: number[] }> {
+  try {
+    const intervalMs = parseInterval(interval);
+    const endTime = Date.now();
+    const startTime = endTime - (intervalMs * count);
+    
+    const candles = await getCandleData(coin, interval, startTime, endTime);
+    
+    if (!candles || candles.length === 0) {
+      console.warn(`[HL] No candle data for ${coin}`);
+      return { prices: [], highs: [], lows: [] };
+    }
+    
+    // Extract close prices, highs, and lows
+    const prices = candles.map((c: any) => parseFloat(c.c)); // close price
+    const highs = candles.map((c: any) => parseFloat(c.h)); // high
+    const lows = candles.map((c: any) => parseFloat(c.l)); // low
+    
+    return { prices, highs, lows };
+  } catch (error) {
+    console.error(`[HL] Failed to fetch historical prices for ${coin}:`, error);
+    return { prices: [], highs: [], lows: [] };
+  }
+}
+
 // ============================================
 // Account & Positions
 // ============================================
@@ -305,10 +389,16 @@ export async function updateLeverage(
   exchange?: ExchangeClient
 ) {
   const exchangeClient = exchange ?? getExchangeClient();
+  
+  // Ensure leverage is a valid integer between 1 and 50
+  const validLeverage = Math.max(1, Math.min(50, Math.round(leverage)));
+  
+  console.log(`[HL] Setting leverage for asset ${asset} to ${validLeverage}x (requested: ${leverage})`);
+  
   return await exchangeClient.updateLeverage({
     asset,
     isCross,
-    leverage,
+    leverage: validLeverage,
   });
 }
 
@@ -326,7 +416,8 @@ export async function placeMarketOrder(params: {
 }, exchange?: ExchangeClient) {
   const info = getInfoClient();
   const meta = await info.meta();
-  const coin = meta.universe[params.asset]?.name;
+  const assetMeta = meta.universe[params.asset];
+  const coin = assetMeta?.name;
   if (!coin) throw new Error(`Unknown asset index: ${params.asset}`);
 
   const mids = await info.allMids();
@@ -341,11 +432,16 @@ export async function placeMarketOrder(params: {
   // HL requires prices with at most 5 significant figures
   const price = formatHlPrice(rawPrice);
 
+  // Format size to correct decimal places for this asset
+  const szDecimals = assetMeta.szDecimals ?? 2;
+  const rawSize = parseFloat(params.size);
+  const formattedSize = rawSize.toFixed(szDecimals);
+
   return await placeOrder({
     asset: params.asset,
     isBuy: params.isBuy,
     price,
-    size: params.size,
+    size: formattedSize,
     reduceOnly: params.reduceOnly ?? false,
     orderType: "Ioc",
     vaultAddress: params.vaultAddress,
@@ -362,17 +458,24 @@ export async function placeStopLossOrder(params: {
   vaultAddress?: Address;
 }, exchange?: ExchangeClient) {
   const exchangeClient = exchange ?? getExchangeClient();
+  const info = getInfoClient();
+  const meta = await info.meta();
+  const szDecimals = meta.universe[params.asset]?.szDecimals ?? 2;
+  const formattedSize = parseFloat(params.size).toFixed(szDecimals);
+  const formattedPrice = formatHlPrice(parseFloat(params.price));
+  const formattedTrigger = formatHlPrice(parseFloat(params.triggerPrice));
+  
   return await exchangeClient.order({
     orders: [
       {
         a: params.asset,
         b: params.isBuy,
-        p: params.price,
-        s: params.size,
+        p: formattedPrice,
+        s: formattedSize,
         r: true, // stop-loss is always reduce-only
         t: {
           trigger: {
-            triggerPx: params.triggerPrice,
+            triggerPx: formattedTrigger,
             isMarket: true,
             tpsl: "sl",
           },
@@ -394,17 +497,24 @@ export async function placeTakeProfitOrder(params: {
   vaultAddress?: Address;
 }, exchange?: ExchangeClient) {
   const exchangeClient = exchange ?? getExchangeClient();
+  const info = getInfoClient();
+  const meta = await info.meta();
+  const szDecimals = meta.universe[params.asset]?.szDecimals ?? 2;
+  const formattedSize = parseFloat(params.size).toFixed(szDecimals);
+  const formattedPrice = formatHlPrice(parseFloat(params.price));
+  const formattedTrigger = formatHlPrice(parseFloat(params.triggerPrice));
+  
   return await exchangeClient.order({
     orders: [
       {
         a: params.asset,
         b: params.isBuy,
-        p: params.price,
-        s: params.size,
+        p: formattedPrice,
+        s: formattedSize,
         r: true,
         t: {
           trigger: {
-            triggerPx: params.triggerPrice,
+            triggerPx: formattedTrigger,
             isMarket: true,
             tpsl: "tp",
           },
@@ -663,6 +773,29 @@ export async function provisionAgentWallet(
   };
 }
 
+export interface AgentPosition {
+  coin: string;
+  size: number;
+  side: "long" | "short";
+  entryPrice: number;
+  markPrice: number;
+  positionValue: number;
+  unrealizedPnl: number;
+  unrealizedPnlPercent: number;
+  leverage: number;
+  marginUsed: number;
+  liquidationPrice: number | null;
+}
+
+export interface AgentHlState {
+  address: Address | null;
+  accountValue: string;
+  availableBalance: string;
+  marginUsed: string;
+  totalUnrealizedPnl: number;
+  positions: AgentPosition[];
+}
+
 /**
  * Get the HL account balance for an agent's wallet.
  */
@@ -692,6 +825,73 @@ export async function getAgentHlBalance(
       accountValue: "0",
       availableBalance: "0",
       marginUsed: "0",
+    };
+  }
+}
+
+/**
+ * Get the full HL account state including positions for an agent's wallet.
+ */
+export async function getAgentHlState(
+  agentId: string
+): Promise<AgentHlState | null> {
+  const { getAccountForAgent } = await import("./account-manager");
+  const account = await getAccountForAgent(agentId);
+  if (!account) return null;
+
+  try {
+    const state = await getAccountState(account.address);
+    const mids = await getInfoClient().allMids();
+    
+    // Parse positions
+    const positions: AgentPosition[] = (state.assetPositions || [])
+      .filter((p) => parseFloat(p.position.szi) !== 0)
+      .map((p) => {
+        const size = parseFloat(p.position.szi);
+        const entryPrice = parseFloat(p.position.entryPx || "0");
+        const markPrice = parseFloat(mids[p.position.coin] || "0");
+        const positionValue = Math.abs(size) * markPrice;
+        const unrealizedPnl = parseFloat(p.position.unrealizedPnl);
+        const leverageVal = parseFloat(String(p.position.leverage?.value ?? "1"));
+        const marginUsed = parseFloat(p.position.marginUsed || "0");
+        const liquidationPx = p.position.liquidationPx ? parseFloat(p.position.liquidationPx) : null;
+        
+        return {
+          coin: p.position.coin,
+          size: Math.abs(size),
+          side: size > 0 ? "long" as const : "short" as const,
+          entryPrice,
+          markPrice,
+          positionValue,
+          unrealizedPnl,
+          unrealizedPnlPercent: entryPrice > 0 
+            ? (unrealizedPnl / (Math.abs(size) * entryPrice)) * 100 
+            : 0,
+          leverage: leverageVal,
+          marginUsed,
+          liquidationPrice: liquidationPx,
+        };
+      });
+
+    const totalUnrealizedPnl = positions.reduce((sum, p) => sum + p.unrealizedPnl, 0);
+
+    return {
+      address: account.address,
+      accountValue: state.marginSummary?.accountValue || "0",
+      availableBalance: state.withdrawable || "0",
+      marginUsed: state.marginSummary?.totalMarginUsed || "0",
+      totalUnrealizedPnl,
+      positions,
+    };
+  } catch (error) {
+    console.error(`Error fetching agent HL state for ${agentId}:`, error);
+    return {
+      address: account.address,
+      accountValue: "0",
+      availableBalance: "0",
+      marginUsed: "0",
+      totalUnrealizedPnl: 0,
+      positions: [],
     };
   }
 }

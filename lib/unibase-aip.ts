@@ -15,7 +15,7 @@ import { randomBytes } from "crypto";
 import type { Agent, TradeDecision } from "./types";
 import { getAgent, getAllAgents } from "./store";
 import { getTradeDecision } from "./ai";
-import { getEnrichedMarketData, getAccountState } from "./hyperliquid";
+import { getEnrichedMarketData, getAccountState, getHistoricalPrices } from "./hyperliquid";
 
 // ============================================
 // Types - AIP SDK Interface
@@ -333,6 +333,26 @@ export function createAgentHandler(hyperClawAgentId: string): AgentHandler {
       const availableBalance = parseFloat(accountState.withdrawable || "0");
       const markets = await getEnrichedMarketData();
 
+      // Fetch historical prices if indicator is enabled
+      let historicalPrices: Record<string, number[]> = {};
+      if (agent.indicator?.enabled && agent.markets.length > 0) {
+        try {
+          const pricePromises = agent.markets.map(async (coin) => {
+            const data = await getHistoricalPrices(coin, "15m", 50);
+            return { coin, prices: data.prices };
+          });
+          
+          const results = await Promise.all(pricePromises);
+          for (const { coin, prices } of results) {
+            if (prices.length > 0) {
+              historicalPrices[coin] = prices;
+            }
+          }
+        } catch (error) {
+          console.error(`[Unibase AIP] Failed to fetch historical prices:`, error);
+        }
+      }
+
       const decision = await getTradeDecision({
         markets,
         currentPositions: positions,
@@ -340,6 +360,12 @@ export function createAgentHandler(hyperClawAgentId: string): AgentHandler {
         riskLevel: agent.riskLevel,
         maxLeverage: agent.maxLeverage,
         allowedMarkets: agent.markets,
+        aggressiveness: agent.autonomy?.aggressiveness ?? 50,
+        indicator: agent.indicator,
+        historicalPrices: Object.keys(historicalPrices).length > 0 ? historicalPrices : undefined,
+        // Pass agent identity and custom strategy
+        agentName: agent.name,
+        agentStrategy: agent.description,
       });
 
       let response = `🤖 **${agent.name} Trading Decision**\n\n`;

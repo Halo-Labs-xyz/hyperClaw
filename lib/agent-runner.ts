@@ -18,6 +18,7 @@ import {
   updateLeverage,
   getAssetIndex,
   getExchangeClientForAgent,
+  getHistoricalPrices,
 } from "./hyperliquid";
 import { getPrivateKeyForAgent } from "./account-manager";
 import type { TradeLog, AgentRunnerState, PlaceOrderParams } from "./types";
@@ -143,7 +144,31 @@ export async function executeTick(agentId: string): Promise<TradeLog> {
 
     const availableBalance = parseFloat(accountState.withdrawable || "0");
 
-    // 3. Ask AI for trade decision
+    // 3. Fetch historical prices if indicator is enabled
+    let historicalPrices: Record<string, number[]> = {};
+    if (agent.indicator?.enabled && agent.markets.length > 0) {
+      console.log(`[Agent ${agentId}] Fetching historical prices for indicator analysis...`);
+      try {
+        // Fetch historical prices for all allowed markets
+        const pricePromises = agent.markets.map(async (coin) => {
+          const data = await getHistoricalPrices(coin, "15m", 50);
+          return { coin, prices: data.prices };
+        });
+        
+        const results = await Promise.all(pricePromises);
+        for (const { coin, prices } of results) {
+          if (prices.length > 0) {
+            historicalPrices[coin] = prices;
+            console.log(`[Agent ${agentId}] Fetched ${prices.length} candles for ${coin}`);
+          }
+        }
+      } catch (error) {
+        console.error(`[Agent ${agentId}] Failed to fetch historical prices:`, error);
+        // Continue without historical prices - indicators will use fallback logic
+      }
+    }
+
+    // 4. Ask AI for trade decision (with indicator and strategy if configured)
     const decision = await getTradeDecision({
       markets,
       currentPositions: positions,
@@ -151,28 +176,47 @@ export async function executeTick(agentId: string): Promise<TradeLog> {
       riskLevel: agent.riskLevel,
       maxLeverage: agent.maxLeverage,
       allowedMarkets: agent.markets,
+      aggressiveness: agent.autonomy?.aggressiveness ?? 50,
+      indicator: agent.indicator,
+      historicalPrices: Object.keys(historicalPrices).length > 0 ? historicalPrices : undefined,
+      // Pass agent identity and custom strategy
+      agentName: agent.name,
+      agentStrategy: agent.description, // The agent's description IS its strategy
     });
 
-    // 4. Execute full order pipeline
+    // 5. Execute full order pipeline
     let executed = false;
     let executionResult: TradeLog["executionResult"] = undefined;
 
+    console.log(`[Agent ${agentId}] Decision: ${decision.action} ${decision.asset} @ ${decision.confidence*100}% confidence`);
+    console.log(`[Agent ${agentId}] Available balance: $${availableBalance}, Has exchange client: ${!!ex}`);
+
     if (decision.action !== "hold" && decision.confidence >= 0.6) {
+      console.log(`[Agent ${agentId}] Attempting to execute trade...`);
       try {
         const assetIndex = await getAssetIndex(decision.asset);
+        console.log(`[Agent ${agentId}] Asset index for ${decision.asset}: ${assetIndex}`);
 
-        // Set leverage first
-        await updateLeverage(assetIndex, decision.leverage, true);
+        // Set leverage first (must use agent's exchange client)
+        if (ex) {
+          await updateLeverage(assetIndex, decision.leverage, true, ex);
+          console.log(`[Agent ${agentId}] Leverage set to ${decision.leverage}x`);
+        } else {
+          console.warn(`[Agent ${agentId}] Cannot set leverage - no exchange client`);
+        }
 
         // Calculate order size with safety checks
         const capitalToUse = availableBalance * decision.size;
         const price =
           markets.find((m) => m.coin === decision.asset)?.price || 0;
         const orderSize = price > 0 ? capitalToUse / price : 0;
+        
+        console.log(`[Agent ${agentId}] Order calculation: capital=$${capitalToUse}, price=$${price}, size=${orderSize}`);
 
         if (!isFinite(orderSize) || isNaN(orderSize) || orderSize <= 0) {
-          console.warn(`[Agent ${agentId}] Invalid order size: ${orderSize} (capital=${capitalToUse}, price=${price})`);
-        } else if (orderSize > 0) {
+          console.warn(`[Agent ${agentId}] SKIPPING: Invalid order size: ${orderSize} (capital=${capitalToUse}, price=${price})`);
+        } else {
+          console.log(`[Agent ${agentId}] Order size valid: ${orderSize}`);
           const isBuy =
             decision.action === "long" ||
             (decision.action === "close" &&
@@ -191,7 +235,13 @@ export async function executeTick(agentId: string): Promise<TradeLog> {
             slippagePercent: 1,
           };
 
-          if (ex) await executeOrder(entryParams, ex);
+          if (ex) {
+            console.log(`[Agent ${agentId}] Executing order:`, JSON.stringify(entryParams));
+            await executeOrder(entryParams, ex);
+            console.log(`[Agent ${agentId}] Order executed successfully!`);
+          } else {
+            console.warn(`[Agent ${agentId}] No exchange client - skipping order execution`);
+          }
 
           executed = true;
           executionResult = {
@@ -240,7 +290,8 @@ export async function executeTick(agentId: string): Promise<TradeLog> {
           }
         }
       } catch (execError) {
-        console.error(`[Agent ${agentId}] Trade execution error:`, execError);
+        console.error(`[Agent ${agentId}] EXCEPTION in trade execution:`, execError);
+        console.error(`[Agent ${agentId}] Full error:`, JSON.stringify(execError, Object.getOwnPropertyNames(execError)));
         if (state) {
           state.errors.push({
             timestamp: Date.now(),

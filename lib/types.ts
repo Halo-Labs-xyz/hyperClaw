@@ -75,6 +75,8 @@ export interface Agent {
   stopLossPercent: number;
   // Autonomy
   autonomy: AutonomyConfig;
+  // Indicator-based trading
+  indicator?: IndicatorConfig;
   // Telegram
   telegram?: TelegramConfig;
   // Vault social
@@ -345,6 +347,83 @@ export interface HlAccount {
   agentId?: string; // linked agent
   createdAt: number;
 }
+
+// ============================================
+// Indicator Configuration Types
+// ============================================
+
+export type IndicatorSignal = "bullish" | "bearish" | "neutral";
+
+export interface IndicatorConfig {
+  enabled: boolean;
+  // The indicator name/type
+  name: string;
+  // Human-readable description
+  description: string;
+  // The Pine Script source code (for reference/documentation)
+  pineScript?: string;
+  // Key signal conditions from the indicator
+  signals: {
+    // What condition indicates bullish signal
+    bullishCondition: string;
+    // What condition indicates bearish signal
+    bearishCondition: string;
+  };
+  // How much weight to give this indicator (0-100)
+  weight: number;
+  // Whether agent should strictly follow or use as guidance
+  strictMode: boolean;
+  // Custom parameters for the indicator
+  parameters?: Record<string, number | string | boolean>;
+}
+
+// Pre-defined indicator templates
+export const INDICATOR_TEMPLATES: Record<string, Omit<IndicatorConfig, "enabled" | "weight" | "strictMode">> = {
+  "adaptive-rsi-divergence": {
+    name: "Adaptive RSI with Divergence",
+    description: "Gaussian-weighted RSI with real-time bullish/bearish divergence detection and trailing stops",
+    signals: {
+      bullishCondition: "RSI crosses above oversold (30) with bullish divergence (price makes lower low, RSI makes higher low), or RSI crosses above buy trigger level",
+      bearishCondition: "RSI crosses below overbought (70) with bearish divergence (price makes higher high, RSI makes lower high), or RSI crosses below sell trigger level",
+    },
+    parameters: {
+      rsiLength: 14,
+      gaussianSigma: 3.0,
+      signalLength: 9,
+      buyTrigger: 20,
+      sellTrigger: 80,
+      enableDivergence: true,
+      enableTrailingStop: true,
+      trailingMultiplier: 3.0,
+    },
+  },
+  "smart-money-concepts": {
+    name: "Smart Money Concepts",
+    description: "Institutional trading concepts including market structure (BOS/CHoCH), order blocks, fair value gaps, and liquidity zones",
+    signals: {
+      bullishCondition: "Bullish CHoCH (change of character) or BOS (break of structure), price in discount zone, bullish order block support, or bullish fair value gap",
+      bearishCondition: "Bearish CHoCH or BOS, price in premium zone, bearish order block resistance, or bearish fair value gap",
+    },
+    parameters: {
+      showInternalStructure: true,
+      showSwingStructure: true,
+      showOrderBlocks: true,
+      showFairValueGaps: true,
+      showPremiumDiscountZones: true,
+      swingsLength: 50,
+      orderBlockFilter: "ATR",
+    },
+  },
+  "custom": {
+    name: "Custom Indicator",
+    description: "Define your own indicator signals and conditions",
+    signals: {
+      bullishCondition: "",
+      bearishCondition: "",
+    },
+    parameters: {},
+  },
+};
 
 // ============================================
 // Strategy Testing Types

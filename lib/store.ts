@@ -97,6 +97,22 @@ export async function updateAgent(
   return agents[index];
 }
 
+export async function deleteAgent(id: string): Promise<boolean> {
+  const agents = await getAgents();
+  const index = agents.findIndex((a) => a.id === id);
+  if (index === -1) return false;
+
+  agents.splice(index, 1);
+  await writeJSON("agents.json", agents);
+  
+  // Also clean up trade logs for this agent
+  const allTrades = await readJSON<TradeLog[]>("trades.json", []);
+  const filteredTrades = allTrades.filter((t) => t.agentId !== id);
+  await writeJSON("trades.json", filteredTrades);
+  
+  return true;
+}
+
 // ============================================
 // Trade Logs
 // ============================================

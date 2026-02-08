@@ -1,13 +1,13 @@
 "use client";
 
 import { useState, useEffect, useCallback, useRef } from "react";
-import { useParams } from "next/navigation";
+import { useParams, useRouter } from "next/navigation";
 import { useAccount, useBalance, useWriteContract, useReadContract, useWaitForTransactionReceipt, useSwitchChain } from "wagmi";
 import { parseEther, formatEther, type Address } from "viem";
 import Link from "next/link";
 import { NetworkToggle } from "@/app/components/NetworkToggle";
-import type { Agent, TradeLog, MonadToken, VaultChatMessage } from "@/lib/types";
-import { MONAD_TOKENS } from "@/lib/types";
+import type { Agent, TradeLog, MonadToken, VaultChatMessage, IndicatorConfig } from "@/lib/types";
+import { MONAD_TOKENS, INDICATOR_TEMPLATES } from "@/lib/types";
 import { VAULT_ABI, ERC20_ABI, agentIdToBytes32 } from "@/lib/vault";
 import { monadTestnet, monadMainnet } from "../../components/Providers";
 
@@ -38,7 +38,7 @@ function CopyAddressButton({ address }: { address: string }) {
   );
 }
 
-type TabKey = "overview" | "trades" | "deposit" | "chat";
+type TabKey = "overview" | "trades" | "deposit" | "chat" | "settings";
 
 export default function AgentDetailPage() {
   const params = useParams();
@@ -64,17 +64,42 @@ export default function AgentDetailPage() {
   const [withdrawTxHash, setWithdrawTxHash] = useState<`0x${string}` | undefined>();
   const [withdrawStatus, setWithdrawStatus] = useState<string>("");
 
-  // HL wallet balance
+  // HL wallet balance and positions
   const [hlBalance, setHlBalance] = useState<{
     hasWallet: boolean;
     address?: string;
     accountValue?: string;
     availableBalance?: string;
+    marginUsed?: string;
     network?: string;
   } | null>(null);
 
+  const [hlPositions, setHlPositions] = useState<{
+    coin: string;
+    size: number;
+    side: "long" | "short";
+    entryPrice: number;
+    markPrice: number;
+    positionValue: number;
+    unrealizedPnl: number;
+    unrealizedPnlPercent: number;
+    leverage: number;
+    liquidationPrice: number | null;
+  }[]>([]);
+  
+  const [totalUnrealizedPnl, setTotalUnrealizedPnl] = useState<number>(0);
+
   // Agent tick (manual trigger)
   const [ticking, setTicking] = useState(false);
+  
+  // Runner/Lifecycle state
+  const [lifecycle, setLifecycle] = useState<{
+    runnerActive: boolean;
+    aipRegistered: boolean;
+    healthStatus: "healthy" | "degraded" | "unhealthy" | "stopped";
+    tickCount?: number;
+    lastTickAt?: number | null;
+  } | null>(null);
 
   // Approval
   const [approving, setApproving] = useState(false);
@@ -84,6 +109,34 @@ export default function AgentDetailPage() {
   const [chatInput, setChatInput] = useState("");
   const [sendingChat, setSendingChat] = useState(false);
   const chatEndRef = useRef<HTMLDivElement>(null);
+
+  // Settings state
+  const router = useRouter();
+  const [saving, setSaving] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+  const [deleteConfirm, setDeleteConfirm] = useState(false);
+  const [settingsStatus, setSettingsStatus] = useState<{ type: "success" | "error"; message: string } | null>(null);
+  
+  // Editable settings
+  const [editName, setEditName] = useState("");
+  const [editDescription, setEditDescription] = useState("");
+  const [editMarkets, setEditMarkets] = useState<string[]>([]);
+  const [editMaxLeverage, setEditMaxLeverage] = useState(10);
+  const [editRiskLevel, setEditRiskLevel] = useState<"conservative" | "moderate" | "aggressive">("moderate");
+  const [editStopLoss, setEditStopLoss] = useState(5);
+  const [editAutonomyMode, setEditAutonomyMode] = useState<"full" | "semi" | "manual">("semi");
+  const [editAggressiveness, setEditAggressiveness] = useState(50);
+  const [editMaxTradesPerDay, setEditMaxTradesPerDay] = useState(10);
+  const [editStatus, setEditStatus] = useState<"active" | "paused" | "stopped">("active");
+
+  // Indicator settings
+  const [indicatorEnabled, setIndicatorEnabled] = useState(false);
+  const [indicatorTemplate, setIndicatorTemplate] = useState<string>("adaptive-rsi-divergence");
+  const [indicatorWeight, setIndicatorWeight] = useState(70);
+  const [indicatorStrictMode, setIndicatorStrictMode] = useState(false);
+  const [indicatorCustomBullish, setIndicatorCustomBullish] = useState("");
+  const [indicatorCustomBearish, setIndicatorCustomBearish] = useState("");
+  const [indicatorCustomDescription, setIndicatorCustomDescription] = useState("");
 
   const { writeContractAsync } = useWriteContract();
   const { switchChainAsync } = useSwitchChain();
@@ -129,18 +182,45 @@ export default function AgentDetailPage() {
       const data = await res.json();
       setAgent(data.agent);
       setTrades(data.trades || []);
+      
+      // Set lifecycle data if present
+      if (data.lifecycle) {
+        setLifecycle(data.lifecycle);
+      }
 
-      // Also fetch HL balance
+      // Also fetch HL balance and positions
       try {
         const hlRes = await fetch("/api/fund", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ action: "agent-balance", agentId }),
+          body: JSON.stringify({ action: "agent-state", agentId }),
         });
         const hlData = await hlRes.json();
         setHlBalance(hlData);
+        if (hlData.positions) {
+          setHlPositions(hlData.positions);
+          setTotalUnrealizedPnl(hlData.totalUnrealizedPnl || 0);
+        }
       } catch {
-        // HL balance fetch is non-critical
+        // HL state fetch is non-critical
+      }
+
+      // Also fetch lifecycle summary for runner status
+      try {
+        const lifecycleRes = await fetch("/api/lifecycle");
+        const lifecycleData = await lifecycleRes.json();
+        const agentLifecycle = lifecycleData.agents?.find((a: { id: string }) => a.id === agentId);
+        if (agentLifecycle) {
+          setLifecycle({
+            runnerActive: agentLifecycle.runnerActive,
+            aipRegistered: agentLifecycle.aipRegistered,
+            healthStatus: agentLifecycle.healthStatus,
+            tickCount: agentLifecycle.tickCount,
+            lastTickAt: agentLifecycle.lastTickAt,
+          });
+        }
+      } catch {
+        // Lifecycle fetch is non-critical
       }
     } catch (e) {
       console.error(e);
@@ -161,7 +241,46 @@ export default function AgentDetailPage() {
 
   useEffect(() => {
     fetchAgent();
-  }, [fetchAgent]);
+    // Auto-refresh positions every 10 seconds when agent is active
+    const refreshInterval = setInterval(() => {
+      if (agent?.status === "active") {
+        fetchAgent();
+      }
+    }, 10000);
+    return () => clearInterval(refreshInterval);
+  }, [fetchAgent, agent?.status]);
+
+  // Sync settings form when agent loads
+  useEffect(() => {
+    if (agent) {
+      setEditName(agent.name);
+      setEditDescription(agent.description);
+      setEditMarkets(agent.markets);
+      setEditMaxLeverage(agent.maxLeverage);
+      setEditRiskLevel(agent.riskLevel);
+      setEditStopLoss(agent.stopLossPercent);
+      setEditAutonomyMode(agent.autonomy?.mode ?? "semi");
+      setEditAggressiveness(agent.autonomy?.aggressiveness ?? 50);
+      setEditMaxTradesPerDay(agent.autonomy?.maxTradesPerDay ?? 10);
+      setEditStatus(agent.status);
+      // Indicator settings
+      if (agent.indicator) {
+        setIndicatorEnabled(agent.indicator.enabled);
+        // Determine template from name
+        const templateKey = Object.keys(INDICATOR_TEMPLATES).find(
+          key => INDICATOR_TEMPLATES[key].name === agent.indicator?.name
+        ) || "custom";
+        setIndicatorTemplate(templateKey);
+        setIndicatorWeight(agent.indicator.weight);
+        setIndicatorStrictMode(agent.indicator.strictMode);
+        if (templateKey === "custom") {
+          setIndicatorCustomBullish(agent.indicator.signals.bullishCondition);
+          setIndicatorCustomBearish(agent.indicator.signals.bearishCondition);
+          setIndicatorCustomDescription(agent.indicator.description);
+        }
+      }
+    }
+  }, [agent]);
 
   // When deposit tx confirms, relay to backend
   useEffect(() => {
@@ -392,6 +511,100 @@ export default function AgentDetailPage() {
     }
   };
 
+  const handleSaveSettings = async () => {
+    setSaving(true);
+    setSettingsStatus(null);
+    try {
+      // Calculate minConfidence from aggressiveness
+      const minConfidence = 1 - (editAggressiveness / 100) * 0.5;
+      
+      // Build indicator config
+      const template = INDICATOR_TEMPLATES[indicatorTemplate];
+      const indicatorConfig: IndicatorConfig | undefined = indicatorEnabled ? {
+        enabled: true,
+        name: indicatorTemplate === "custom" ? "Custom Indicator" : template.name,
+        description: indicatorTemplate === "custom" ? indicatorCustomDescription : template.description,
+        signals: indicatorTemplate === "custom" 
+          ? { bullishCondition: indicatorCustomBullish, bearishCondition: indicatorCustomBearish }
+          : template.signals,
+        weight: indicatorWeight,
+        strictMode: indicatorStrictMode,
+        parameters: indicatorTemplate === "custom" ? {} : template.parameters,
+      } : undefined;
+      
+      const res = await fetch(`/api/agents/${agentId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name: editName,
+          description: editDescription,
+          markets: editMarkets,
+          maxLeverage: editMaxLeverage,
+          riskLevel: editRiskLevel,
+          stopLossPercent: editStopLoss,
+          status: editStatus,
+          autonomy: {
+            mode: editAutonomyMode,
+            aggressiveness: editAggressiveness,
+            minConfidence,
+            maxTradesPerDay: editMaxTradesPerDay,
+            approvalTimeoutMs: agent?.autonomy?.approvalTimeoutMs ?? 300000,
+          },
+          indicator: indicatorConfig,
+        }),
+      });
+      
+      if (!res.ok) {
+        throw new Error("Failed to save settings");
+      }
+      
+      setSettingsStatus({ type: "success", message: "Settings saved successfully!" });
+      await fetchAgent();
+    } catch (e) {
+      console.error("Save settings error:", e);
+      setSettingsStatus({ type: "error", message: e instanceof Error ? e.message : "Failed to save settings" });
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleDeleteAgent = async () => {
+    if (!deleteConfirm) {
+      setDeleteConfirm(true);
+      return;
+    }
+    
+    setDeleting(true);
+    try {
+      const res = await fetch(`/api/agents/${agentId}`, {
+        method: "DELETE",
+      });
+      
+      if (!res.ok) {
+        throw new Error("Failed to delete agent");
+      }
+      
+      // Redirect to agents list
+      router.push("/agents");
+    } catch (e) {
+      console.error("Delete agent error:", e);
+      setSettingsStatus({ type: "error", message: e instanceof Error ? e.message : "Failed to delete agent" });
+      setDeleteConfirm(false);
+    } finally {
+      setDeleting(false);
+    }
+  };
+
+  const handleAddMarket = (market: string) => {
+    if (market && !editMarkets.includes(market)) {
+      setEditMarkets([...editMarkets, market]);
+    }
+  };
+
+  const handleRemoveMarket = (market: string) => {
+    setEditMarkets(editMarkets.filter((m) => m !== market));
+  };
+
   if (loading) {
     return (
       <div className="min-h-screen bg-background flex items-center justify-center">
@@ -443,6 +656,7 @@ export default function AgentDetailPage() {
     { key: "trades", label: "Trades" },
     { key: "deposit", label: "Deposit" },
     ...(agent.vaultSocial?.isOpenVault ? [{ key: "chat" as const, label: "Vault Chat", badge: chatMessages.length > 0 }] : []),
+    { key: "settings", label: "Settings" },
   ];
 
   return (
@@ -571,13 +785,157 @@ export default function AgentDetailPage() {
           </div>
         )}
 
+        {/* Runner Status Banner */}
+        {agent.status === "active" && (
+          <div className={`mb-6 p-4 rounded-2xl border ${
+            lifecycle?.healthStatus === "healthy" 
+              ? "bg-success/5 border-success/20"
+              : lifecycle?.healthStatus === "degraded"
+              ? "bg-warning/5 border-warning/20"
+              : lifecycle?.healthStatus === "unhealthy"
+              ? "bg-danger/5 border-danger/20"
+              : "bg-surface border-card-border"
+          }`}>
+            <div className="flex flex-wrap items-center justify-between gap-4">
+              <div className="flex items-center gap-4">
+                {/* Runner Status */}
+                <div className="flex items-center gap-2">
+                  <div className={`w-2 h-2 rounded-full ${
+                    lifecycle?.runnerActive ? "bg-success animate-pulse" : "bg-muted"
+                  }`} />
+                  <span className="text-sm font-medium">
+                    {lifecycle?.runnerActive ? "Runner Active" : "Runner Stopped"}
+                  </span>
+                </div>
+
+                {/* AIP Status */}
+                <div className="flex items-center gap-2">
+                  <div className={`w-2 h-2 rounded-full ${
+                    lifecycle?.aipRegistered ? "bg-accent" : "bg-muted"
+                  }`} />
+                  <span className="text-sm text-muted">
+                    {lifecycle?.aipRegistered ? "AIP Registered" : "AIP Not Registered"}
+                  </span>
+                </div>
+
+                {/* Health Badge */}
+                <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${
+                  lifecycle?.healthStatus === "healthy"
+                    ? "bg-success/15 text-success"
+                    : lifecycle?.healthStatus === "degraded"
+                    ? "bg-warning/15 text-warning"
+                    : lifecycle?.healthStatus === "unhealthy"
+                    ? "bg-danger/15 text-danger"
+                    : "bg-muted/15 text-muted"
+                }`}>
+                  {lifecycle?.healthStatus || "unknown"}
+                </span>
+              </div>
+
+              <div className="flex items-center gap-3 text-xs text-dim">
+                {lifecycle?.tickCount !== undefined && (
+                  <span>Ticks: {lifecycle.tickCount}</span>
+                )}
+                {lifecycle?.lastTickAt && (
+                  <span>Last: {new Date(lifecycle.lastTickAt).toLocaleTimeString()}</span>
+                )}
+                
+                {/* Start/Activate Button - shown when not running */}
+                {!lifecycle?.runnerActive && (
+                  <button
+                    onClick={async () => {
+                      setTicking(true);
+                      try {
+                        await fetch("/api/fund", {
+                          method: "POST",
+                          headers: { "Content-Type": "application/json" },
+                          body: JSON.stringify({ action: "activate", agentId }),
+                        });
+                        await fetchAgent();
+                      } finally {
+                        setTicking(false);
+                      }
+                    }}
+                    disabled={ticking}
+                    className="px-4 py-1.5 text-xs rounded-lg bg-success/15 border border-success/30 text-success hover:bg-success/20 transition-colors disabled:opacity-50 font-medium"
+                  >
+                    {ticking ? "Starting..." : "Start Agent"}
+                  </button>
+                )}
+                
+                {/* Manual Tick Button */}
+                <button
+                  onClick={async () => {
+                    setTicking(true);
+                    try {
+                      await fetch(`/api/agents/${agentId}/tick`, {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({ action: "tick" }),
+                      });
+                      await fetchAgent();
+                    } finally {
+                      setTicking(false);
+                    }
+                  }}
+                  disabled={ticking}
+                  className="px-3 py-1.5 text-xs rounded-lg bg-accent/10 border border-accent/20 text-accent hover:bg-accent/15 transition-colors disabled:opacity-50"
+                >
+                  {ticking ? "Running..." : "Manual Tick"}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+        
+        {/* Activation Banner - shown when agent is not active but has balance */}
+        {agent.status !== "active" && hlBalance?.hasWallet && parseFloat(hlBalance.accountValue || "0") >= 1 && (
+          <div className="mb-6 p-4 rounded-2xl border bg-accent/5 border-accent/20">
+            <div className="flex flex-wrap items-center justify-between gap-4">
+              <div>
+                <h4 className="text-sm font-semibold text-accent mb-1">Agent Ready to Activate</h4>
+                <p className="text-xs text-muted">
+                  This agent has ${parseFloat(hlBalance.accountValue || "0").toFixed(2)} available. 
+                  Start the autonomous trading runner and register with Unibase AIP.
+                </p>
+              </div>
+              <button
+                onClick={async () => {
+                  setTicking(true);
+                  try {
+                    await fetch("/api/fund", {
+                      method: "POST",
+                      headers: { "Content-Type": "application/json" },
+                      body: JSON.stringify({ action: "activate", agentId }),
+                    });
+                    await fetchAgent();
+                  } finally {
+                    setTicking(false);
+                  }
+                }}
+                disabled={ticking}
+                className="btn-primary px-6 py-2.5 text-sm"
+              >
+                {ticking ? "Activating..." : "Activate Agent"}
+              </button>
+            </div>
+          </div>
+        )}
+
         {/* Stats row */}
-        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-6 gap-3 mb-10">
+        <div className="grid grid-cols-2 sm:grid-cols-4 md:grid-cols-8 gap-3 mb-10">
           {[
             {
               label: "Total PnL",
               value: `${agent.totalPnl >= 0 ? "+" : ""}$${agent.totalPnl.toFixed(2)}`,
               color: agent.totalPnl >= 0 ? "text-success" : "text-danger",
+            },
+            {
+              label: "Unrealized PnL",
+              value: hlPositions.length > 0 
+                ? `${totalUnrealizedPnl >= 0 ? "+" : ""}$${totalUnrealizedPnl.toFixed(2)}`
+                : "-",
+              color: totalUnrealizedPnl >= 0 ? "text-success" : "text-danger",
             },
             { label: "Vault TVL", value: `$${agent.vaultTvlUsd.toLocaleString()}`, color: "text-foreground" },
             {
@@ -587,14 +945,14 @@ export default function AgentDetailPage() {
                 : "No wallet",
               color: hlBalance?.hasWallet ? "text-accent" : "text-dim",
             },
+            {
+              label: "Active Positions",
+              value: String(hlPositions.length),
+              color: hlPositions.length > 0 ? "text-accent" : "text-dim",
+            },
             { label: "Total Trades", value: String(agent.totalTrades), color: "text-foreground" },
             { label: "Win Rate", value: `${(agent.winRate * 100).toFixed(1)}%`, color: "text-foreground" },
             { label: "Your Share", value: `${sharePercent.toFixed(2)}%`, color: "gradient-text" },
-            {
-              label: "Aggressiveness",
-              value: `${agent.autonomy?.aggressiveness ?? 50}%`,
-              color: (agent.autonomy?.aggressiveness ?? 50) > 70 ? "text-danger" : (agent.autonomy?.aggressiveness ?? 50) > 40 ? "text-warning" : "text-success",
-            },
           ].map((s) => (
             <div key={s.label} className="card rounded-2xl p-4">
               <div className="text-[11px] text-dim uppercase tracking-wider mb-2">{s.label}</div>
@@ -627,6 +985,83 @@ export default function AgentDetailPage() {
         <div className="animate-fade-in-up">
           {tab === "overview" && (
             <div className="space-y-4">
+              {/* Active Positions */}
+              {hlPositions.length > 0 && (
+                <div className="card rounded-2xl p-6 md:p-8">
+                  <div className="flex items-center justify-between mb-5">
+                    <h3 className="font-semibold text-sm uppercase tracking-wider text-muted">Active Positions</h3>
+                    <div className={`text-sm font-bold mono-nums ${totalUnrealizedPnl >= 0 ? "text-success" : "text-danger"}`}>
+                      Total: {totalUnrealizedPnl >= 0 ? "+" : ""}${totalUnrealizedPnl.toFixed(2)}
+                    </div>
+                  </div>
+                  <div className="overflow-x-auto -mx-6 md:-mx-8 px-6 md:px-8">
+                    <table className="w-full text-sm min-w-[600px]">
+                      <thead>
+                        <tr className="text-[11px] text-dim uppercase tracking-wider text-left border-b border-card-border">
+                          <th className="pb-3 font-medium">Asset</th>
+                          <th className="pb-3 font-medium">Side</th>
+                          <th className="pb-3 font-medium text-right">Size</th>
+                          <th className="pb-3 font-medium text-right">Entry</th>
+                          <th className="pb-3 font-medium text-right">Mark</th>
+                          <th className="pb-3 font-medium text-right">Value</th>
+                          <th className="pb-3 font-medium text-right">uPnL</th>
+                          <th className="pb-3 font-medium text-right">Lev</th>
+                          <th className="pb-3 font-medium text-right">Liq. Price</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {hlPositions.map((pos) => (
+                          <tr key={pos.coin} className="border-b border-card-border/50 last:border-0">
+                            <td className="py-3 font-semibold text-foreground">{pos.coin}</td>
+                            <td className="py-3">
+                              <span className={`chip ${
+                                pos.side === "long" ? "chip-active" : "bg-danger/15 text-danger"
+                              } uppercase text-[10px] font-semibold tracking-wider`}>
+                                {pos.side}
+                              </span>
+                            </td>
+                            <td className="py-3 text-right mono-nums">{pos.size.toFixed(4)}</td>
+                            <td className="py-3 text-right mono-nums text-muted">${pos.entryPrice.toFixed(2)}</td>
+                            <td className="py-3 text-right mono-nums">${pos.markPrice.toFixed(2)}</td>
+                            <td className="py-3 text-right mono-nums">${pos.positionValue.toFixed(2)}</td>
+                            <td className={`py-3 text-right mono-nums font-medium ${
+                              pos.unrealizedPnl >= 0 ? "text-success" : "text-danger"
+                            }`}>
+                              {pos.unrealizedPnl >= 0 ? "+" : ""}${pos.unrealizedPnl.toFixed(2)}
+                              <span className="text-[10px] text-dim ml-1">
+                                ({pos.unrealizedPnlPercent >= 0 ? "+" : ""}{pos.unrealizedPnlPercent.toFixed(2)}%)
+                              </span>
+                            </td>
+                            <td className="py-3 text-right mono-nums text-accent">{pos.leverage}x</td>
+                            <td className="py-3 text-right mono-nums text-warning">
+                              {pos.liquidationPrice ? `$${pos.liquidationPrice.toFixed(2)}` : "-"}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )}
+
+              {/* No positions placeholder */}
+              {hlPositions.length === 0 && hlBalance?.hasWallet && (
+                <div className="card rounded-2xl p-6 md:p-8">
+                  <h3 className="font-semibold text-sm uppercase tracking-wider text-muted mb-5">Active Positions</h3>
+                  <div className="flex items-center justify-center py-8 text-center">
+                    <div>
+                      <div className="w-12 h-12 rounded-2xl bg-surface border border-card-border flex items-center justify-center mx-auto mb-3">
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" className="text-dim">
+                          <path d="M3 3v18h18" strokeLinecap="round" /><path d="M7 16l4-8 4 4 4-6" strokeLinecap="round" strokeLinejoin="round" />
+                        </svg>
+                      </div>
+                      <p className="text-muted text-sm">No active positions</p>
+                      <p className="text-dim text-xs mt-1">Agent will open positions based on market conditions</p>
+                    </div>
+                  </div>
+                </div>
+              )}
+
               {/* Autonomy Config */}
               <div className="card rounded-2xl p-6 md:p-8">
                 <h3 className="font-semibold text-sm uppercase tracking-wider text-muted mb-5">Autonomy &amp; Control</h3>
@@ -1152,6 +1587,458 @@ export default function AgentDetailPage() {
                     End your message with ? to get an AI response from the agent
                   </p>
                 </div>
+              </div>
+            </div>
+          )}
+
+          {tab === "settings" && (
+            <div className="max-w-2xl mx-auto space-y-6">
+              {/* Status Banner */}
+              {settingsStatus && (
+                <div className={`p-4 rounded-xl text-sm ${
+                  settingsStatus.type === "success" 
+                    ? "bg-success/10 border border-success/20 text-success" 
+                    : "bg-danger/10 border border-danger/20 text-danger"
+                }`}>
+                  {settingsStatus.message}
+                </div>
+              )}
+
+              {/* Agent Status */}
+              <div className="card rounded-2xl p-6">
+                <h3 className="font-semibold text-sm uppercase tracking-wider text-muted mb-5">Agent Status</h3>
+                <div className="grid grid-cols-3 gap-3">
+                  {(["active", "paused", "stopped"] as const).map((status) => (
+                    <button
+                      key={status}
+                      onClick={() => setEditStatus(status)}
+                      className={`py-3 rounded-xl text-sm font-medium transition-all capitalize ${
+                        editStatus === status
+                          ? status === "active" 
+                            ? "bg-success/15 border border-success/40 text-success"
+                            : status === "paused"
+                            ? "bg-warning/15 border border-warning/40 text-warning"
+                            : "bg-danger/15 border border-danger/40 text-danger"
+                          : "bg-surface border border-card-border text-muted hover:text-foreground"
+                      }`}
+                    >
+                      {status}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Basic Info */}
+              <div className="card rounded-2xl p-6">
+                <h3 className="font-semibold text-sm uppercase tracking-wider text-muted mb-5">Basic Info</h3>
+                <div className="space-y-4">
+                  <div>
+                    <label className="block text-xs font-medium text-dim uppercase tracking-wider mb-2">Name</label>
+                    <input
+                      type="text"
+                      value={editName}
+                      onChange={(e) => setEditName(e.target.value)}
+                      className="input w-full px-4 py-3"
+                      placeholder="Agent name"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium text-dim uppercase tracking-wider mb-2">Description</label>
+                    <textarea
+                      value={editDescription}
+                      onChange={(e) => setEditDescription(e.target.value)}
+                      className="input w-full px-4 py-3 min-h-[100px] resize-y"
+                      placeholder="What does this agent do?"
+                    />
+                  </div>
+                </div>
+              </div>
+
+              {/* Trading Strategy */}
+              <div className="card rounded-2xl p-6">
+                <h3 className="font-semibold text-sm uppercase tracking-wider text-muted mb-5">Trading Strategy</h3>
+                <div className="space-y-5">
+                  {/* Markets */}
+                  <div>
+                    <label className="block text-xs font-medium text-dim uppercase tracking-wider mb-2">Markets</label>
+                    <div className="flex flex-wrap gap-2 mb-3">
+                      {editMarkets.map((market) => (
+                        <span
+                          key={market}
+                          className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-accent/10 border border-accent/20 text-accent text-sm font-medium"
+                        >
+                          {market}
+                          <button
+                            onClick={() => handleRemoveMarket(market)}
+                            className="hover:text-danger transition-colors"
+                          >
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                              <path d="M18 6L6 18M6 6l12 12" />
+                            </svg>
+                          </button>
+                        </span>
+                      ))}
+                    </div>
+                    <div className="flex gap-2">
+                      <select
+                        className="input flex-1 px-4 py-2.5"
+                        onChange={(e) => {
+                          handleAddMarket(e.target.value);
+                          e.target.value = "";
+                        }}
+                        defaultValue=""
+                      >
+                        <option value="" disabled>Add market...</option>
+                        {["BTC", "ETH", "SOL", "ARB", "OP", "AVAX", "MATIC", "DOGE", "PEPE", "WIF", "BONK", "LINK", "UNI", "AAVE"].filter((m) => !editMarkets.includes(m)).map((m) => (
+                          <option key={m} value={m}>{m}</option>
+                        ))}
+                      </select>
+                    </div>
+                  </div>
+
+                  {/* Risk Level */}
+                  <div>
+                    <label className="block text-xs font-medium text-dim uppercase tracking-wider mb-2">Risk Level</label>
+                    <div className="grid grid-cols-3 gap-3">
+                      {(["conservative", "moderate", "aggressive"] as const).map((level) => (
+                        <button
+                          key={level}
+                          onClick={() => setEditRiskLevel(level)}
+                          className={`py-2.5 rounded-xl text-sm font-medium transition-all capitalize ${
+                            editRiskLevel === level
+                              ? level === "conservative"
+                                ? "bg-success/15 border border-success/40 text-success"
+                                : level === "moderate"
+                                ? "bg-warning/15 border border-warning/40 text-warning"
+                                : "bg-danger/15 border border-danger/40 text-danger"
+                              : "bg-surface border border-card-border text-muted hover:text-foreground"
+                          }`}
+                        >
+                          {level}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* Max Leverage */}
+                  <div>
+                    <label className="block text-xs font-medium text-dim uppercase tracking-wider mb-2">
+                      Max Leverage: <span className="text-accent">{editMaxLeverage}x</span>
+                    </label>
+                    <input
+                      type="range"
+                      min="1"
+                      max="50"
+                      value={editMaxLeverage}
+                      onChange={(e) => setEditMaxLeverage(parseInt(e.target.value))}
+                      className="w-full accent-accent"
+                    />
+                    <div className="flex justify-between text-[10px] text-dim mt-1">
+                      <span>1x</span>
+                      <span>50x</span>
+                    </div>
+                  </div>
+
+                  {/* Stop Loss */}
+                  <div>
+                    <label className="block text-xs font-medium text-dim uppercase tracking-wider mb-2">
+                      Stop Loss: <span className="text-danger">{editStopLoss}%</span>
+                    </label>
+                    <input
+                      type="range"
+                      min="1"
+                      max="25"
+                      value={editStopLoss}
+                      onChange={(e) => setEditStopLoss(parseInt(e.target.value))}
+                      className="w-full accent-danger"
+                    />
+                    <div className="flex justify-between text-[10px] text-dim mt-1">
+                      <span>1%</span>
+                      <span>25%</span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {/* Autonomy Settings */}
+              <div className="card rounded-2xl p-6">
+                <h3 className="font-semibold text-sm uppercase tracking-wider text-muted mb-5">Autonomy Settings</h3>
+                <div className="space-y-5">
+                  {/* Autonomy Mode */}
+                  <div>
+                    <label className="block text-xs font-medium text-dim uppercase tracking-wider mb-2">Trading Mode</label>
+                    <div className="grid grid-cols-3 gap-3">
+                      {([
+                        { mode: "full" as const, label: "Full Auto", icon: "🤖", desc: "Trades automatically" },
+                        { mode: "semi" as const, label: "Semi-Auto", icon: "🤝", desc: "Requires approval" },
+                        { mode: "manual" as const, label: "Manual", icon: "👤", desc: "You trigger trades" },
+                      ]).map(({ mode, label, icon }) => (
+                        <button
+                          key={mode}
+                          onClick={() => setEditAutonomyMode(mode)}
+                          className={`py-3 rounded-xl text-sm font-medium transition-all ${
+                            editAutonomyMode === mode
+                              ? "bg-accent/15 border border-accent/40 text-accent"
+                              : "bg-surface border border-card-border text-muted hover:text-foreground"
+                          }`}
+                        >
+                          <span className="mr-1.5">{icon}</span>
+                          {label}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* Aggressiveness */}
+                  <div>
+                    <label className="block text-xs font-medium text-dim uppercase tracking-wider mb-2">
+                      Aggressiveness: <span className={`${
+                        editAggressiveness > 70 ? "text-danger" : editAggressiveness > 40 ? "text-warning" : "text-success"
+                      }`}>{editAggressiveness}%</span>
+                    </label>
+                    <input
+                      type="range"
+                      min="0"
+                      max="100"
+                      value={editAggressiveness}
+                      onChange={(e) => setEditAggressiveness(parseInt(e.target.value))}
+                      className="w-full accent-accent"
+                    />
+                    <div className="flex justify-between text-[10px] text-dim mt-1">
+                      <span>Conservative</span>
+                      <span>Aggressive</span>
+                    </div>
+                    <p className="text-xs text-dim mt-2">
+                      Min confidence required: {(1 - (editAggressiveness / 100) * 0.5).toFixed(0)}%
+                    </p>
+                  </div>
+
+                  {/* Max Trades Per Day */}
+                  <div>
+                    <label className="block text-xs font-medium text-dim uppercase tracking-wider mb-2">
+                      Max Trades Per Day: <span className="text-accent">{editMaxTradesPerDay}</span>
+                    </label>
+                    <input
+                      type="range"
+                      min="1"
+                      max="100"
+                      value={editMaxTradesPerDay}
+                      onChange={(e) => setEditMaxTradesPerDay(parseInt(e.target.value))}
+                      className="w-full accent-accent"
+                    />
+                    <div className="flex justify-between text-[10px] text-dim mt-1">
+                      <span>1</span>
+                      <span>100</span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {/* Indicator Settings */}
+              <div className="card rounded-2xl p-6">
+                <div className="flex items-center justify-between mb-5">
+                  <h3 className="font-semibold text-sm uppercase tracking-wider text-muted">Key Indicator</h3>
+                  <label className="flex items-center gap-2 cursor-pointer">
+                    <span className="text-xs text-dim">{indicatorEnabled ? "Enabled" : "Disabled"}</span>
+                    <div
+                      onClick={() => setIndicatorEnabled(!indicatorEnabled)}
+                      className={`relative w-10 h-5 rounded-full transition-colors ${
+                        indicatorEnabled ? "bg-accent" : "bg-surface"
+                      }`}
+                    >
+                      <div
+                        className={`absolute top-0.5 w-4 h-4 rounded-full bg-white transition-transform ${
+                          indicatorEnabled ? "translate-x-5" : "translate-x-0.5"
+                        }`}
+                      />
+                    </div>
+                  </label>
+                </div>
+
+                {indicatorEnabled && (
+                  <div className="space-y-5">
+                    {/* Indicator Template */}
+                    <div>
+                      <label className="block text-xs font-medium text-dim uppercase tracking-wider mb-2">Indicator Type</label>
+                      <select
+                        value={indicatorTemplate}
+                        onChange={(e) => setIndicatorTemplate(e.target.value)}
+                        className="input w-full px-4 py-3"
+                      >
+                        <option value="adaptive-rsi-divergence">Adaptive RSI with Divergence</option>
+                        <option value="smart-money-concepts">Smart Money Concepts (SMC)</option>
+                        <option value="custom">Custom Indicator</option>
+                      </select>
+                    </div>
+
+                    {/* Template Description */}
+                    {indicatorTemplate !== "custom" && (
+                      <div className="bg-surface/50 rounded-xl p-4 border border-card-border">
+                        <p className="text-sm text-muted mb-3">
+                          {INDICATOR_TEMPLATES[indicatorTemplate]?.description}
+                        </p>
+                        <div className="space-y-2 text-xs">
+                          <div>
+                            <span className="text-success font-medium">Bullish: </span>
+                            <span className="text-dim">{INDICATOR_TEMPLATES[indicatorTemplate]?.signals.bullishCondition}</span>
+                          </div>
+                          <div>
+                            <span className="text-danger font-medium">Bearish: </span>
+                            <span className="text-dim">{INDICATOR_TEMPLATES[indicatorTemplate]?.signals.bearishCondition}</span>
+                          </div>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Custom Indicator Fields */}
+                    {indicatorTemplate === "custom" && (
+                      <div className="space-y-4">
+                        <div>
+                          <label className="block text-xs font-medium text-dim uppercase tracking-wider mb-2">Description</label>
+                          <textarea
+                            value={indicatorCustomDescription}
+                            onChange={(e) => setIndicatorCustomDescription(e.target.value)}
+                            className="input w-full px-4 py-3 min-h-[80px] resize-y"
+                            placeholder="Describe your indicator and what it measures..."
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-xs font-medium text-dim uppercase tracking-wider mb-2">
+                            <span className="text-success">Bullish</span> Condition
+                          </label>
+                          <textarea
+                            value={indicatorCustomBullish}
+                            onChange={(e) => setIndicatorCustomBullish(e.target.value)}
+                            className="input w-full px-4 py-3 min-h-[80px] resize-y"
+                            placeholder="Describe when the indicator signals bullish (e.g., 'RSI crosses above 30 with positive divergence')"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-xs font-medium text-dim uppercase tracking-wider mb-2">
+                            <span className="text-danger">Bearish</span> Condition
+                          </label>
+                          <textarea
+                            value={indicatorCustomBearish}
+                            onChange={(e) => setIndicatorCustomBearish(e.target.value)}
+                            className="input w-full px-4 py-3 min-h-[80px] resize-y"
+                            placeholder="Describe when the indicator signals bearish (e.g., 'RSI crosses below 70 with negative divergence')"
+                          />
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Weight Slider */}
+                    <div>
+                      <label className="block text-xs font-medium text-dim uppercase tracking-wider mb-2">
+                        Signal Weight: <span className="text-accent">{indicatorWeight}%</span>
+                      </label>
+                      <input
+                        type="range"
+                        min="10"
+                        max="100"
+                        value={indicatorWeight}
+                        onChange={(e) => setIndicatorWeight(parseInt(e.target.value))}
+                        className="w-full accent-accent"
+                      />
+                      <div className="flex justify-between text-[10px] text-dim mt-1">
+                        <span>10% (Light influence)</span>
+                        <span>100% (Primary signal)</span>
+                      </div>
+                    </div>
+
+                    {/* Strict Mode Toggle */}
+                    <div className="flex items-center justify-between py-3 px-4 rounded-xl bg-surface/50 border border-card-border">
+                      <div>
+                        <div className="text-sm font-medium text-foreground">Strict Mode</div>
+                        <p className="text-xs text-dim mt-0.5">
+                          {indicatorStrictMode 
+                            ? "Agent will strongly follow indicator signals unless there's clear counter-evidence"
+                            : "Agent uses indicator as one of many inputs for decision making"}
+                        </p>
+                      </div>
+                      <div
+                        onClick={() => setIndicatorStrictMode(!indicatorStrictMode)}
+                        className={`relative w-10 h-5 rounded-full transition-colors cursor-pointer ${
+                          indicatorStrictMode ? "bg-warning" : "bg-surface"
+                        }`}
+                      >
+                        <div
+                          className={`absolute top-0.5 w-4 h-4 rounded-full bg-white transition-transform ${
+                            indicatorStrictMode ? "translate-x-5" : "translate-x-0.5"
+                          }`}
+                        />
+                      </div>
+                    </div>
+
+                    {/* Info Box */}
+                    <div className="bg-accent/5 border border-accent/20 rounded-xl p-4">
+                      <div className="flex gap-3">
+                        <svg className="w-5 h-5 text-accent flex-shrink-0 mt-0.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                          <circle cx="12" cy="12" r="10" />
+                          <path d="M12 16v-4M12 8h.01" />
+                        </svg>
+                        <div className="text-xs text-muted">
+                          <p className="mb-2">
+                            When enabled, the AI will evaluate this indicator and use it as a key signal source for trading decisions.
+                          </p>
+                          <p>
+                            The AI can still <strong className="text-foreground">reason against</strong> the indicator if market conditions clearly contradict it, providing explanations in its trade reasoning.
+                          </p>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {/* Save Button */}
+              <button
+                onClick={handleSaveSettings}
+                disabled={saving}
+                className="btn-primary w-full py-4 text-sm"
+              >
+                {saving ? (
+                  <span className="flex items-center justify-center gap-2">
+                    <span className="w-4 h-4 border-2 border-background/30 border-t-background rounded-full animate-spin" />
+                    Saving...
+                  </span>
+                ) : "Save Settings"}
+              </button>
+
+              {/* Danger Zone */}
+              <div className="card rounded-2xl p-6 border-danger/20 bg-danger/5">
+                <h3 className="font-semibold text-sm uppercase tracking-wider text-danger mb-3">Danger Zone</h3>
+                <p className="text-sm text-muted mb-4">
+                  Deleting this agent will permanently remove all its data, trade history, and configurations. This action cannot be undone.
+                </p>
+                <button
+                  onClick={handleDeleteAgent}
+                  disabled={deleting}
+                  className={`px-6 py-3 rounded-xl text-sm font-medium transition-all ${
+                    deleteConfirm
+                      ? "bg-danger text-white"
+                      : "bg-danger/10 border border-danger/20 text-danger hover:bg-danger/15"
+                  }`}
+                >
+                  {deleting ? (
+                    <span className="flex items-center gap-2">
+                      <span className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                      Deleting...
+                    </span>
+                  ) : deleteConfirm ? (
+                    "Click again to confirm deletion"
+                  ) : (
+                    "Delete Agent"
+                  )}
+                </button>
+                {deleteConfirm && !deleting && (
+                  <button
+                    onClick={() => setDeleteConfirm(false)}
+                    className="ml-3 px-4 py-3 text-sm text-muted hover:text-foreground transition-colors"
+                  >
+                    Cancel
+                  </button>
+                )}
               </div>
             </div>
           )}

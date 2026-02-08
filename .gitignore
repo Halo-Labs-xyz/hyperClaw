@@ -39,3 +39,8 @@ next-env.d.ts
 # Serwist
 public/sw*
 public/swe-worker*
+
+.data/*
+.data/agents.json
+.data/trades.json
+.data/accounts.json

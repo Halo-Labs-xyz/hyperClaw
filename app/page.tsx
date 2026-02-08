@@ -34,6 +34,9 @@ export default function Dashboard() {
   useEffect(() => {
     async function fetchData() {
       try {
+        // Initialize agent lifecycle on app load (starts all active agents)
+        fetch("/api/startup").catch(() => {});
+        
         const [agentsRes, tokenRes] = await Promise.all([
           fetch("/api/agents").then((r) => r.json()),
           fetch("/api/token").then((r) => r.json()),
@@ -126,11 +129,11 @@ export default function Dashboard() {
           </Link>
 
           <nav className="hidden md:flex items-center gap-1">
-            <Link href="/" className="btn-ghost px-3 py-2 text-sm text-foreground">Dashboard</Link>
+          { /*<Link href="/" className="btn-ghost px-3 py-2 text-sm text-foreground">Dashboard</Link>
             <Link href="/agents" className="btn-ghost px-3 py-2 text-sm">Agents</Link>
             <Link href="/monitor" className="btn-ghost px-3 py-2 text-sm">Monitor</Link>
             <Link href="/strategy" className="btn-ghost px-3 py-2 text-sm">Strategy</Link>
-            <Link href="/agents/new" className="btn-ghost px-3 py-2 text-sm">Create</Link>
+            <Link href="/agents/new" className="btn-ghost px-3 py-2 text-sm">Create</Link>*/}
           </nav>
 
           <div className="flex items-center gap-2 sm:gap-3">
@@ -223,7 +226,7 @@ export default function Dashboard() {
                       </svg>
                     </div>
                     <div>
-                      <h3 className="font-semibold text-sm">Hyperliquid Wallets</h3>
+                      <h3 className="font-semibold text-sm">Agent Wallets</h3>
                       <p className="text-xs text-muted">Agent trading accounts on HL {hlStatus?.network || "testnet"}</p>
                     </div>
                   </div>
@@ -356,7 +359,7 @@ export default function Dashboard() {
           </div>
         </section>
 
-        {/* Agents */}
+        {/* Agents 
         <section className="mb-16">
           <div className="flex items-center justify-between mb-6">
             <div>
@@ -397,7 +400,7 @@ export default function Dashboard() {
               })}
             </div>
           )}
-        </section>
+        </section> */}
 
         {/* How It Works */}
         <section className="pb-8">

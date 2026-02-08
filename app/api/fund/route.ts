@@ -6,11 +6,14 @@ import {
   isTestnet,
   provisionAgentWallet,
   getAgentHlBalance,
+  getAgentHlState,
   sendUsdToAgent,
 } from "@/lib/hyperliquid";
 import { getAccountForAgent } from "@/lib/account-manager";
 import { verifyApiKey, unauthorizedResponse } from "@/lib/auth";
 import { type Address } from "viem";
+import { activateAgent, getLifecycleState } from "@/lib/agent-lifecycle";
+import { getAgent, updateAgent } from "@/lib/store";
 
 /**
  * POST /api/fund
@@ -46,7 +49,7 @@ export async function POST(request: Request) {
     const action = body.action || "status";
 
     switch (action) {
-      // ========== New: Provision agent wallet + fund ==========
+      // ========== New: Provision agent wallet + fund + activate ==========
       case "provision": {
         if (!body.agentId) {
           return NextResponse.json(
@@ -56,6 +59,21 @@ export async function POST(request: Request) {
         }
         const amount = body.amount || 0;
         const result = await provisionAgentWallet(body.agentId, amount);
+        
+        // Auto-activate the agent if funded and autoActivate is not false
+        let lifecycleState = null;
+        if (result.funded && body.autoActivate !== false) {
+          try {
+            // Set agent to active status
+            await updateAgent(body.agentId, { status: "active" });
+            // Start the runner and register with AIP
+            lifecycleState = await activateAgent(body.agentId);
+            console.log(`[Fund] Agent ${body.agentId} auto-activated after provisioning`);
+          } catch (activateError) {
+            console.error(`[Fund] Failed to auto-activate agent:`, activateError);
+          }
+        }
+        
         return NextResponse.json({
           success: true,
           action: "provision",
@@ -65,10 +83,11 @@ export async function POST(request: Request) {
           fundedAmount: result.fundedAmount,
           network: isTestnet() ? "testnet" : "mainnet",
           txResult: result.txResult,
+          lifecycle: lifecycleState,
         });
       }
 
-      // ========== New: Fund existing agent wallet ==========
+      // ========== New: Fund existing agent wallet + auto-activate ==========
       case "fund": {
         if (!body.agentId || !body.amount) {
           return NextResponse.json(
@@ -83,7 +102,26 @@ export async function POST(request: Request) {
             { status: 404 }
           );
         }
-        const result = await sendUsdToAgent(account.address, body.amount);
+        const fundResult = await sendUsdToAgent(account.address, body.amount);
+        
+        // Auto-activate the agent if funded and autoActivate is not false
+        let lifecycleState = null;
+        const agent = await getAgent(body.agentId);
+        if (agent && agent.status !== "active" && body.autoActivate !== false) {
+          try {
+            // Set agent to active status
+            await updateAgent(body.agentId, { status: "active" });
+            // Start the runner and register with AIP
+            lifecycleState = await activateAgent(body.agentId);
+            console.log(`[Fund] Agent ${body.agentId} auto-activated after funding`);
+          } catch (activateError) {
+            console.error(`[Fund] Failed to auto-activate agent:`, activateError);
+          }
+        } else if (agent?.status === "active") {
+          // Already active, just get current state
+          lifecycleState = getLifecycleState(body.agentId);
+        }
+        
         return NextResponse.json({
           success: true,
           action: "fund",
@@ -91,7 +129,8 @@ export async function POST(request: Request) {
           hlAddress: account.address,
           amount: body.amount,
           network: isTestnet() ? "testnet" : "mainnet",
-          txResult: result,
+          txResult: fundResult,
+          lifecycle: lifecycleState,
         });
       }
 
@@ -115,6 +154,30 @@ export async function POST(request: Request) {
           agentId: body.agentId,
           hasWallet: true,
           ...balance,
+          network: isTestnet() ? "testnet" : "mainnet",
+        });
+      }
+
+      // ========== Agent HL state with positions ==========
+      case "agent-state": {
+        if (!body.agentId) {
+          return NextResponse.json(
+            { error: "agentId required" },
+            { status: 400 }
+          );
+        }
+        const state = await getAgentHlState(body.agentId);
+        if (!state) {
+          return NextResponse.json({
+            agentId: body.agentId,
+            hasWallet: false,
+            network: isTestnet() ? "testnet" : "mainnet",
+          });
+        }
+        return NextResponse.json({
+          agentId: body.agentId,
+          hasWallet: true,
+          ...state,
           network: isTestnet() ? "testnet" : "mainnet",
         });
       }
@@ -190,9 +253,53 @@ export async function POST(request: Request) {
         });
       }
 
+      // ========== Activate agent (start runner + register AIP) ==========
+      case "activate": {
+        if (!body.agentId) {
+          return NextResponse.json(
+            { error: "agentId required" },
+            { status: 400 }
+          );
+        }
+        
+        const agentToActivate = await getAgent(body.agentId);
+        if (!agentToActivate) {
+          return NextResponse.json(
+            { error: "Agent not found" },
+            { status: 404 }
+          );
+        }
+        
+        // Check if agent has wallet with balance
+        const agentBalance = await getAgentHlBalance(body.agentId);
+        if (!agentBalance || parseFloat(agentBalance.accountValue || "0") < 1) {
+          return NextResponse.json(
+            { error: "Agent needs at least $1 balance to activate. Fund the agent first." },
+            { status: 400 }
+          );
+        }
+        
+        // Update status if needed
+        if (agentToActivate.status !== "active") {
+          await updateAgent(body.agentId, { status: "active" });
+        }
+        
+        // Activate lifecycle (start runner + register AIP)
+        const lifecycleState = await activateAgent(body.agentId);
+        
+        return NextResponse.json({
+          success: true,
+          action: "activate",
+          agentId: body.agentId,
+          status: "active",
+          lifecycle: lifecycleState,
+          network: isTestnet() ? "testnet" : "mainnet",
+        });
+      }
+
       default:
         return NextResponse.json(
-          { error: "Unknown action. Use: provision, fund, agent-balance, deposit, withdraw, balance, status" },
+          { error: "Unknown action. Use: provision, fund, activate, agent-balance, agent-state, deposit, withdraw, balance, status" },
           { status: 400 }
         );
     }
