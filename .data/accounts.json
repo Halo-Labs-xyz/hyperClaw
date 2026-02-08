@@ -1,0 +1,20 @@
+[
+  {
+    "alias": "agent-c0d03487",
+    "address": "0xb07E2AB8AA2A00cFD09701ebeA36c71fC9e59be5",
+    "type": "trading",
+    "isDefault": false,
+    "encryptedKey": "f5e773dea493200ece5741c90ae793a8:e71266d3b93cc6f070aa0a8aa17c2f7f49423234a465b9e6d3f5f5105c432956ead62858ac94fc0b5a5fdbb5d79fb2470f10831a5f0075b39534f349c72bc47d8a2155857b80921c3d1a42e38522164d",
+    "agentId": "c0d034873babb9ec",
+    "createdAt": 1770512037573
+  },
+  {
+    "alias": "agent-512ff00c",
+    "address": "0xC3d0e086Bf278DA65Ba5Da104a66B863Eb387102",
+    "type": "trading",
+    "isDefault": false,
+    "encryptedKey": "97b1943f70f6089bbbb93ea119804d17:b06639c455a6ecbb75f07bdc4d2f721a2e0820880a24e53085109398ec45a0ef9e70d9b812fc5e57eca523b52c2502cd12281c4be4382eccdf05f52285e88fa917d0d8f187e7443e4fffc4fc85912840",
+    "agentId": "512ff00c9c2311ec",
+    "createdAt": 1770513763518
+  }
+]

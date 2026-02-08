@@ -1,0 +1,26 @@
+{
+  "name": "Hyperclaw - AI Perp Trading Agents",
+  "short_name": "Hyperclaw",
+  "description": "Launch AI agents on Monad that trade perps on Hyperliquid. Deposit Monad assets, join vaults, and let AI agents trade for you.",
+  "display": "standalone",
+  "orientation": "portrait",
+  "theme_color": "#0f0f23",
+  "background_color": "#0f0f23",
+  "start_url": "/",
+  "scope": "/",
+  "id": "/",
+  "icons": [
+    {
+      "src": "/icons/android-chrome-192x192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "/icons/icon-512x512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    }
+  ]
+}

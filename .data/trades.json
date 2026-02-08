@@ -1,0 +1,66 @@
+[
+  {
+    "id": "da45411c43da0068",
+    "agentId": "512ff00c9c2311ec",
+    "timestamp": 1770514811597,
+    "decision": {
+      "action": "hold",
+      "asset": "",
+      "size": 0,
+      "leverage": 0,
+      "confidence": 0,
+      "reasoning": "No significant price movement or funding rate imbalance detected across BTC, ETH, and SOL. Open interest levels are stable, indicating no clear directional bias. Holding until a high-confidence opportunity arises.",
+      "stopLoss": null,
+      "takeProfit": null
+    },
+    "executed": false
+  },
+  {
+    "id": "b8b5ce971c2c170a",
+    "agentId": "512ff00c9c2311ec",
+    "timestamp": 1770514885496,
+    "decision": {
+      "action": "hold",
+      "asset": "",
+      "size": 0,
+      "leverage": 0,
+      "confidence": 0,
+      "reasoning": "No available balance to execute trades. All assets show no price change, indicating a lack of momentum or clear trend.",
+      "stopLoss": null,
+      "takeProfit": null
+    },
+    "executed": false
+  },
+  {
+    "id": "a5e66c9a1f9f851d",
+    "agentId": "512ff00c9c2311ec",
+    "timestamp": 1770515085715,
+    "decision": {
+      "action": "hold",
+      "asset": "",
+      "size": 0,
+      "leverage": 0,
+      "confidence": 0,
+      "reasoning": "Current market data shows no significant price movement or trend in SOL, BTC, or ETH. Funding rates are positive, indicating a slight long bias, but not strong enough to warrant a high-confidence entry. Open interest levels do not suggest any significant changes. Thus, no high-confidence opportunity exists at this time.",
+      "stopLoss": null,
+      "takeProfit": null
+    },
+    "executed": false
+  },
+  {
+    "id": "1cdecb17c5e9adbc",
+    "agentId": "512ff00c9c2311ec",
+    "timestamp": 1770515216251,
+    "decision": {
+      "action": "hold",
+      "asset": "",
+      "size": 0,
+      "leverage": 0,
+      "confidence": 0,
+      "reasoning": "All assets show no price change in the last 24 hours, indicating a lack of clear trend. Funding rates are positive across the board, suggesting a slight long bias, but not enough to warrant a confident entry. Open interest levels are stable, and no significant volume or cross-asset correlation signals are present.",
+      "stopLoss": null,
+      "takeProfit": null
+    },
+    "executed": false
+  }
+]

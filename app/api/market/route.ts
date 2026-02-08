@@ -1,0 +1,89 @@
+import { NextResponse } from "next/server";
+import {
+  getAllMids,
+  getMarketData,
+  getEnrichedMarketData,
+  getL2Book,
+  getAllAssets,
+  getFundingHistory,
+  getAllMarkets,
+} from "@/lib/hyperliquid";
+
+/**
+ * GET /api/market
+ *
+ * Proxy for Hyperliquid market data.
+ * Enhanced with funding rates, OI, and asset metadata.
+ *
+ * Actions: mids, markets, markets-enriched, book, assets, funding
+ */
+export async function GET(request: Request) {
+  const { searchParams } = new URL(request.url);
+  const action = searchParams.get("action") || "mids";
+
+  try {
+    switch (action) {
+      case "mids": {
+        const mids = await getAllMids();
+        return NextResponse.json({ mids });
+      }
+
+      case "markets": {
+        const markets = await getMarketData();
+        return NextResponse.json({ markets });
+      }
+
+      case "markets-enriched": {
+        const markets = await getEnrichedMarketData();
+        return NextResponse.json({ markets });
+      }
+
+      case "book": {
+        const coin = searchParams.get("coin");
+        if (!coin)
+          return NextResponse.json(
+            { error: "coin param required" },
+            { status: 400 }
+          );
+        const book = await getL2Book(coin);
+        return NextResponse.json({ book });
+      }
+
+      case "assets": {
+        const assets = await getAllAssets();
+        return NextResponse.json({ assets });
+      }
+
+      case "all-markets": {
+        const allMarkets = await getAllMarkets();
+        return NextResponse.json(allMarkets);
+      }
+
+      case "funding": {
+        const coin = searchParams.get("coin");
+        if (!coin)
+          return NextResponse.json(
+            { error: "coin param required" },
+            { status: 400 }
+          );
+        const startTime =
+          parseInt(searchParams.get("startTime") || "0") ||
+          Date.now() - 24 * 60 * 60 * 1000; // default last 24h
+        const history = await getFundingHistory(coin, startTime);
+        return NextResponse.json({ funding: history });
+      }
+
+      default:
+        return NextResponse.json(
+          { error: "Unknown action. Use: mids, markets, markets-enriched, book, assets, funding, all-markets" },
+          { status: 400 }
+        );
+    }
+  } catch (error) {
+    console.error("Market API error:", error);
+    return NextResponse.json(
+      { error: "Failed to fetch market data" },
+      { status: 500 }
+    );
+  }
+}

@@ -1,0 +1,12 @@
+{
+  "framework": "nextjs",
+  "regions": ["arn1"],
+  "functions": {
+    "app/api/agents/[id]/tick/route.ts": {
+      "maxDuration": 60
+    },
+    "app/api/agents/orchestrator/route.ts": {
+      "maxDuration": 10
+    }
+  }
+}
