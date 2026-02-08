@@ -111,12 +111,41 @@ Provide your trading decision as JSON:`;
   const content = response.choices[0]?.message?.content;
   if (!content) throw new Error("No response from AI");
 
-  const decision = JSON.parse(content) as TradeDecision;
+  let decision: TradeDecision;
+  try {
+    decision = JSON.parse(content) as TradeDecision;
+  } catch {
+    console.error("[AI] Failed to parse response:", content);
+    // Return safe hold decision on parse failure
+    return {
+      action: "hold",
+      asset: params.allowedMarkets[0] || "BTC",
+      size: 0,
+      leverage: 1,
+      confidence: 0,
+      reasoning: "AI response parsing failed; holding position.",
+    };
+  }
+
+  // Validate required fields
+  if (!decision.action || !decision.asset) {
+    return {
+      action: "hold",
+      asset: params.allowedMarkets[0] || "BTC",
+      size: 0,
+      leverage: 1,
+      confidence: 0,
+      reasoning: "AI returned incomplete decision; holding position.",
+    };
+  }
 
   // Safety clamps
-  decision.leverage = Math.min(decision.leverage, params.maxLeverage);
-  decision.size = Math.max(0, Math.min(1, decision.size));
-  decision.confidence = Math.max(0, Math.min(1, decision.confidence));
+  decision.leverage = Math.min(
+    Math.max(1, Math.round(decision.leverage || 1)),
+    params.maxLeverage
+  );
+  decision.size = Math.max(0, Math.min(1, decision.size || 0));
+  decision.confidence = Math.max(0, Math.min(1, decision.confidence || 0));
 
   return decision;
 }

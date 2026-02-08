@@ -11,7 +11,7 @@ interface Props {
 const FALLBACK_MARKETS = ["BTC", "ETH", "SOL", "DOGE", "ARB", "OP", "AVAX", "MATIC", "LINK", "UNI"];
 
 export function StrategyBuilder({ onSubmit, loading }: Props) {
-  const [name, setName] = useState("Test Strategy");
+  const [name, setName] = useState("");
   const [markets, setMarkets] = useState<string[]>(["BTC", "ETH"]);
   const [availableMarkets, setAvailableMarkets] = useState<string[]>(FALLBACK_MARKETS);
   const [marketSearch, setMarketSearch] = useState("");

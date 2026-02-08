@@ -223,12 +223,11 @@ export default function AgentDetailPage() {
     setDepositStatus("");
 
     // Check if vault contract is deployed
-    const hasVault = vaultAddress && (vaultAddress as string) !== "your_deployed_vault_contract_address";
+    const hasVault = vaultAddress && vaultAddress.startsWith("0x") && vaultAddress.length === 42;
 
     try {
       if (hasVault) {
         // ========== On-chain deposit via Monad vault ==========
-        // Ensure wallet is on the correct chain
         try {
           await switchChainAsync({ chainId: vaultChainId });
         } catch {
@@ -306,7 +305,7 @@ export default function AgentDetailPage() {
   };
 
   const handleWithdraw = async () => {
-    const hasVault = vaultAddress && (vaultAddress as string) !== "your_deployed_vault_contract_address";
+    const hasVault = vaultAddress && vaultAddress.startsWith("0x") && vaultAddress.length === 42;
     if (!hasVault || !address || !userShares || !totalShares || totalShares === BigInt(0)) return;
     const sharesWei = parseEther(withdrawShares || "0");
     if (sharesWei <= BigInt(0)) return;
@@ -888,7 +887,7 @@ export default function AgentDetailPage() {
                 </div>
 
                 {/* Network Info */}
-                {vaultAddress && (vaultAddress as string) !== "your_deployed_vault_contract_address" ? (
+                {vaultAddress && vaultAddress.startsWith("0x") && vaultAddress.length === 42 ? (
                   <div className="mb-4 p-3 bg-success/5 border border-success/20 rounded-xl text-xs">
                     <div className="flex items-center gap-1.5 text-success font-medium mb-1">
                       <div className="w-2 h-2 rounded-full bg-success" />
@@ -960,7 +959,7 @@ export default function AgentDetailPage() {
                 )}
 
                 {/* Withdraw — adheres to Hyperliquid vault rule: leader must keep ≥5% */}
-                {vaultAddress && (vaultAddress as string) !== "your_deployed_vault_contract_address" && userShares && userShares > BigInt(0) && (
+                {vaultAddress && vaultAddress.startsWith("0x") && vaultAddress.length === 42 && userShares && userShares > BigInt(0) && (
                   <div className="mt-5 p-4 bg-surface rounded-xl border border-card-border">
                     <h4 className="text-xs font-semibold uppercase tracking-wider text-muted mb-2">Withdraw</h4>
                     <p className="text-xs text-dim mb-3">

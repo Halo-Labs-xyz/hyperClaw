@@ -6,6 +6,7 @@ import {
   setDefaultAccount,
   linkAccountToAgent,
 } from "@/lib/account-manager";
+import { verifyApiKey, unauthorizedResponse } from "@/lib/auth";
 
 /**
  * GET /api/accounts - List all accounts
@@ -33,6 +34,7 @@ export async function GET() {
  *   { action: "link", alias, agentId }
  */
 export async function POST(request: Request) {
+  if (!verifyApiKey(request)) return unauthorizedResponse();
   try {
     const body = await request.json();
 

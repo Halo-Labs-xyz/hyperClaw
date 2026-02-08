@@ -98,8 +98,20 @@ export async function getHclawState(
     const supply = Number(formatEther(totalSupply));
     const marketCap = price * supply;
 
-    // Rough MON->USD (we'll use a price feed in production)
-    const monPriceUsd = 1; // placeholder
+    // MON->USD: fetch live price from CoinGecko, fallback to 1.0
+    let monPriceUsd = 1;
+    try {
+      const priceRes = await fetch(
+        "https://api.coingecko.com/api/v3/simple/price?ids=monad&vs_currencies=usd",
+        { next: { revalidate: 300 } } // cache 5 min
+      );
+      if (priceRes.ok) {
+        const priceData = await priceRes.json();
+        monPriceUsd = priceData?.monad?.usd ?? 1;
+      }
+    } catch {
+      // Fallback to 1.0 if CoinGecko is unreachable
+    }
     const mcapUsd = marketCap * monPriceUsd;
 
     const currentTier = getTierForMcap(mcapUsd);

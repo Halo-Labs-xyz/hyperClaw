@@ -1,18 +1,20 @@
 import { NextResponse } from "next/server";
 import { executeOrder, getExchangeClientForAgent } from "@/lib/hyperliquid";
 import { getPrivateKeyForAgent } from "@/lib/account-manager";
+import { verifyApiKey, unauthorizedResponse } from "@/lib/auth";
 import type { PlaceOrderParams } from "@/lib/types";
 
 /**
  * POST /api/trade
  *
  * Unified trading endpoint. Accepts all order types.
- * Mirrors CLI's `hl trade order` command structure.
+ * Requires X-Api-Key or Bearer token when HYPERCLAW_API_KEY is set.
  *
  * Body: PlaceOrderParams & { agentId?: string }
  *   If agentId is provided, the trade is placed from the agent's HL wallet.
  */
 export async function POST(request: Request) {
+  if (!verifyApiKey(request)) return unauthorizedResponse();
   try {
     const body = (await request.json()) as PlaceOrderParams & { agentId?: string };
 

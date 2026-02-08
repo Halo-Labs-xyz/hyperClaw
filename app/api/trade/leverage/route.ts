@@ -1,14 +1,16 @@
 import { NextResponse } from "next/server";
 import { updateLeverage, getAssetIndex } from "@/lib/hyperliquid";
+import { verifyApiKey, unauthorizedResponse } from "@/lib/auth";
 
 /**
  * POST /api/trade/leverage
  *
- * Set leverage for a coin. Mirrors `hl trade set-leverage`.
+ * Set leverage for a coin. Requires X-Api-Key when HYPERCLAW_API_KEY is set.
  *
  * Body: { coin: string, leverage: number, mode?: "cross" | "isolated" }
  */
 export async function POST(request: Request) {
+  if (!verifyApiKey(request)) return unauthorizedResponse();
   try {
     const body = await request.json();
 

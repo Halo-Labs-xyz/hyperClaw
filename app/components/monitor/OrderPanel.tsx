@@ -61,6 +61,7 @@ export function OrderPanel({ user }: Props) {
           {orders && orders.length > 0 && (
             <button
               onClick={handleCancelAll}
+              aria-label="Cancel all open orders"
               className="text-xs text-danger hover:text-danger/80 transition-colors"
             >
               Cancel All
@@ -76,7 +77,7 @@ export function OrderPanel({ user }: Props) {
         </div>
       ) : (
         <div className="overflow-x-auto">
-          <table className="w-full text-sm">
+          <table className="w-full text-sm" aria-label="Open orders">
             <thead>
               <tr className="text-muted text-left text-xs border-b border-card-border">
                 <th className="px-4 py-2 font-medium">Coin</th>

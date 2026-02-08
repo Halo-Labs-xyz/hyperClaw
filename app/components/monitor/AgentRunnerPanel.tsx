@@ -152,6 +152,7 @@ export function AgentRunnerPanel({ agent }: Props) {
             <button
               onClick={handleStop}
               disabled={loading}
+              aria-label="Stop agent runner"
               className="flex-1 bg-danger hover:bg-danger/80 text-white py-2 rounded-lg text-sm font-bold transition-all disabled:opacity-50"
             >
               {loading ? "..." : "Stop Runner"}
@@ -160,6 +161,7 @@ export function AgentRunnerPanel({ agent }: Props) {
             <button
               onClick={handleStart}
               disabled={loading}
+              aria-label="Start agent runner"
               className="flex-1 bg-success hover:bg-success/80 text-white py-2 rounded-lg text-sm font-bold transition-all disabled:opacity-50"
             >
               {loading ? "..." : "Start Runner"}
@@ -168,6 +170,7 @@ export function AgentRunnerPanel({ agent }: Props) {
           <button
             onClick={handleTick}
             disabled={loading}
+            aria-label="Execute a single trading tick"
             className="flex-1 bg-accent hover:bg-accent/80 text-white py-2 rounded-lg text-sm font-bold transition-all disabled:opacity-50"
           >
             {loading ? "..." : "Manual Tick"}

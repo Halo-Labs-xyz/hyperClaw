@@ -164,13 +164,15 @@ export async function executeTick(agentId: string): Promise<TradeLog> {
         // Set leverage first
         await updateLeverage(assetIndex, decision.leverage, true);
 
-        // Calculate order size
+        // Calculate order size with safety checks
         const capitalToUse = availableBalance * decision.size;
         const price =
           markets.find((m) => m.coin === decision.asset)?.price || 0;
         const orderSize = price > 0 ? capitalToUse / price : 0;
 
-        if (orderSize > 0) {
+        if (!isFinite(orderSize) || isNaN(orderSize) || orderSize <= 0) {
+          console.warn(`[Agent ${agentId}] Invalid order size: ${orderSize} (capital=${capitalToUse}, price=${price})`);
+        } else if (orderSize > 0) {
           const isBuy =
             decision.action === "long" ||
             (decision.action === "close" &&

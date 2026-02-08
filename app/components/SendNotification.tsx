@@ -73,11 +73,8 @@ export default function SendNotification() {
       // TODO: you should call your API to save subscription data on the server in order to send web push notification from the server
       setSubscription(sub);
       setIsSubscribed(true);
-      alert("Web push subscribed!");
-      console.log(sub);
     } catch (error) {
       console.error("Failed to subscribe:", error);
-      alert("Failed to subscribe to notifications");
     } finally {
       setIsSubscribing(false);
     }
@@ -101,7 +98,6 @@ export default function SendNotification() {
       console.log("Web push unsubscribed!");
     } catch (error) {
       console.error("Failed to unsubscribe:", error);
-      alert("Failed to unsubscribe from notifications");
     } finally {
       setIsUnsubscribing(false);
     }
@@ -113,7 +109,6 @@ export default function SendNotification() {
     event.preventDefault();
 
     if (!subscription) {
-      alert("Web push not subscribed");
       return;
     }
 
@@ -145,7 +140,7 @@ export default function SendNotification() {
       } else {
         console.error(err);
       }
-      alert("An error happened.");
+      // Error already logged above
     }
   };
 

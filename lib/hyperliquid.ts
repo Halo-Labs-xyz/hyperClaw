@@ -374,7 +374,7 @@ export async function placeStopLossOrder(params: {
           trigger: {
             triggerPx: params.triggerPrice,
             isMarket: true,
-            tpsl: params.isTpsl ? "sl" : "sl",
+            tpsl: "sl",
           },
         },
       },
@@ -406,7 +406,7 @@ export async function placeTakeProfitOrder(params: {
           trigger: {
             triggerPx: params.triggerPrice,
             isMarket: true,
-            tpsl: params.isTpsl ? "tp" : "tp",
+            tpsl: "tp",
           },
         },
       },

@@ -19,11 +19,21 @@ const ACCOUNTS_FILE = "accounts.json";
 // Encryption key derived from env or fallback (hackathon)
 function getEncryptionKey(): Buffer {
   const envKey = process.env.ACCOUNT_ENCRYPTION_KEY;
-  if (envKey) {
-    return createHash("sha256").update(envKey).digest();
+  if (!envKey) {
+    if (process.env.NODE_ENV === "production") {
+      throw new Error(
+        "ACCOUNT_ENCRYPTION_KEY must be set in production. " +
+        "Generate one with: openssl rand -hex 32"
+      );
+    }
+    // Dev-only fallback — logged as warning so it's visible
+    console.warn(
+      "[AccountManager] ACCOUNT_ENCRYPTION_KEY not set — using dev-only fallback. " +
+      "Set this env var before deploying."
+    );
+    return createHash("sha256").update("hyperclaw-dev-key-unsafe").digest();
   }
-  // Fallback for dev: derive from a stable seed
-  return createHash("sha256").update("hyperclaw-dev-key").digest();
+  return createHash("sha256").update(envKey).digest();
 }
 
 function encrypt(text: string): string {
@@ -37,10 +47,13 @@ function encrypt(text: string): string {
 
 function decrypt(encrypted: string): string {
   const key = getEncryptionKey();
-  const [ivHex, encText] = encrypted.split(":");
-  const iv = Buffer.from(ivHex, "hex");
+  const parts = encrypted.split(":");
+  if (parts.length !== 2 || !parts[0] || !parts[1]) {
+    throw new Error("Invalid encrypted key format");
+  }
+  const iv = Buffer.from(parts[0], "hex");
   const decipher = createDecipheriv("aes-256-cbc", key, iv);
-  let decrypted = decipher.update(encText, "hex", "utf8");
+  let decrypted = decipher.update(parts[1], "hex", "utf8");
   decrypted += decipher.final("utf8");
   return decrypted;
 }

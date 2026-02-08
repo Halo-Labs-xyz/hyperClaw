@@ -9,6 +9,7 @@ import {
   sendUsdToAgent,
 } from "@/lib/hyperliquid";
 import { getAccountForAgent } from "@/lib/account-manager";
+import { verifyApiKey, unauthorizedResponse } from "@/lib/auth";
 import { type Address } from "viem";
 
 /**
@@ -39,6 +40,7 @@ import { type Address } from "viem";
  *     -> System status info
  */
 export async function POST(request: Request) {
+  if (!verifyApiKey(request)) return unauthorizedResponse();
   try {
     const body = await request.json();
     const action = body.action || "status";

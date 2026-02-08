@@ -1,17 +1,19 @@
 import { NextResponse } from "next/server";
 import { cancelOrder, cancelAllOrders, getAssetIndex } from "@/lib/hyperliquid";
+import { verifyApiKey, unauthorizedResponse } from "@/lib/auth";
 
 /**
  * POST /api/trade/cancel
  *
  * Cancel specific order or all orders.
- * Mirrors CLI's `hl trade cancel` and `hl trade cancel-all`.
+ * Requires X-Api-Key or Bearer token when HYPERCLAW_API_KEY is set.
  *
  * Body:
  *   { coin: string, oid: number }  - cancel specific order
  *   { coin?: string, all: true }   - cancel all (optionally filtered by coin)
  */
 export async function POST(request: Request) {
+  if (!verifyApiKey(request)) return unauthorizedResponse();
   try {
     const body = await request.json();
 

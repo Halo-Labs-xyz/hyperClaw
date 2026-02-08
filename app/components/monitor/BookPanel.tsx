@@ -40,6 +40,7 @@ export function BookPanel({ defaultCoin = "BTC" }: Props) {
               onChange={(e) => setInputCoin(e.target.value)}
               onKeyDown={(e) => e.key === "Enter" && handleChangeCoin()}
               onBlur={handleChangeCoin}
+              aria-label="Market symbol"
               className="bg-background border border-card-border rounded px-2 py-0.5 text-xs w-16 text-center font-bold focus:outline-none focus:border-accent"
             />
           </div>
@@ -49,6 +50,8 @@ export function BookPanel({ defaultCoin = "BTC" }: Props) {
             className={`w-2 h-2 rounded-full ${
               connected ? "bg-success pulse-live" : "bg-danger"
             }`}
+            aria-label={connected ? "Connected" : "Disconnected"}
+            role="status"
           />
           <span className="text-xs text-muted">
             {connected ? "Live" : "..."}

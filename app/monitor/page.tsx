@@ -77,7 +77,7 @@ export default function MonitorPage() {
               >
                 {agents.map((agent) => (
                   <option key={agent.id} value={agent.id}>
-                    {agent.name} ({agent.hlAddress.slice(0, 6)}...)
+                    {agent.name} ({agent.hlAddress?.slice(0, 6) ?? "no wallet"}...)
                   </option>
                 ))}
               </select>
