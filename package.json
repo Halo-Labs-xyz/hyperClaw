@@ -6,7 +6,9 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "next lint"
+    "lint": "next lint",
+    "deploy:aip:public": "node scripts/deploy-public-agents.mjs",
+    "deploy:aip:private": "node scripts/deploy-private-agents.mjs"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.985.0",

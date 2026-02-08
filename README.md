@@ -10,6 +10,7 @@ Users deposit into Monad smart contract vaults. Capital is relayed to Hyperliqui
 
 - [Architecture](#architecture)
 - [Core Concepts](#core-concepts)
+- [Unibase AIP Integration](#unibase-aip-integration)
 - [Tech Stack](#tech-stack)
 - [Pages and UI](#pages-and-ui)
 - [API Surface](#api-surface)
@@ -130,6 +131,225 @@ Each agent is an independent trading entity with:
 - Runtime-switchable between Monad mainnet/testnet and Hyperliquid mainnet/testnet
 - Persisted to localStorage on client, synced to server via API
 - Wallet chain auto-switches on toggle
+
+---
+
+## Unibase AIP Integration
+
+HyperClaw agents can be deployed on the **Unibase AIP platform** via the **A2A (Agent-to-Agent) protocol**, enabling:
+
+- **On-chain agent registration** (ERC-8004)
+- **X402 micropayments** for agent invocations
+- **Membase memory** for conversation context
+- **Gateway routing** for seamless agent discovery
+- **Two deployment modes**: DIRECT (public) or POLLING (private)
+
+### Architecture
+
+```mermaid
+flowchart LR
+    subgraph User["User / Client"]
+        Client["User Wallet"]
+    end
+
+    subgraph AIP["Unibase AIP Platform"]
+        Platform["AIP Platform<br/>ERC-8004 Registry"]
+        Gateway["Gateway<br/>X402 Payment Routing"]
+        Membase["Membase<br/>Context Storage"]
+    end
+
+    subgraph HyperClaw["HyperClaw"]
+        AIPLib["Unibase AIP<br/>Integration"]
+        AgentRunner["Agent Runner"]
+        AIBrain["AI Trading Brain"]
+        HL["Hyperliquid<br/>Exchange"]
+    end
+
+    Client -->|1. Invoke agent + payment| Platform
+    Platform -->|2. Route via Gateway| Gateway
+    Gateway -->|3a. POST /invoke (DIRECT)| AIPLib
+    Gateway -.->|3b. Queue task (POLLING)| Gateway
+    AIPLib -.->|Poll tasks| Gateway
+    AIPLib -->|4. Process request| AgentRunner
+    AgentRunner -->|5. Get trade decision| AIBrain
+    AIBrain -->|6. Market data| HL
+    AIPLib -->|7. Response| Gateway
+    Gateway -->|8. Store context| Membase
+    Gateway -->|9. Return result| Platform
+    Platform -->|10. Deliver to user| Client
+```
+
+### Deployment Modes
+
+#### DIRECT Mode (Public Agent)
+
+- **Requires**: Public endpoint accessible from internet
+- **Routing**: Gateway calls agent directly via HTTP POST
+- **Latency**: Low (direct connection)
+- **Use case**: Production deployments, cloud services
+
+**Setup:**
+
+```bash
+# Set public endpoint
+export AGENT_PUBLIC_URL="https://your-domain.com/api/unibase"
+
+# Deploy agent
+npm run deploy:aip:public -- --agent-id <id> --endpoint $AGENT_PUBLIC_URL
+
+# Or deploy all active agents
+npm run deploy:aip:public -- --all --endpoint $AGENT_PUBLIC_URL
+```
+
+#### POLLING Mode (Private Agent)
+
+- **Requires**: No public endpoint (works behind firewall/NAT)
+- **Routing**: Agent polls Gateway for tasks every 2-5 seconds
+- **Latency**: Slightly higher (polling delay)
+- **Use case**: Private networks, local development, enhanced security
+
+**Setup:**
+
+```bash
+# No public endpoint needed
+npm run deploy:aip:private -- --agent-id <id>
+
+# Or deploy all active agents with custom polling interval
+npm run deploy:aip:private -- --all --poll-interval 3
+```
+
+### Agent Skills
+
+Each HyperClaw agent exposes three core skills via A2A:
+
+1. **Market Analysis** (`trading.analysis`)
+   - Analyze market conditions for configured assets
+   - Funding rates, price trends, volume analysis
+   - Example: "What's your analysis on BTC?"
+
+2. **Trading Decision** (`trading.decision`)
+   - Generate AI-powered trade recommendations
+   - Long/short signals with confidence scores
+   - Stop loss and take profit levels
+   - Example: "Give me a trade recommendation"
+
+3. **Portfolio Status** (`portfolio.status`)
+   - Report current positions and PnL
+   - Performance metrics and win rate
+   - Example: "Show me the portfolio performance"
+
+### Pricing Model
+
+Agent pricing is dynamically calculated based on:
+
+- **Autonomy mode**: Full auto = $0.01, Semi auto = $0.005
+- **Risk level**: Aggressive = 1.5x, Moderate = 1.2x, Conservative = 1.0x
+- **Per-token fee**: $0.00001 per token
+
+Example pricing:
+- Conservative BTC agent (semi): $0.005/call
+- Moderate ETH agent (full): $0.012/call
+- Aggressive multi-market (full): $0.015/call
+
+### API Endpoints
+
+| Method | Route                             | Description                          |
+|--------|-----------------------------------|--------------------------------------|
+| POST   | `/api/unibase/register`           | Register agent(s) with AIP platform  |
+| POST   | `/api/unibase/invoke/[agentId]`   | A2A invocation endpoint (DIRECT)     |
+| GET    | `/api/unibase/agents`             | List registered AIP agents           |
+| POST   | `/api/unibase/poll`               | Gateway polling endpoint (POLLING)   |
+| GET    | `/api/unibase/health`             | AIP integration health check         |
+
+### Environment Variables
+
+```bash
+# AIP Platform endpoint
+AIP_ENDPOINT=http://api.aip.unibase.com
+
+# Gateway endpoint
+GATEWAY_URL=http://gateway.aip.unibase.com
+
+# Public endpoint (DIRECT mode only)
+AGENT_PUBLIC_URL=https://your-domain.com/api/unibase
+
+# Wallet for X402 payments and Membase memory
+# Test account: 0x5ea13664c5ce67753f208540d25b913788aa3daa
+MEMBASE_ACCOUNT=your_wallet_address
+
+# Deployment mode: DIRECT or POLLING
+AIP_DEPLOYMENT_MODE=POLLING
+```
+
+### Example Configurations
+
+See [`lib/unibase-agent-configs.ts`](./lib/unibase-agent-configs.ts) for detailed examples:
+
+- **BTC Guardian**: Conservative, semi-autonomous BTC agent
+- **Hyper Trader Alpha**: Aggressive multi-market agent
+- **ETH Strategist**: Moderate ETH-focused agent
+- **Community Alpha Fund**: Open vault with social features
+
+### Quick Start
+
+1. **Create a HyperClaw agent:**
+   ```bash
+   # Via UI: /agents/new
+   # Or via API:
+   curl -X POST http://localhost:3000/api/agents \
+     -H "Content-Type: application/json" \
+     -d '{
+       "name": "BTC Guardian",
+       "markets": ["BTC"],
+       "riskLevel": "conservative",
+       "autonomy": { "mode": "semi", "aggressiveness": 30 }
+     }'
+   ```
+
+2. **Fund the agent:**
+   ```bash
+   # Deposit to agent's HL wallet
+   curl -X POST http://localhost:3000/api/fund \
+     -H "Content-Type: application/json" \
+     -d '{
+       "agentId": "agent_abc123",
+       "action": "deposit",
+       "amount": 1000
+     }'
+   ```
+
+3. **Deploy to AIP (choose mode):**
+   ```bash
+   # Public (DIRECT)
+   npm run deploy:aip:public -- \
+     --agent-id agent_abc123 \
+     --endpoint https://hyperclaw.com/api/unibase
+
+   # Private (POLLING)
+   npm run deploy:aip:private -- --agent-id agent_abc123
+   ```
+
+4. **Invoke agent via Gateway:**
+   ```bash
+   # Users call via AIP Gateway (payment included)
+   curl -X POST https://gateway.aip.unibase.com/invoke \
+     -H "Content-Type: application/json" \
+     -d '{
+       "agent_handle": "hyperclaw_abc12345",
+       "message": "What'\''s your BTC analysis?",
+       "user_id": "user:0x...",
+       "payment": { ... }
+     }'
+   ```
+
+### Benefits
+
+✅ **Monetization**: Earn micropayments per agent invocation (X402)
+✅ **Discoverability**: Agents listed on AIP platform registry
+✅ **Interoperability**: Standard A2A protocol for agent-to-agent communication
+✅ **Memory**: Persistent conversation context via Membase
+✅ **Security**: Payment verification and rate limiting built-in
+✅ **Flexibility**: Choose public or private deployment mode
 
 ---
 
@@ -298,7 +518,12 @@ hyperClaw/
 │   ├── store.ts                    # Agent + trade data persistence
 │   ├── watchers.ts                 # WebSocket stream managers
 │   ├── sse.ts                      # SSE response helper
+│   ├── unibase-aip.ts              # Unibase AIP A2A protocol integration
+│   ├── unibase-agent-configs.ts    # Example AIP agent configurations
 │   └── hooks/useSSE.ts             # Client-side SSE hook
+├── scripts/
+│   ├── deploy-public-agents.mjs    # Deploy agents to AIP (DIRECT mode)
+│   └── deploy-private-agents.mjs   # Deploy agents to AIP (POLLING mode)
 ├── contracts/
 │   └── HyperclawVault.sol          # On-chain vault contract
 ├── .data/                          # Local JSON storage (gitignored in prod)
@@ -343,6 +568,14 @@ cp .env.example .env.local
 | `MONAD_PRIVATE_KEY`                  | Yes      | Monad deployer/admin private key                      |
 | `NEXT_PUBLIC_MONAD_TESTNET`          | No       | `"true"` for Monad testnet (default: true)            |
 | `NEXT_PUBLIC_HCLAW_TOKEN_ADDRESS`    | No       | $HCLAW token address (after deployment)               |
+| `PHALA_API_KEY`                     | No       | Phala Cloud API key (for CVM management)              |
+| `PHALA_CVM_ID`                      | No       | CVM VM ID (UUID) to connect to                        |
+| `PHALA_APP_ID`                      | No       | Phala App ID for the CVM workload                     |
+| `AIP_ENDPOINT`                      | No       | Unibase AIP platform endpoint (default: http://api.aip.unibase.com) |
+| `GATEWAY_URL`                       | No       | Unibase Gateway endpoint (default: http://gateway.aip.unibase.com) |
+| `AGENT_PUBLIC_URL`                  | No       | Public endpoint for DIRECT mode AIP agents            |
+| `MEMBASE_ACCOUNT`                   | No       | Wallet address for X402 payments and Membase          |
+| `AIP_DEPLOYMENT_MODE`               | No       | AIP agent mode: "DIRECT" or "POLLING" (default: POLLING) |
 
 **Production (Vercel + EC2):**
 

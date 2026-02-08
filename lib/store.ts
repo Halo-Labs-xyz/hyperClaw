@@ -16,6 +16,10 @@ export async function getAgents(): Promise<Agent[]> {
   return readJSON<Agent[]>("agents.json", []);
 }
 
+export async function getAllAgents(): Promise<Agent[]> {
+  return getAgents();
+}
+
 export async function getAgent(id: string): Promise<Agent | null> {
   const agents = await getAgents();
   return agents.find((a) => a.id === id) || null;

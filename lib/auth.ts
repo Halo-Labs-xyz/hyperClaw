@@ -44,3 +44,18 @@ export function unauthorizedResponse() {
     { status: 401 }
   );
 }
+
+/**
+ * Require authentication for API routes.
+ * Returns null if auth passes, or a NextResponse with error if it fails.
+ * 
+ * Usage in API routes:
+ *   const authError = requireAuth(req);
+ *   if (authError) return authError;
+ */
+export function requireAuth(request: Request): NextResponse | null {
+  if (!verifyApiKey(request)) {
+    return unauthorizedResponse();
+  }
+  return null;
+}
