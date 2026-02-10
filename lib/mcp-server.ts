@@ -190,7 +190,7 @@ export async function handleMcpRequest(req: McpRequest): Promise<McpResponse> {
         id,
         result: {
           content: [textContent(typeof out === "string" ? out : JSON.stringify(out, null, 2))],
-          is_error: false,
+          isError: false,
         },
       };
     } catch (err) {
@@ -200,7 +200,7 @@ export async function handleMcpRequest(req: McpRequest): Promise<McpResponse> {
         id,
         result: {
           content: [textContent(message)],
-          is_error: true,
+          isError: true,
         },
       };
     }

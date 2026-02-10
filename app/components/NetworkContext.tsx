@@ -9,7 +9,7 @@ import {
   type ReactNode,
 } from "react";
 import { useSwitchChain } from "wagmi";
-import { monadTestnet, monadMainnet } from "./Providers";
+import { monadTestnet, monadMainnet } from "@/lib/chains";
 
 interface NetworkContextValue {
   monadTestnet: boolean;

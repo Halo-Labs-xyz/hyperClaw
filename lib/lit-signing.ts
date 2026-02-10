@@ -220,11 +220,17 @@ export async function signMessageWithPKP(
       authContext: await getOperatorAuthContext(),
     });
 
+    const resultWithRecovery = result as {
+      signature: string;
+      recid?: number;
+      recoveryId?: number;
+    };
+
     return {
       success: true,
-      signature: result.signature,
+      signature: resultWithRecovery.signature,
       publicKey: pkpInfo.publicKey,
-      recid: result.recid,
+      recid: resultWithRecovery.recid ?? resultWithRecovery.recoveryId ?? 0,
       messageHash,
     };
   } catch (error) {
@@ -362,10 +368,10 @@ export async function signBuilderApprovalWithPKP(
       return { success: false, error: "Builder not configured" };
     }
 
-    const { isHlTestnet } = await import("./hyperliquid");
+    const { isTestnet } = await import("./hyperliquid");
     const nonce = Date.now();
     const maxFeeRate = builderPointsToPercent(config.feePoints);
-    const hyperliquidChain = isHlTestnet() ? "Testnet" : "Mainnet";
+    const hyperliquidChain = isTestnet() ? "Testnet" : "Mainnet";
 
     const action = {
       type: "approveBuilderFee" as const,
@@ -486,299 +492,9 @@ export async function executeOrderWithPKP(
   agentId: string,
   orderParams: PlaceOrderParams
 ): Promise<unknown> {
-  // Import dependencies dynamically to avoid circular refs
-  const { getInfoClient, getAssetIndex, isHlTestnet } = await import("./hyperliquid");
-  const { getBuilderParam } = await import("./builder");
-  
-  // Get PKP info
-  const pkpInfo = await getPKPForAgent(agentId);
-  if (!pkpInfo) {
-    throw new Error(`No PKP wallet found for agent ${agentId}`);
-  }
-
-  // Resolve asset index
-  const assetIndex = await getAssetIndex(orderParams.coin);
-  const isBuy = orderParams.side === "buy" || orderParams.side === "long";
-
-  // Get current price for market orders or use provided price
-  let orderPrice = orderParams.price;
-  if (orderParams.orderType === "market") {
-    const info = getInfoClient();
-    const mids = await info.allMids();
-    const midPrice = parseFloat(mids[orderParams.coin] || "0");
-    if (midPrice === 0) throw new Error(`No price for ${orderParams.coin}`);
-    
-    const slippage = (orderParams.slippagePercent ?? 1) / 100;
-    orderPrice = isBuy ? midPrice * (1 + slippage) : midPrice * (1 - slippage);
-  }
-
-  if (!orderPrice) {
-    throw new Error(`Price required for ${orderParams.orderType} orders`);
-  }
-
-  // Get metadata for size formatting
-  const info = getInfoClient();
-  const meta = await info.meta();
-  const szDecimals = meta.universe[assetIndex]?.szDecimals ?? 2;
-  const formattedSize = orderParams.size.toFixed(szDecimals);
-  const formattedPrice = parseFloat(orderPrice.toPrecision(5)).toString();
-
-  // Build order action (Hyperliquid format)
-  const orderTypeMap = {
-    market: "Ioc",
-    limit: orderParams.tif || "Gtc",
-    "stop-loss": "Trigger",
-    "take-profit": "Trigger",
-  } as const;
-
-  const builderParam = getBuilderParam();
-  
-  const action: Record<string, unknown> = {
-    type: "order",
-    orders: [
-      {
-        a: assetIndex,
-        b: isBuy,
-        p: formattedPrice,
-        s: formattedSize,
-        r: orderParams.reduceOnly ?? false,
-        t: orderTypeMap[orderParams.orderType] || { limit: { tif: "Gtc" } },
-      },
-    ],
-    grouping: "na",
-  };
-
-  if (builderParam) action.builder = builderParam;
-  if (orderParams.vaultAddress) action.vaultAddress = orderParams.vaultAddress;
-
-  const nonce = Date.now();
-
-  // Sign the action using PKP via Lit Protocol
-  console.log(`[PKP] Signing order for ${agentId}: ${orderParams.side} ${formattedSize} ${orderParams.coin} @ ${formattedPrice}`);
-  
-  // Create Lit Action to sign the order (simplified for now)
-  const litActionCode = `
-(async () => {
-  const { action, nonce, isTestnet, pkpPublicKey } = jsParams;
-  
-  try {
-    const actionObj = JSON.parse(action);
-    const nonceNum = parseInt(nonce);
-    const testnet = isTestnet === "true";
-    
-    // Create L1 action hash (same as @nktkas/hyperliquid SDK)
-    // This is a simplified version - production should use exact SDK logic
-    const phantomAgent = { address: "0x0000000000000000000000000000000000000000" };
-    const connectionId = ethers.utils.keccak256(
-      ethers.utils.toUtf8Bytes(JSON.stringify(actionObj) + nonceNum)
-    );
-    
-    const domain = {
-      name: "Exchange",
-      version: "1",
-      chainId: testnet ? 421614 : 42161,
-      verifyingContract: "0x0000000000000000000000000000000000000000",
-    };
-    
-    const types = {
-      Agent: [
-        { name: "source", type: "string" },
-        { name: "connectionId", type: "bytes32" },
-      ],
-    };
-    
-    const message = {
-      source: "a",
-      connectionId,
-    };
-    
-    const toSign = ethers.utils.arrayify(
-      ethers.utils._TypedDataEncoder.hash(domain, types, message)
-    );
-    
-    // Sign with PKP
-    const sigShare = await Lit.Actions.signEcdsa({
-      toSign,
-      publicKey: pkpPublicKey,
-      sigName: "hyperliquidL1Action",
-    });
-    
-    Lit.Actions.setResponse({ 
-      response: JSON.stringify({ success: true })
-    });
-  } catch (err) {
-    Lit.Actions.setResponse({ 
-      response: JSON.stringify({ 
-        success: false, 
-        errors: [err.message || String(err)]
-      })
-    });
-  }
-})();
-`;
-  
-  const result = await executeLitAction({
-    code: litActionCode,
-    jsParams: {
-      action: JSON.stringify(action),
-      nonce: nonce.toString(),
-      isTestnet: isHlTestnet().toString(),
-      pkpPublicKey: pkpInfo.publicKey,
-    },
-  });
-
-  if (!result.response) {
-    throw new Error("No response from Lit Action");
-  }
-
-  const parsed = JSON.parse(result.response);
-  if (!parsed.success) {
-    throw new Error(parsed.errors?.join(", ") || "PKP signing failed");
-  }
-
-  const sig = result.signatures?.["hyperliquidL1Action"];
-  if (!sig) {
-    throw new Error("No signature in Lit Action result");
-  }
-
-  // Submit signed order to Hyperliquid
-  const endpoint = isHlTestnet() 
-    ? "https://api.hyperliq-testnet.xyz/exchange"
-    : "https://api.hyperliquid.xyz/exchange";
-
-  const response = await fetch(endpoint, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      action,
-      nonce,
-      signature: {
-        r: `0x${sig.signature.slice(0, 64)}`,
-        s: `0x${sig.signature.slice(64, 128)}`,
-        v: sig.recid + 27,
-      },
-    }),
-  });
-
-  if (!response.ok) {
-    const errorBody = await response.text();
-    throw new Error(`Hyperliquid order failed: ${response.status} ${errorBody}`);
-  }
-
-  return await response.json();
-}
-
-// ============================================
-// PKP Builder Code Approval
-// ============================================
-
-/**
- * Sign builder code approval using PKP
- * 
- * This signs the approveBuilderFee action using Lit Protocol PKP.
- * Used for Vincent-style auto-approval during wallet provisioning.
- */
-export async function signBuilderApprovalWithPKP(
-  agentId: string
-): Promise<{
-  success: boolean;
-  signature?: { r: string; s: string; v: number };
-  action?: any;
-  error?: string;
-}> {
-  try {
-    const pkpInfo = await getPKPForAgent(agentId);
-    if (!pkpInfo) {
-      return {
-        success: false,
-        error: `No PKP found for agent ${agentId}`,
-      };
-    }
-
-    // Get builder config
-    const { getApproveBuilderFeeTypedData, getBuilderConfig } = await import("./builder");
-    const config = getBuilderConfig();
-    
-    if (!config) {
-      return {
-        success: false,
-        error: "Builder not configured",
-      };
-    }
-
-    // Generate approval action
-    const nonce = Date.now();
-    const chainId = 421614; // Arbitrum Sepolia (standard for Hyperliquid)
-    const typedData = getApproveBuilderFeeTypedData(chainId, nonce);
-
-    // Construct the EIP-712 hash
-    const { ethers } = await import("ethers");
-    const domain = typedData.domain;
-    const types = typedData.types;
-    const message = typedData.message;
-
-    // Create domain separator
-    const domainSeparator = ethers.TypedDataEncoder.hashDomain(domain);
-    const messageHash = ethers.TypedDataEncoder.hash(domain, types, message);
-
-    // Get session sigs
-    const authConfig: PKPAuthConfig = {
-      pkpPublicKey: pkpInfo.publicKey,
-      pkpTokenId: pkpInfo.tokenId,
-      pkpEthAddress: pkpInfo.ethAddress,
-    };
-
-    const sessionSigs = await getSessionSigsForPKP(authConfig);
-    const client = await getLitNodeClient();
-
-    // Sign the approval message hash using PKP
-    const toSign = ethers.getBytes(messageHash);
-
-    const litActionCode = `
-      const go = async () => {
-        const sigShare = await Lit.Actions.signEcdsa({
-          toSign: dataToSign,
-          publicKey,
-          sigName: "builderApprovalSig",
-        });
-      };
-      go();
-    `;
-
-    const result = await client.executeJs({
-      code: litActionCode,
-      sessionSigs,
-      jsParams: {
-        dataToSign: toSign,
-        publicKey: pkpInfo.publicKey,
-      },
-    });
-
-    const sig = result.signatures?.["builderApprovalSig"];
-    if (!sig) {
-      return {
-        success: false,
-        error: "No signature returned from PKP",
-      };
-    }
-
-    // Convert signature to r, s, v format
-    const signature = ethers.Signature.from("0x" + sig.signature);
-    
-    return {
-      success: true,
-      signature: {
-        r: signature.r,
-        s: signature.s,
-        v: signature.v,
-      },
-      action: message,
-    };
-  } catch (error) {
-    console.error("[LitSigning] Failed to sign builder approval:", error);
-    return {
-      success: false,
-      error: error instanceof Error ? error.message : "Unknown error",
-    };
-  }
+  // Use Hyperliquid SDK end-to-end with a PKP-backed viem account.
+  // This aligns signing payload/domain/nonce semantics with the SDK implementation.
+  const { getExchangeClientForPKP, executeOrder } = await import("./hyperliquid");
+  const exchange = await getExchangeClientForPKP(agentId);
+  return await executeOrder(orderParams, exchange);
 }

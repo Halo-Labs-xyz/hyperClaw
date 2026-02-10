@@ -14,12 +14,18 @@
  */
 
 import { createCipheriv, createDecipheriv, randomBytes, createHash } from "crypto";
-import { privateKeyToAccount } from "viem/accounts";
 import { type Address } from "viem";
 import type { HlAccount, PKPAccountInfo, PKPTradingConstraints } from "./types";
 import { readJSON, writeJSON } from "./store-backend";
 
 const ACCOUNTS_FILE = "accounts.json";
+
+function privateKeyToAccountCompat(privateKey: `0x${string}`) {
+  // Delay loading viem/accounts until a private-key account operation is used.
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const { privateKeyToAccount } = require("viem/accounts");
+  return privateKeyToAccount(privateKey);
+}
 
 // Encryption key derived from env or fallback (hackathon)
 function getEncryptionKey(): Buffer {
@@ -110,7 +116,7 @@ export async function addAccount(params: {
     pkp = params.pkp;
   } else if (params.privateKey) {
     // Trading account: derive address from key
-    const account = privateKeyToAccount(params.privateKey as `0x${string}`);
+    const account = privateKeyToAccountCompat(params.privateKey as `0x${string}`);
     address = account.address;
     encryptedKey = encrypt(params.privateKey);
     type = "trading";

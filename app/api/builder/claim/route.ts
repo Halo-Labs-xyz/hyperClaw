@@ -23,10 +23,13 @@ export async function POST(request: Request) {
 
     // Check if the operator key matches the builder address
     const exchange = getExchangeClient();
+    const exchangeWithCustom = exchange as unknown as {
+      custom: (payload: Record<string, unknown>) => Promise<unknown>;
+    };
     // Note: The exchange client is already initialized with HYPERLIQUID_PRIVATE_KEY
     
     // Claim builder fees using the referral claim action
-    const result = await exchange.custom({
+    const result = await exchangeWithCustom.custom({
       action: {
         type: "usdClassTransfer",
         hyperliquidChain: process.env.NEXT_PUBLIC_HYPERLIQUID_TESTNET === "true" 

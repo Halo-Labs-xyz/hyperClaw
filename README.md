@@ -744,6 +744,9 @@ cp .env.example .env.local
 | Variable                  | Description                                    |
 |---------------------------|------------------------------------------------|
 | `AWS_S3_BUCKET`           | S3 bucket for persistent storage               |
+| `SUPABASE_URL`            | Supabase project URL (optional DB store)       |
+| `SUPABASE_SERVICE_ROLE_KEY` | Supabase service role key (server only)     |
+| `TRADE_ARCHIVE_PREFIX`    | S3 trade log prefix (default `hyperclaw/trades`) |
 | `AWS_REGION`              | AWS region (default: eu-north-1)               |
 | `AWS_ACCESS_KEY_ID`       | AWS access key                                 |
 | `AWS_SECRET_ACCESS_KEY`   | AWS secret key                                 |
@@ -819,6 +822,12 @@ npm run lint
 The app deploys to Vercel. `vercel.json` sets extended timeouts for agent tick (60s) and orchestrator (10s) routes.
 
 Storage: In serverless (Vercel), local filesystem is ephemeral. Set `AWS_S3_BUCKET` and AWS credentials to use S3 for persistent `.data/` storage.
+
+For concurrent-safe, long-term history with heavy inflows, use hybrid storage:
+- Supabase (`SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`) for core state (`hc_agents`, `hc_deposits`)
+- S3 (`AWS_S3_BUCKET`) for high-volume trade events (`TRADE_ARCHIVE_PREFIX`)
+
+`AWS_S3_BUCKET` can be a bucket name or an S3 access point alias.
 
 ### EC2 Orchestrator
 

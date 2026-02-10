@@ -243,24 +243,27 @@ export function createAgentHandler(hyperClawAgentId: string): AgentHandler {
     try {
       // Portfolio status query
       if (isPortfolioQuery) {
-        const accountState = await getAccountState(agent.hlAddress);
-        const positions = (accountState.assetPositions || [])
-          .filter((p) => parseFloat(p.position.szi) !== 0)
-          .map((p) => ({
-            coin: p.position.coin,
-            size: parseFloat(p.position.szi),
-            entryPrice: parseFloat(p.position.entryPx || "0"),
-            unrealizedPnl: parseFloat(p.position.unrealizedPnl),
-            leverage: parseFloat(String(p.position.leverage?.value ?? "1")),
-          }));
+        const { getAgentHlState } = await import("./hyperliquid");
+        const hlState = await getAgentHlState(hyperClawAgentId);
+        const totalPnl = hlState?.totalPnl ?? agent.totalPnl;
+        const totalPnlPercent = hlState && parseFloat(hlState.accountValue) > 0
+          ? (totalPnl / parseFloat(hlState.accountValue)) * 100
+          : agent.totalPnlPercent;
+        const positions = (hlState?.positions || []).map((p) => ({
+          coin: p.coin,
+          size: p.side === "long" ? p.size : -p.size,
+          entryPrice: p.entryPrice,
+          unrealizedPnl: p.unrealizedPnl,
+          leverage: p.leverage,
+        }));
 
-        const availableBalance = parseFloat(accountState.withdrawable || "0");
-        const totalEquity = parseFloat(accountState.marginSummary.accountValue || "0");
+        const availableBalance = parseFloat(hlState?.availableBalance || "0");
+        const totalEquity = parseFloat(hlState?.accountValue || "0");
 
         let response = `📊 **${agent.name} Portfolio Status**\n\n`;
         response += `**Account Value:** $${totalEquity.toFixed(2)}\n`;
         response += `**Available Balance:** $${availableBalance.toFixed(2)}\n`;
-        response += `**Total PnL:** ${agent.totalPnl >= 0 ? "+" : ""}$${agent.totalPnl.toFixed(2)} (${agent.totalPnlPercent.toFixed(2)}%)\n`;
+        response += `**Total PnL:** ${totalPnl >= 0 ? "+" : ""}$${totalPnl.toFixed(2)} (${totalPnlPercent.toFixed(2)}%)\n`;
         response += `**Win Rate:** ${agent.winRate.toFixed(1)}%\n`;
         response += `**Total Trades:** ${agent.totalTrades}\n\n`;
 

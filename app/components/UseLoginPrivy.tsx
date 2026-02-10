@@ -7,7 +7,7 @@ import {
   WalletWithMetadata,
 } from "@privy-io/react-auth";
 import { createPublicClient, http, formatEther } from "viem";
-import { monadMainnet } from "./Providers";
+import { monadMainnet } from "@/lib/chains";
 import { QRCodeSVG } from "qrcode.react";
 
 const publicClient = createPublicClient({

@@ -9,7 +9,7 @@ import { NetworkToggle } from "@/app/components/NetworkToggle";
 import type { Agent, TradeLog, MonadToken, VaultChatMessage, IndicatorConfig } from "@/lib/types";
 import { MONAD_TOKENS, INDICATOR_TEMPLATES } from "@/lib/types";
 import { VAULT_ABI, ERC20_ABI, agentIdToBytes32 } from "@/lib/vault";
-import { monadTestnet, monadMainnet } from "../../components/Providers";
+import { monadTestnet, monadMainnet } from "@/lib/chains";
 
 const AUTONOMY_LABELS = {
   full: { icon: "🤖", label: "Full Auto", color: "text-success", bg: "bg-success/10", border: "border-success/20" },
@@ -71,6 +71,8 @@ export default function AgentDetailPage() {
     accountValue?: string;
     availableBalance?: string;
     marginUsed?: string;
+    totalPnl?: number;
+    totalUnrealizedPnl?: number;
     network?: string;
     stale?: boolean;
     error?: string;
@@ -201,10 +203,8 @@ export default function AgentDetailPage() {
         });
         const hlData = await hlRes.json();
         setHlBalance(hlData);
-        if (hlData.positions && hlData.positions.length > 0) {
-          setHlPositions(hlData.positions);
-          setTotalUnrealizedPnl(hlData.totalUnrealizedPnl || 0);
-        }
+        setHlPositions(hlData.positions || []);
+        setTotalUnrealizedPnl(hlData.totalUnrealizedPnl ?? 0);
         // Track stale data / errors from the backend
         if (hlData.stale) {
           setHlFetchErrors(prev => prev + 1);
@@ -944,8 +944,18 @@ export default function AgentDetailPage() {
           {[
             {
               label: "Total PnL",
-              value: `${agent.totalPnl >= 0 ? "+" : ""}$${agent.totalPnl.toFixed(2)}`,
-              color: agent.totalPnl >= 0 ? "text-success" : "text-danger",
+              value: (() => {
+                const pnl = hlBalance?.hasWallet && typeof hlBalance.totalPnl === "number"
+                  ? hlBalance.totalPnl
+                  : agent.totalPnl;
+                return `${pnl >= 0 ? "+" : ""}$${pnl.toFixed(2)}`;
+              })(),
+              color: (() => {
+                const pnl = hlBalance?.hasWallet && typeof hlBalance.totalPnl === "number"
+                  ? hlBalance.totalPnl
+                  : agent.totalPnl;
+                return pnl >= 0 ? "text-success" : "text-danger";
+              })(),
             },
             {
               label: "Unrealized PnL",

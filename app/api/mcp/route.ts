@@ -12,14 +12,16 @@ export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 
 function isAuthorized(request: Request): boolean {
-  const apiKey = process.env.HYPERCLAW_API_KEY || process.env.MCP_API_KEY;
-  if (!apiKey?.trim()) return true; // No key configured = open (e.g. local dev)
+  const configuredKeys = [process.env.HYPERCLAW_API_KEY, process.env.MCP_API_KEY]
+    .map((k) => k?.trim())
+    .filter((k): k is string => !!k);
+  if (configuredKeys.length === 0) return true; // No key configured = open (e.g. local dev)
 
   const auth = request.headers.get("authorization");
   const bearer = auth?.startsWith("Bearer ") ? auth.slice(7).trim() : null;
   const xKey = request.headers.get("x-api-key")?.trim() ?? null;
   const key = bearer ?? xKey;
-  return key === apiKey;
+  return !!key && configuredKeys.includes(key);
 }
 
 export async function POST(request: Request) {

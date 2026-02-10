@@ -11,17 +11,9 @@ import { initializeAgentLifecycle, getLifecycleSummary } from "@/lib/agent-lifec
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-// Track initialization state
-let initPromise: Promise<void> | null = null;
-
 export async function GET() {
   try {
-    // Only initialize once
-    if (!initPromise) {
-      initPromise = initializeAgentLifecycle();
-    }
-    
-    await initPromise;
+    await initializeAgentLifecycle();
     
     const summary = await getLifecycleSummary();
     

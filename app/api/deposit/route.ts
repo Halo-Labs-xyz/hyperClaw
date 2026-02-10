@@ -89,7 +89,8 @@ export async function GET(request: Request) {
     // Share percent query
     if (agentId && user) {
       const sharePercent = await getUserSharePercent(agentId, user);
-      const deposits = getDepositsForUser(user).filter(
+      const userDeposits = await getDepositsForUser(user);
+      const deposits = userDeposits.filter(
         (d) => d.agentId === agentId
       );
       return NextResponse.json({
@@ -102,14 +103,14 @@ export async function GET(request: Request) {
 
     // Agent deposits
     if (agentId) {
-      const deposits = getDepositsForAgent(agentId);
+      const deposits = await getDepositsForAgent(agentId);
       const tvlUsd = await getVaultTvlOnChain(agentId);
       return NextResponse.json({ agentId, tvlUsd, deposits });
     }
 
     // User deposits
     if (user) {
-      const deposits = getDepositsForUser(user);
+      const deposits = await getDepositsForUser(user);
       return NextResponse.json({ user, deposits });
     }
 

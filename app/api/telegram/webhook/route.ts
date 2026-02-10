@@ -74,9 +74,14 @@ export async function POST(request: Request) {
         const TELEGRAM_API = "https://api.telegram.org/bot";
         const token = process.env.TELEGRAM_BOT_TOKEN;
         if (token && linkedAgents.length > 0) {
-          const statusLines = linkedAgents.map((a) => {
+          const { getAgentHlState } = await import("@/lib/hyperliquid");
+          const pnlResults = await Promise.all(
+            linkedAgents.map((a) => getAgentHlState(a.id).then((s) => s?.totalPnl ?? a.totalPnl))
+          );
+          const statusLines = linkedAgents.map((a, i) => {
             const modeEmoji = a.autonomy.mode === "full" ? "🤖" : a.autonomy.mode === "semi" ? "🤝" : "👤";
-            return `${modeEmoji} *${a.name}*\nStatus: ${a.status} | PnL: $${a.totalPnl.toFixed(2)}\nMode: ${a.autonomy.mode} | Trades: ${a.totalTrades}`;
+            const pnl = pnlResults[i] ?? a.totalPnl;
+            return `${modeEmoji} *${a.name}*\nStatus: ${a.status} | PnL: $${pnl.toFixed(2)}\nMode: ${a.autonomy.mode} | Trades: ${a.totalTrades}`;
           });
 
           await fetch(`${TELEGRAM_API}${token}/sendMessage`, {

@@ -108,7 +108,6 @@ export async function getLitClient(
 
   litClient = await createLitClient({
     network,
-    debug: config.debug ?? DEFAULT_CONFIG.debug,
   });
 
   console.log(`[Lit] Connected to ${networkName} network`);
@@ -287,9 +286,15 @@ export async function signWithPKP(params: {
     authContext,
   });
 
+  const resultWithRecovery = result as {
+    signature: string;
+    recid?: number;
+    recoveryId?: number;
+  };
+
   return {
-    signature: result.signature,
-    recid: result.recid,
+    signature: resultWithRecovery.signature,
+    recid: resultWithRecovery.recid ?? resultWithRecovery.recoveryId ?? 0,
   };
 }
 

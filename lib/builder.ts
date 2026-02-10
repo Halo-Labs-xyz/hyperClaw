@@ -71,8 +71,7 @@ export async function getMaxBuilderFee(user: Address): Promise<number> {
 
   try {
     const info = getInfoClient();
-    const response = await info.custom({
-      type: "maxBuilderFee",
+    const response = await info.maxBuilderFee({
       user,
       builder: config.address,
     });
@@ -113,8 +112,7 @@ export async function getBuilderStats(): Promise<{
 
   try {
     const info = getInfoClient();
-    const referralState = await info.custom({
-      type: "referral",
+    const referralState = await info.referral({
       user: config.address,
     }) as any;
 
@@ -336,7 +334,7 @@ async function autoApproveBuilderCodeWithPKP(
     const { signBuilderApprovalWithPKP } = await import("./lit-signing");
     const result = await signBuilderApprovalWithPKP(agentId);
 
-    if (!result.success || !result.signature) {
+    if (!result.success || !result.signature || !result.action) {
       return {
         success: false,
         error: result.error || "PKP signing failed",
@@ -346,9 +344,12 @@ async function autoApproveBuilderCodeWithPKP(
     // Submit signed approval to Hyperliquid
     const { getInfoClient } = await import("./hyperliquid");
     const info = getInfoClient();
+    const infoWithCustom = info as unknown as {
+      custom: (payload: Record<string, unknown>) => Promise<unknown>;
+    };
     
     // Submit via custom endpoint
-    const submitResult = await info.custom({
+    const submitResult = await infoWithCustom.custom({
       action: result.action,
       nonce: result.action.nonce,
       signature: result.signature,

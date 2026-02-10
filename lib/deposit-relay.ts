@@ -22,6 +22,14 @@ import { VAULT_ABI } from "./vault";
 import { getAgent, updateAgent } from "./store";
 import { provisionAgentWallet } from "./hyperliquid";
 import { isMonadTestnet } from "./network";
+import {
+  type DepositRow,
+  isSupabaseStoreEnabled,
+  sbGetDepositByTxHash,
+  sbGetDepositsForAgent,
+  sbGetDepositsForUser,
+  sbInsertDeposit,
+} from "./supabase-store";
 
 // ============================================
 // MON -> USDC price conversion
@@ -159,7 +167,7 @@ function getMonadClient() {
 
 interface DepositRecord {
   txHash: string;
-  blockNumber: bigint;
+  blockNumber: string;
   agentId: string;
   user: Address;
   token: Address;
@@ -178,6 +186,54 @@ interface DepositRecord {
 // In-memory deposit ledger (persisted via store on important events)
 const depositLedger: DepositRecord[] = [];
 let lastProcessedBlock: bigint = BigInt(0);
+
+function toDepositRow(record: DepositRecord): DepositRow {
+  return {
+    tx_hash: record.txHash,
+    block_number: record.blockNumber,
+    agent_id: record.agentId,
+    user_address: record.user.toLowerCase(),
+    token_address: record.token.toLowerCase(),
+    amount: record.amount,
+    shares: record.shares,
+    usd_value: record.usdValue,
+    mon_rate: record.monRate,
+    relay_fee: record.relayFee,
+    timestamp: record.timestamp,
+    relayed: record.relayed,
+    hl_wallet_address: record.hlWalletAddress ?? null,
+    hl_funded: record.hlFunded ?? null,
+    hl_funded_amount: record.hlFundedAmount ?? null,
+  };
+}
+
+function fromDepositRow(row: DepositRow): DepositRecord {
+  return {
+    txHash: row.tx_hash,
+    blockNumber: row.block_number,
+    agentId: row.agent_id,
+    user: row.user_address as Address,
+    token: row.token_address as Address,
+    amount: row.amount,
+    shares: row.shares,
+    usdValue: row.usd_value,
+    monRate: row.mon_rate,
+    relayFee: row.relay_fee,
+    timestamp: row.timestamp,
+    relayed: row.relayed,
+    hlWalletAddress: row.hl_wallet_address ?? undefined,
+    hlFunded: row.hl_funded ?? undefined,
+    hlFundedAmount: row.hl_funded_amount ?? undefined,
+  };
+}
+
+async function hasProcessedDeposit(txHash: string): Promise<boolean> {
+  if (isSupabaseStoreEnabled()) {
+    const existing = await sbGetDepositByTxHash(txHash);
+    return !!existing;
+  }
+  return depositLedger.some((d) => d.txHash === txHash);
+}
 
 // ============================================
 // Event parsing
@@ -201,6 +257,14 @@ export const WITHDRAWN_EVENT = parseAbiItem(
  * Parses the Deposited event, records shares, updates agent TVL.
  */
 export async function processDepositTx(txHash: string): Promise<DepositRecord | null> {
+  if (await hasProcessedDeposit(txHash)) {
+    if (isSupabaseStoreEnabled()) {
+      const row = await sbGetDepositByTxHash(txHash);
+      return row ? fromDepositRow(row) : null;
+    }
+    return depositLedger.find((d) => d.txHash === txHash) ?? null;
+  }
+
   const vaultAddress = process.env.NEXT_PUBLIC_VAULT_ADDRESS as Address | undefined;
   if (!vaultAddress) return null;
 
@@ -248,7 +312,7 @@ export async function processDepositTx(txHash: string): Promise<DepositRecord | 
 
           const record: DepositRecord = {
             txHash,
-            blockNumber: receipt.blockNumber,
+            blockNumber: receipt.blockNumber.toString(),
             agentId: agentIdHex,
             user: userAddress,
             token: tokenAddress,
@@ -294,6 +358,9 @@ export async function processDepositTx(txHash: string): Promise<DepositRecord | 
           }
 
           depositLedger.push(record);
+          if (isSupabaseStoreEnabled()) {
+            await sbInsertDeposit(toDepositRow(record));
+          }
 
           // Update agent TVL
           const agent = await getAgent(agentIdHex);
@@ -362,7 +429,7 @@ export async function startDepositPoller(intervalMs: number = 10_000): Promise<v
         if (!log.transactionHash) continue;
 
         // Check if we already processed this
-        if (depositLedger.some((d) => d.txHash === log.transactionHash)) continue;
+        if (await hasProcessedDeposit(log.transactionHash)) continue;
 
         await processDepositTx(log.transactionHash);
         console.log(`[DepositRelay] Processed deposit tx: ${log.transactionHash}`);
@@ -386,20 +453,27 @@ export function stopDepositPoller(): void {
 // Query functions
 // ============================================
 
-export function getDepositsForAgent(agentId: string): DepositRecord[] {
+export async function getDepositsForAgent(agentId: string): Promise<DepositRecord[]> {
+  if (isSupabaseStoreEnabled()) {
+    const rows = await sbGetDepositsForAgent(agentId);
+    return rows.map(fromDepositRow);
+  }
   return depositLedger.filter((d) => d.agentId === agentId);
 }
 
-export function getDepositsForUser(user: Address): DepositRecord[] {
+export async function getDepositsForUser(user: Address): Promise<DepositRecord[]> {
+  if (isSupabaseStoreEnabled()) {
+    const rows = await sbGetDepositsForUser(user);
+    return rows.map(fromDepositRow);
+  }
   return depositLedger.filter(
     (d) => d.user.toLowerCase() === user.toLowerCase()
   );
 }
 
-export function getTotalDepositedUsd(agentId: string): number {
-  return depositLedger
-    .filter((d) => d.agentId === agentId)
-    .reduce((sum, d) => sum + d.usdValue, 0);
+export async function getTotalDepositedUsd(agentId: string): Promise<number> {
+  const deposits = await getDepositsForAgent(agentId);
+  return deposits.reduce((sum, d) => sum + d.usdValue, 0);
 }
 
 /**

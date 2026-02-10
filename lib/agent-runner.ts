@@ -18,6 +18,7 @@ import {
   updateLeverage,
   getAssetIndex,
   getExchangeClientForAgent,
+  getExchangeClientForPKP,
   getHistoricalPrices,
 } from "./hyperliquid";
 import { getPrivateKeyForAgent } from "./account-manager";
@@ -28,11 +29,23 @@ import { randomBytes } from "crypto";
 // Runner State
 // ============================================
 
-const runnerStates = new Map<string, AgentRunnerState>();
-const runnerIntervals = new Map<string, ReturnType<typeof setInterval>>();
+type RunnerGlobals = {
+  runnerStates: Map<string, AgentRunnerState>;
+  runnerIntervals: Map<string, ReturnType<typeof setInterval>>;
+  consecutiveFailures: Map<string, number>;
+};
 
-// Track consecutive failures per agent for adaptive backoff
-const consecutiveFailures = new Map<string, number>();
+const runnerGlobals = (globalThis as typeof globalThis & {
+  __hyperclawRunnerGlobals?: RunnerGlobals;
+}).__hyperclawRunnerGlobals ??= {
+  runnerStates: new Map<string, AgentRunnerState>(),
+  runnerIntervals: new Map<string, ReturnType<typeof setInterval>>(),
+  consecutiveFailures: new Map<string, number>(),
+};
+
+const runnerStates = runnerGlobals.runnerStates;
+const runnerIntervals = runnerGlobals.runnerIntervals;
+const consecutiveFailures = runnerGlobals.consecutiveFailures;
 
 export function getRunnerState(agentId: string): AgentRunnerState | null {
   return runnerStates.get(agentId) || null;
@@ -275,8 +288,13 @@ export async function executeTick(agentId: string): Promise<TradeLog> {
 
         // Set leverage first
         if (isPKP) {
-          // TODO: Implement PKP leverage update via Lit Action
-          console.log(`[Agent ${agentId}] PKP leverage update not yet implemented, using default`);
+          try {
+            const pkpExchange = await getExchangeClientForPKP(agentId);
+            await updateLeverage(assetIndex, decision.leverage, true, pkpExchange);
+            console.log(`[Agent ${agentId}] PKP leverage set to ${decision.leverage}x`);
+          } catch (levErr) {
+            console.warn(`[Agent ${agentId}] PKP leverage update failed, continuing:`, levErr);
+          }
         } else if (ex) {
           await updateLeverage(assetIndex, decision.leverage, true, ex);
           console.log(`[Agent ${agentId}] Leverage set to ${decision.leverage}x`);
@@ -477,13 +495,21 @@ export async function executeApprovedTrade(
     throw new Error("No matching pending approval");
   }
 
-  const agentPk = await getPrivateKeyForAgent(agentId);
-  const agentExchange = agentPk ? getExchangeClientForAgent(agentPk) : null;
-  const { getAccountForAgent } = await import("./account-manager");
+  const { getAccountForAgent, isPKPAccount } = await import("./account-manager");
   const agentAccount = await getAccountForAgent(agentId);
   const hlAddress = agentAccount?.address ?? agent.hlAddress;
+  const isPKP = agentAccount ? await isPKPAccount(agentId) : false;
+  let agentExchange: ReturnType<typeof getExchangeClientForAgent> | null = null;
+  let pkpExchange: Awaited<ReturnType<typeof getExchangeClientForPKP>> | null = null;
 
-  if (!agentExchange) {
+  if (!isPKP) {
+    const agentPk = await getPrivateKeyForAgent(agentId);
+    agentExchange = agentPk ? getExchangeClientForAgent(agentPk) : null;
+  } else {
+    pkpExchange = await getExchangeClientForPKP(agentId);
+  }
+
+  if (!isPKP && !agentExchange) {
     throw new Error("No HL key found for agent");
   }
 
@@ -497,7 +523,11 @@ export async function executeApprovedTrade(
       const accountState = await getAccountState(hlAddress);
       const availableBalance = parseFloat(accountState.withdrawable || "0");
       const assetIndex = await getAssetIndex(decision.asset);
-      await updateLeverage(assetIndex, decision.leverage, true);
+      if (isPKP && pkpExchange) {
+        await updateLeverage(assetIndex, decision.leverage, true, pkpExchange);
+      } else if (agentExchange) {
+        await updateLeverage(assetIndex, decision.leverage, true, agentExchange);
+      }
 
       const capitalToUse = availableBalance * decision.size;
       const price =
@@ -523,7 +553,12 @@ export async function executeApprovedTrade(
           slippagePercent: 1,
         };
 
-        await executeOrder(entryParams, agentExchange);
+        if (isPKP) {
+          const { executeOrderWithPKP } = await import("./lit-signing");
+          await executeOrderWithPKP(agentId, entryParams);
+        } else if (agentExchange) {
+          await executeOrder(entryParams, agentExchange);
+        }
         executed = true;
         executionResult = {
           orderId: "market",
@@ -534,7 +569,7 @@ export async function executeApprovedTrade(
 
         if (decision.stopLoss && decision.action !== "close") {
           const slSide = decision.action === "long" ? "sell" : "buy";
-          await executeOrder({
+          const slParams: PlaceOrderParams = {
             coin: decision.asset,
             side: slSide,
             size: orderSize,
@@ -543,11 +578,17 @@ export async function executeApprovedTrade(
             triggerPrice: decision.stopLoss,
             isTpsl: true,
             reduceOnly: true,
-          }, agentExchange);
+          };
+          if (isPKP) {
+            const { executeOrderWithPKP } = await import("./lit-signing");
+            await executeOrderWithPKP(agentId, slParams);
+          } else if (agentExchange) {
+            await executeOrder(slParams, agentExchange);
+          }
         }
         if (decision.takeProfit && decision.action !== "close") {
           const tpSide = decision.action === "long" ? "sell" : "buy";
-          await executeOrder({
+          const tpParams: PlaceOrderParams = {
             coin: decision.asset,
             side: tpSide,
             size: orderSize,
@@ -556,7 +597,13 @@ export async function executeApprovedTrade(
             triggerPrice: decision.takeProfit,
             isTpsl: true,
             reduceOnly: true,
-          }, agentExchange);
+          };
+          if (isPKP) {
+            const { executeOrderWithPKP } = await import("./lit-signing");
+            await executeOrderWithPKP(agentId, tpParams);
+          } else if (agentExchange) {
+            await executeOrder(tpParams, agentExchange);
+          }
         }
       }
     } catch (err) {

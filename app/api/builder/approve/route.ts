@@ -30,7 +30,10 @@ export async function POST(request: Request) {
     
     // Submit to Hyperliquid
     const exchange = getExchangeClient();
-    const result = await exchange.custom({
+    const exchangeWithCustom = exchange as unknown as {
+      custom: (payload: Record<string, unknown>) => Promise<unknown>;
+    };
+    const result = await exchangeWithCustom.custom({
       action: typedData.message,
       nonce,
       signature,

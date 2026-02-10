@@ -1,6 +1,4 @@
 import { NextResponse } from "next/server";
-import { executeOrder, getExchangeClientForAgent } from "@/lib/hyperliquid";
-import { getPrivateKeyForAgent } from "@/lib/account-manager";
 import { verifyApiKey, unauthorizedResponse } from "@/lib/auth";
 import type { PlaceOrderParams } from "@/lib/types";
 
@@ -16,6 +14,13 @@ import type { PlaceOrderParams } from "@/lib/types";
 export async function POST(request: Request) {
   if (!verifyApiKey(request)) return unauthorizedResponse();
   try {
+    const { executeOrder, getExchangeClientForAgent } = await import("@/lib/hyperliquid");
+    const {
+      getPrivateKeyForAgent,
+      getAccountForAgent,
+      isPKPAccount,
+    } = await import("@/lib/account-manager");
+
     const body = (await request.json()) as PlaceOrderParams & { agentId?: string };
 
     // Validate required fields
@@ -47,28 +52,33 @@ export async function POST(request: Request) {
 
     // Resolve exchange client: agent wallet or operator
     let exchange = undefined;
-    let agentAddress = undefined;
+    let agentAddress: `0x${string}` | undefined = undefined;
     let agentPrivateKey = undefined;
+    let usePKP = false;
     
     if (body.agentId) {
-      const pk = await getPrivateKeyForAgent(body.agentId);
-      if (!pk) {
+      const account = await getAccountForAgent(body.agentId);
+      if (!account) {
         return NextResponse.json(
-          { error: `No HL key found for agent ${body.agentId}` },
+          { error: `No HL account found for agent ${body.agentId}` },
           { status: 400 }
         );
       }
-      
-      // Get agent account info for builder approval
-      const { getAccountForAgent } = await import("@/lib/account-manager");
-      const account = await getAccountForAgent(body.agentId);
-      
-      if (account) {
-        agentAddress = account.address;
+
+      agentAddress = account.address;
+      usePKP = await isPKPAccount(body.agentId);
+
+      if (!usePKP) {
+        const pk = await getPrivateKeyForAgent(body.agentId);
+        if (!pk) {
+          return NextResponse.json(
+            { error: `No HL private key found for agent ${body.agentId}` },
+            { status: 400 }
+          );
+        }
         agentPrivateKey = pk;
+        exchange = getExchangeClientForAgent(pk);
       }
-      
-      exchange = getExchangeClientForAgent(pk);
     }
 
     // Auto-approve builder code on first trade (Vincent-style)
@@ -90,11 +100,20 @@ export async function POST(request: Request) {
       }
     }
 
-    const result = await executeOrder(body, exchange);
+    const orderParams = { ...body } as PlaceOrderParams & { agentId?: string };
+    delete orderParams.agentId;
+    const result =
+      body.agentId && usePKP
+        ? await (await import("@/lib/lit-signing")).executeOrderWithPKP(
+            body.agentId,
+            orderParams
+          )
+        : await executeOrder(orderParams, exchange);
 
     return NextResponse.json({
       success: true,
       order: body,
+      signingMethod: body.agentId ? (usePKP ? "pkp" : "traditional") : "operator",
       result,
     });
   } catch (error) {

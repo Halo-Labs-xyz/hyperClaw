@@ -9,6 +9,7 @@ export default function AgentsPage() {
   const [agents, setAgents] = useState<Agent[]>([]);
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState<"all" | "active" | "paused" | "stopped">("all");
+  const [pnlMap, setPnlMap] = useState<Record<string, number>>({});
 
   useEffect(() => {
     fetch("/api/agents")
@@ -17,6 +18,35 @@ export default function AgentsPage() {
       .catch(console.error)
       .finally(() => setLoading(false));
   }, []);
+
+  useEffect(() => {
+    if (agents.length === 0) return;
+    let cancelled = false;
+    const queue = [...agents];
+    const concurrency = Math.min(4, queue.length);
+    const fetchOne = async () => {
+      while (!cancelled) {
+        const a = queue.shift();
+        if (!a) return;
+        try {
+          const res = await fetch("/api/fund", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ action: "agent-balance", agentId: a.id, includePnl: true }),
+            signal: AbortSignal.timeout(8000),
+          });
+          const data = await res.json();
+          if (!cancelled && typeof data.totalPnl === "number") {
+            setPnlMap((prev) => ({ ...prev, [a.id]: data.totalPnl }));
+          }
+        } catch {
+          // non-critical
+        }
+      }
+    };
+    Promise.all(Array.from({ length: concurrency }, () => fetchOne()));
+    return () => { cancelled = true; };
+  }, [agents]);
 
   const filtered = filter === "all" ? agents : agents.filter((a) => a.status === filter);
 
@@ -45,6 +75,9 @@ export default function AgentsPage() {
           </div>
           <div className="flex items-center gap-2 sm:gap-3">
             <NetworkToggle />
+            <Link href="/arena" className="btn-secondary px-4 py-2 text-sm">
+              Live Arena
+            </Link>
             <Link href="/agents/new" className="btn-primary px-4 py-2 text-sm">
               + Create Agent
             </Link>
@@ -150,8 +183,14 @@ export default function AgentsPage() {
                   <div className="space-y-2 text-xs">
                     <div className="flex justify-between">
                       <span className="text-dim">PnL</span>
-                      <span className={`font-medium mono-nums ${agent.totalPnl >= 0 ? "text-success" : "text-danger"}`}>
-                        {agent.totalPnl >= 0 ? "+" : ""}${agent.totalPnl.toLocaleString()}
+                      <span className={`font-medium mono-nums ${(() => {
+                        const pnl = pnlMap[agent.id] ?? agent.totalPnl;
+                        return pnl >= 0 ? "text-success" : "text-danger";
+                      })()}`}>
+                        {(() => {
+                          const pnl = pnlMap[agent.id] ?? agent.totalPnl;
+                          return `${pnl >= 0 ? "+" : ""}$${pnl.toLocaleString()}`;
+                        })()}
                       </span>
                     </div>
                     <div className="flex justify-between">

@@ -7,12 +7,29 @@ import {
 } from "./types";
 import { randomBytes } from "crypto";
 import { readJSON, writeJSON } from "./store-backend";
+import {
+  isSupabaseStoreEnabled,
+  sbDeleteAgent,
+  sbGetAgent,
+  sbGetAgents,
+  sbInsertAgent,
+  sbUpdateAgent,
+} from "./supabase-store";
+import {
+  appendTradeToArchive,
+  deleteAgentTradesFromArchive,
+  getRecentTradesFromArchive,
+  getTradesForAgentFromArchive,
+} from "./trade-archive";
 
 // ============================================
 // Agent CRUD
 // ============================================
 
 export async function getAgents(): Promise<Agent[]> {
+  if (isSupabaseStoreEnabled()) {
+    return sbGetAgents();
+  }
   return readJSON<Agent[]>("agents.json", []);
 }
 
@@ -21,6 +38,9 @@ export async function getAllAgents(): Promise<Agent[]> {
 }
 
 export async function getAgent(id: string): Promise<Agent | null> {
+  if (isSupabaseStoreEnabled()) {
+    return sbGetAgent(id);
+  }
   const agents = await getAgents();
   return agents.find((a) => a.id === id) || null;
 }
@@ -29,6 +49,59 @@ export async function createAgent(
   config: AgentConfig,
   hlAddress: `0x${string}`
 ): Promise<Agent> {
+  if (isSupabaseStoreEnabled()) {
+    const id = randomBytes(8).toString("hex");
+
+    const aggressiveness = config.autonomy?.aggressiveness ?? 50;
+    const minConfidence = 1 - (aggressiveness / 100) * 0.5;
+
+    const agent: Agent = {
+      id,
+      name: config.name,
+      description: config.description ?? "",
+      status: "active",
+      createdAt: Date.now(),
+      markets: config.markets,
+      maxLeverage: config.maxLeverage ?? 5,
+      riskLevel: config.riskLevel ?? "moderate",
+      stopLossPercent: config.stopLossPercent ?? 5,
+      autonomy: {
+        mode: config.autonomy?.mode ?? "semi",
+        aggressiveness,
+        minConfidence,
+        maxTradesPerDay: config.autonomy?.maxTradesPerDay ?? 10,
+        approvalTimeoutMs: config.autonomy?.approvalTimeoutMs ?? 300000,
+      },
+      telegram: config.telegramChatId
+        ? {
+            enabled: true,
+            chatId: config.telegramChatId,
+            notifyOnTrade: true,
+            notifyOnPnl: true,
+            notifyOnTierUnlock: true,
+          }
+        : undefined,
+      vaultSocial: config.isOpenVault
+        ? {
+            isOpenVault: true,
+            agentPostsTrades: true,
+            allowDiscussion: true,
+            agentRespondsToQuestions: true,
+          }
+        : undefined,
+      hlAddress,
+      totalPnl: 0,
+      totalPnlPercent: 0,
+      totalTrades: 0,
+      winRate: 0,
+      vaultTvlUsd: 0,
+      depositorCount: 0,
+    };
+
+    await sbInsertAgent(agent);
+    return agent;
+  }
+
   const agents = await getAgents();
   const id = randomBytes(8).toString("hex");
 
@@ -39,13 +112,13 @@ export async function createAgent(
   const agent: Agent = {
     id,
     name: config.name,
-    description: config.description,
+    description: config.description ?? "",
     status: "active",
     createdAt: Date.now(),
     markets: config.markets,
-    maxLeverage: config.maxLeverage,
-    riskLevel: config.riskLevel,
-    stopLossPercent: config.stopLossPercent,
+    maxLeverage: config.maxLeverage ?? 5,
+    riskLevel: config.riskLevel ?? "moderate",
+    stopLossPercent: config.stopLossPercent ?? 5,
     autonomy: {
       mode: config.autonomy?.mode ?? "semi",
       aggressiveness,
@@ -88,6 +161,9 @@ export async function updateAgent(
   id: string,
   updates: Partial<Agent>
 ): Promise<Agent | null> {
+  if (isSupabaseStoreEnabled()) {
+    return sbUpdateAgent(id, updates);
+  }
   const agents = await getAgents();
   const index = agents.findIndex((a) => a.id === id);
   if (index === -1) return null;
@@ -98,6 +174,13 @@ export async function updateAgent(
 }
 
 export async function deleteAgent(id: string): Promise<boolean> {
+  if (isSupabaseStoreEnabled()) {
+    const deleted = await sbDeleteAgent(id);
+    if (deleted) {
+      await deleteAgentTradesFromArchive(id);
+    }
+    return deleted;
+  }
   const agents = await getAgents();
   const index = agents.findIndex((a) => a.id === id);
   if (index === -1) return false;
@@ -120,11 +203,18 @@ export async function deleteAgent(id: string): Promise<boolean> {
 export async function getTradeLogsForAgent(
   agentId: string
 ): Promise<TradeLog[]> {
+  if (isSupabaseStoreEnabled() && process.env.AWS_S3_BUCKET) {
+    return getTradesForAgentFromArchive(agentId);
+  }
   const all = await readJSON<TradeLog[]>("trades.json", []);
   return all.filter((t) => t.agentId === agentId);
 }
 
 export async function appendTradeLog(log: TradeLog): Promise<void> {
+  if (isSupabaseStoreEnabled() && process.env.AWS_S3_BUCKET) {
+    await appendTradeToArchive(log);
+    return;
+  }
   const all = await readJSON<TradeLog[]>("trades.json", []);
   all.push(log);
   // Keep last 1000 trades per agent
@@ -133,6 +223,9 @@ export async function appendTradeLog(log: TradeLog): Promise<void> {
 }
 
 export async function getRecentTrades(limit: number = 20): Promise<TradeLog[]> {
+  if (isSupabaseStoreEnabled() && process.env.AWS_S3_BUCKET) {
+    return getRecentTradesFromArchive(limit);
+  }
   const all = await readJSON<TradeLog[]>("trades.json", []);
   return all.slice(-limit).reverse();
 }

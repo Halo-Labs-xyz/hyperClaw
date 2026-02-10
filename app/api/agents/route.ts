@@ -162,9 +162,13 @@ export async function POST(request: Request) {
     }, { status: 201 });
     
   } catch (error) {
-    console.error("Create agent error:", error);
+    const message = error instanceof Error ? error.message : String(error);
+    console.error("Create agent error:", message, error);
     return NextResponse.json(
-      { error: "Failed to create agent" },
+      {
+        error: "Failed to create agent",
+        detail: process.env.NODE_ENV === "development" ? message : undefined,
+      },
       { status: 500 }
     );
   }

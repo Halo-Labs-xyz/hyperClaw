@@ -1,64 +1,94 @@
 "use client";
 
-import { PrivyProvider as BasePrivyProvider } from "@privy-io/react-auth";
+import { useEffect, useMemo, useState, type ComponentType, type ReactNode } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { createConfig } from "@privy-io/wagmi";
-import { http } from "wagmi";
-import { WagmiProvider } from "@privy-io/wagmi";
-import { defineChain } from "viem";
 import { NetworkProvider } from "./NetworkContext";
+import { monadMainnet, monadTestnet } from "@/lib/chains";
 
-// Monad Mainnet chain definition
-export const monadMainnet = defineChain({
-  id: 143,
-  name: "Monad",
-  nativeCurrency: { name: "MON", symbol: "MON", decimals: 18 },
-  rpcUrls: {
-    default: { http: ["https://rpc.monad.xyz"] },
-  },
-  blockExplorers: {
-    default: { name: "Monad Explorer", url: "https://explorer.monad.xyz" },
-  },
-});
-
-// Monad Testnet chain definition (fallback)
-export const monadTestnet = defineChain({
-  id: 10143,
-  name: "Monad Testnet",
-  nativeCurrency: { name: "MON", symbol: "MON", decimals: 18 },
-  rpcUrls: {
-    default: { http: ["https://testnet-rpc.monad.xyz"] },
-  },
-  blockExplorers: {
-    default: {
-      name: "Monad Testnet Explorer",
-      url: "https://testnet.monadexplorer.com",
-    },
-  },
-  testnet: true,
-});
-
-export const config = createConfig({
-  chains: [monadMainnet, monadTestnet],
-  transports: {
-    [monadMainnet.id]: http("https://rpc.monad.xyz"),
-    [monadTestnet.id]: http("https://testnet-rpc.monad.xyz"),
-  },
-});
-
-const queryClient = new QueryClient();
-
-// Use testnet when NEXT_PUBLIC_MONAD_TESTNET is set
-const useTestnet = process.env.NEXT_PUBLIC_MONAD_TESTNET === "true";
+type LoadedModules = {
+  PrivyProvider: ComponentType<{
+    children: ReactNode;
+    appId: string;
+    clientId?: string;
+    config?: Record<string, unknown>;
+  }>;
+  WagmiProvider: ComponentType<{
+    children: ReactNode;
+    config: unknown;
+  }>;
+  createConfig: (args: unknown) => unknown;
+  http: (url: string) => unknown;
+};
 
 export default function Providers({
   children,
 }: {
-  children: React.ReactNode;
+  children: ReactNode;
 }) {
+  const [modules, setModules] = useState<LoadedModules | null>(null);
+  const [queryClient] = useState(() => new QueryClient());
+
+  useEffect(() => {
+    let active = true;
+    (async () => {
+      const [privyModule, privyWagmiModule, wagmiModule] = await Promise.all([
+        import("@privy-io/react-auth"),
+        import("@privy-io/wagmi"),
+        import("wagmi"),
+      ]);
+
+      const PrivyProvider =
+        (privyModule as { PrivyProvider?: LoadedModules["PrivyProvider"]; default?: { PrivyProvider?: LoadedModules["PrivyProvider"] } }).PrivyProvider ??
+        (privyModule as { default?: { PrivyProvider?: LoadedModules["PrivyProvider"] } }).default?.PrivyProvider;
+      const WagmiProvider =
+        (privyWagmiModule as { WagmiProvider?: LoadedModules["WagmiProvider"]; default?: { WagmiProvider?: LoadedModules["WagmiProvider"] } }).WagmiProvider ??
+        (privyWagmiModule as { default?: { WagmiProvider?: LoadedModules["WagmiProvider"] } }).default?.WagmiProvider;
+      const createConfig =
+        (privyWagmiModule as { createConfig?: LoadedModules["createConfig"]; default?: { createConfig?: LoadedModules["createConfig"] } }).createConfig ??
+        (privyWagmiModule as { default?: { createConfig?: LoadedModules["createConfig"] } }).default?.createConfig;
+      const http =
+        (wagmiModule as { http?: LoadedModules["http"]; default?: { http?: LoadedModules["http"] } }).http ??
+        (wagmiModule as { default?: { http?: LoadedModules["http"] } }).default?.http;
+
+      if (!PrivyProvider || !WagmiProvider || !createConfig || !http) {
+        throw new Error("Failed to load wallet provider modules");
+      }
+
+      if (!active) return;
+      setModules({
+        PrivyProvider,
+        WagmiProvider,
+        createConfig,
+        http,
+      });
+    })().catch((error) => {
+      console.error("[Providers] Failed to initialize providers:", error);
+    });
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  const wagmiConfig = useMemo(() => {
+    if (!modules) return null;
+    return modules.createConfig({
+      chains: [monadMainnet, monadTestnet],
+      transports: {
+        [monadMainnet.id]: modules.http("https://rpc.monad.xyz"),
+        [monadTestnet.id]: modules.http("https://testnet-rpc.monad.xyz"),
+      },
+    });
+  }, [modules]);
+
+  if (!modules || !wagmiConfig) return null;
+
+  const useTestnet = process.env.NEXT_PUBLIC_MONAD_TESTNET === "true";
+  const BasePrivyProvider = modules.PrivyProvider;
+  const WagmiProvider = modules.WagmiProvider;
+
   return (
     <BasePrivyProvider
-      appId={process.env.NEXT_PUBLIC_PRIVY_APP_ID!}
+      appId={process.env.NEXT_PUBLIC_PRIVY_APP_ID || ""}
       clientId={process.env.NEXT_PUBLIC_PRIVY_CLIENT_ID || ""}
       config={{
         embeddedWallets: {
@@ -70,12 +100,23 @@ export default function Providers({
             secondary: null,
           },
         },
+        externalWallets: {
+          coinbaseWallet: {
+            config: {
+              preference: {
+                // Monad chains are not supported by Coinbase Smart Wallet.
+                // Force EOA mode to avoid noisy smart-wallet initialization errors.
+                options: "eoaOnly",
+              },
+            },
+          },
+        },
         defaultChain: useTestnet ? monadTestnet : monadMainnet,
         supportedChains: [monadMainnet, monadTestnet],
       }}
     >
       <QueryClientProvider client={queryClient}>
-        <WagmiProvider config={config}>
+        <WagmiProvider config={wagmiConfig}>
           <NetworkProvider>{children}</NetworkProvider>
         </WagmiProvider>
       </QueryClientProvider>

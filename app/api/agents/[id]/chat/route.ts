@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { getAgent, getVaultMessages, appendVaultMessage } from "@/lib/store";
+import { getAgentHlState } from "@/lib/hyperliquid";
 import { handleInvestorQuestion, postToVaultGroup } from "@/lib/telegram";
 import type { VaultChatMessage } from "@/lib/types";
 import { randomBytes } from "crypto";
@@ -110,11 +111,19 @@ export async function POST(
           .join("\n");
 
         if (agent.vaultSocial.telegramGroupId) {
+          let totalPnl: number | undefined;
+          try {
+            const hlState = await getAgentHlState(agentId);
+            if (hlState) totalPnl = hlState.totalPnl;
+          } catch {
+            // use agent.totalPnl if HL fetch fails
+          }
           aiResponse = await handleInvestorQuestion(
             agent.vaultSocial.telegramGroupId,
             content.trim(),
             agent,
-            contextStr
+            contextStr,
+            totalPnl
           );
         } else {
           // No Telegram group, just generate and store

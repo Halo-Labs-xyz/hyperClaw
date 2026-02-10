@@ -48,7 +48,21 @@ interface AgentLifecycleState {
   healthStatus: "healthy" | "degraded" | "unhealthy" | "stopped";
 }
 
-const lifecycleStates = new Map<string, AgentLifecycleState>();
+type LifecycleGlobals = {
+  lifecycleStates: Map<string, AgentLifecycleState>;
+  initialized: boolean;
+  healthCheckInterval: ReturnType<typeof setInterval> | null;
+};
+
+const lifecycleGlobals = (globalThis as typeof globalThis & {
+  __hyperclawLifecycleGlobals?: LifecycleGlobals;
+}).__hyperclawLifecycleGlobals ??= {
+  lifecycleStates: new Map<string, AgentLifecycleState>(),
+  initialized: false,
+  healthCheckInterval: null,
+};
+
+const lifecycleStates = lifecycleGlobals.lifecycleStates;
 
 export function getLifecycleState(agentId: string): AgentLifecycleState | null {
   return lifecycleStates.get(agentId) || null;
@@ -412,11 +426,41 @@ export async function getLifecycleSummary(): Promise<LifecycleSummary> {
 // Initialization (call on server start)
 // ============================================
 
-let initialized = false;
+async function ensureActiveAgentsRunning(): Promise<{
+  restarted: string[];
+  failed: string[];
+}> {
+  const agents = await getAllAgents();
+  const activeAgents = agents.filter(a => a.status === "active");
+  const restarted: string[] = [];
+  const failed: string[] = [];
+
+  for (const agent of activeAgents) {
+    const runner = getRunnerState(agent.id);
+    if (runner?.isRunning) continue;
+
+    try {
+      await activateAgent(agent.id, { skipAIP: true });
+      restarted.push(agent.id);
+    } catch (error) {
+      console.error(`[Lifecycle] Failed to recover runner for ${agent.id}:`, error);
+      failed.push(agent.id);
+    }
+  }
+
+  return { restarted, failed };
+}
 
 export async function initializeAgentLifecycle(): Promise<void> {
-  if (initialized) {
-    console.log("[Lifecycle] Already initialized, skipping...");
+  if (lifecycleGlobals.initialized) {
+    const { restarted, failed } = await ensureActiveAgentsRunning();
+    if (restarted.length > 0 || failed.length > 0) {
+      console.log(
+        `[Lifecycle] Reconciliation complete: restarted ${restarted.length}, failed ${failed.length}`
+      );
+    } else {
+      console.log("[Lifecycle] Already initialized, all active runners healthy.");
+    }
     return;
   }
 
@@ -430,16 +474,18 @@ export async function initializeAgentLifecycle(): Promise<void> {
   console.log(`  - Failed: ${failed.length} agents`);
   
   // Set up periodic health checks (every 5 minutes)
-  setInterval(async () => {
-    try {
-      const { healed, failed } = await autoHealAgents();
-      if (healed.length > 0 || failed.length > 0) {
-        console.log(`[Lifecycle] Health check: healed ${healed.length}, failed ${failed.length}`);
+  if (!lifecycleGlobals.healthCheckInterval) {
+    lifecycleGlobals.healthCheckInterval = setInterval(async () => {
+      try {
+        const { healed, failed } = await autoHealAgents();
+        if (healed.length > 0 || failed.length > 0) {
+          console.log(`[Lifecycle] Health check: healed ${healed.length}, failed ${failed.length}`);
+        }
+      } catch (error) {
+        console.error("[Lifecycle] Health check failed:", error);
       }
-    } catch (error) {
-      console.error("[Lifecycle] Health check failed:", error);
-    }
-  }, 5 * 60 * 1000);
+    }, 5 * 60 * 1000);
+  }
 
-  initialized = true;
+  lifecycleGlobals.initialized = true;
 }

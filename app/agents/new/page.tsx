@@ -207,11 +207,15 @@ export default function CreateAgentPage() {
           isOpenVault,
         }),
       });
-      if (!res.ok) throw new Error("Failed to create agent");
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        const msg = data?.detail ?? data?.error ?? "Failed to create agent";
+        throw new Error(msg);
+      }
       const data = await res.json();
       router.push(`/agents/${data.agent.id}`);
-    } catch {
-      setError("Failed to create agent. Please try again.");
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Failed to create agent. Please try again.");
     } finally {
       setCreating(false);
     }

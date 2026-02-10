@@ -146,8 +146,11 @@ export async function sendPnlSummary(
   chatId: string,
   agent: Agent,
   dailyPnl: number,
-  openPositions: Array<{ coin: string; pnl: number; side: string }>
+  openPositions: Array<{ coin: string; pnl: number; side: string }>,
+  /** Holistic total PnL (realized + unrealized). When provided, used instead of agent.totalPnl. */
+  totalPnlOverride?: number
 ) {
+  const totalPnl = typeof totalPnlOverride === "number" ? totalPnlOverride : agent.totalPnl;
   const pnlEmoji = dailyPnl >= 0 ? "🟢" : "🔴";
   const positionLines = openPositions.length === 0
     ? "No open positions"
@@ -158,7 +161,7 @@ export async function sendPnlSummary(
   const message = `${pnlEmoji} *Daily Summary — ${agent.name}*
 
 PnL Today: ${dailyPnl >= 0 ? "+" : ""}$${dailyPnl.toFixed(2)}
-Total PnL: ${agent.totalPnl >= 0 ? "+" : ""}$${agent.totalPnl.toFixed(2)}
+Total PnL: ${totalPnl >= 0 ? "+" : ""}$${totalPnl.toFixed(2)}
 Trades Today: ${agent.totalTrades}
 Win Rate: ${(agent.winRate * 100).toFixed(1)}%
 
@@ -182,8 +185,11 @@ export async function handleInvestorQuestion(
   groupId: string,
   question: string,
   agent: Agent,
-  agentContext: string
+  agentContext: string,
+  /** Holistic total PnL (realized + unrealized). When provided, used instead of agent.totalPnl. */
+  totalPnlOverride?: number
 ): Promise<string> {
+  const totalPnl = typeof totalPnlOverride === "number" ? totalPnlOverride : agent.totalPnl;
   // Use OpenAI to generate a response as the agent
   const OpenAI = (await import("openai")).default;
   const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
@@ -197,7 +203,7 @@ export async function handleInvestorQuestion(
 Your strategy: ${agent.description}
 Markets: ${agent.markets.join(", ")}
 Risk level: ${agent.riskLevel}
-Current performance: PnL $${agent.totalPnl.toFixed(2)}, Win rate ${(agent.winRate * 100).toFixed(1)}%
+Current performance: PnL $${totalPnl.toFixed(2)}, Win rate ${(agent.winRate * 100).toFixed(1)}%
 
 ${agentContext}
 

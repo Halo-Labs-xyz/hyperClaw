@@ -6,6 +6,24 @@ const withSerwist = withSerwistInit({
 });
 
 export default withSerwist({
+  experimental: {
+    serverComponentsExternalPackages: [
+      "@lit-protocol/lit-client",
+      "@lit-protocol/auth",
+      "@lit-protocol/contracts",
+      "@lit-protocol/networks",
+      "@lit-protocol/access-control-conditions",
+      "ethers",
+      "bn.js",
+      "viem",
+      "@noble/curves",
+      "@noble/hashes",
+      "@privy-io/react-auth",
+      "@privy-io/wagmi",
+      "@tanstack/react-query",
+      "wagmi",
+    ],
+  },
   images: {
     domains: [
       "imagedelivery.net",

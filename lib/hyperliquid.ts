@@ -6,7 +6,6 @@ import {
   WebSocketTransport,
   SubscriptionClient,
 } from "@nktkas/hyperliquid";
-import { privateKeyToAccount } from "viem/accounts";
 import { type Address } from "viem";
 import {
   type MarketData,
@@ -15,6 +14,13 @@ import {
   type TimeInForce,
 } from "./types";
 import { isHlTestnet, onNetworkChange } from "./network";
+
+function privateKeyToAccountCompat(privateKey: `0x${string}`) {
+  // Load viem/accounts lazily so non-signing routes don't fail at module init.
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const { privateKeyToAccount } = require("viem/accounts");
+  return privateKeyToAccount(privateKey);
+}
 
 // ============================================
 // Config
@@ -158,6 +164,7 @@ let exchangeClient: ExchangeClient | null = null;
 
 // Per-agent exchange clients
 const agentExchangeClients = new Map<string, ExchangeClient>();
+const pkpExchangeClients = new Map<string, ExchangeClient>();
 
 /**
  * Flush all cached clients so they rebuild with the new network.
@@ -166,6 +173,7 @@ function invalidateClients(): void {
   infoClient = null;
   exchangeClient = null;
   agentExchangeClients.clear();
+  pkpExchangeClients.clear();
   // WebSocket also needs to reconnect
   if (wsTransport) {
     wsTransport.close().catch(() => {});
@@ -197,7 +205,7 @@ export function getExchangeClient(): ExchangeClient {
   if (!exchangeClient) {
     const pk = process.env.HYPERLIQUID_PRIVATE_KEY;
     if (!pk) throw new Error("HYPERLIQUID_PRIVATE_KEY not set");
-    const wallet = privateKeyToAccount(pk as `0x${string}`);
+    const wallet = privateKeyToAccountCompat(pk as `0x${string}`);
     const transport = new HttpTransport({ 
       isTestnet: isHlTestnet(),
       timeout: 15000, // 15 second timeout for exchange operations
@@ -214,7 +222,7 @@ export function getExchangeClientForAgent(
   const cacheKey = privateKey.slice(0, 10);
   let client = agentExchangeClients.get(cacheKey);
   if (!client) {
-    const wallet = privateKeyToAccount(privateKey as `0x${string}`);
+    const wallet = privateKeyToAccountCompat(privateKey as `0x${string}`);
     const transport = new HttpTransport({ 
       isTestnet: isHlTestnet(),
       timeout: 30000, // 30 second timeout
@@ -223,6 +231,37 @@ export function getExchangeClientForAgent(
     agentExchangeClients.set(cacheKey, client);
   }
   return client;
+}
+
+export async function getExchangeClientForPKP(agentId: string): Promise<ExchangeClient> {
+  const cached = pkpExchangeClients.get(agentId);
+  if (cached) return cached;
+
+  const { getPKPForAgent } = await import("./account-manager");
+  const { getLitClient, getOperatorAuthContext } = await import("./lit-protocol");
+
+  const pkpInfo = await getPKPForAgent(agentId);
+  if (!pkpInfo) {
+    throw new Error(`No PKP wallet found for agent ${agentId}`);
+  }
+
+  const client = await getLitClient();
+  const authContext = await getOperatorAuthContext();
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const { arbitrum, arbitrumSepolia } = require("viem/chains");
+  const wallet = await client.getPkpViemAccount({
+    pkpPublicKey: pkpInfo.publicKey,
+    authContext,
+    chainConfig: isHlTestnet() ? arbitrumSepolia : arbitrum,
+  });
+
+  const transport = new HttpTransport({
+    isTestnet: isHlTestnet(),
+    timeout: 30000,
+  });
+  const exchange = new ExchangeClient({ transport, wallet: wallet as any });
+  pkpExchangeClients.set(agentId, exchange);
+  return exchange;
 }
 
 // ============================================
@@ -535,7 +574,7 @@ export async function cancelAllOrders(coin?: string) {
   // Get the wallet address from the exchange client
   const pk = process.env.HYPERLIQUID_PRIVATE_KEY;
   if (!pk) throw new Error("HYPERLIQUID_PRIVATE_KEY not set");
-  const wallet = privateKeyToAccount(pk as `0x${string}`);
+  const wallet = privateKeyToAccountCompat(pk as `0x${string}`);
 
   const orders = await info.openOrders({ user: wallet.address });
   const cancels = orders
@@ -879,7 +918,7 @@ export function generateAgentWallet(): { privateKey: string; address: Address } 
   // Generate random private key (32 bytes)
   const keyBytes = randomBytes(32);
   const privateKey = "0x" + keyBytes.toString("hex");
-  const account = privateKeyToAccount(privateKey as `0x${string}`);
+  const account = privateKeyToAccountCompat(privateKey as `0x${string}`);
   return { privateKey, address: account.address };
 }
 
@@ -1039,8 +1078,8 @@ export async function provisionAgentWallet(
     } else {
       address = pkpResult.address;
       signingMethod = "pkp";
-      // Builder approval already handled in provisionPKPWallet
-      builderApproved = pkpResult.builderApproved || false;
+      // Builder approval for PKP is handled at order-time fallback if needed.
+      builderApproved = false;
     }
   } else {
     // Traditional: generate local wallet with encrypted private key
@@ -1129,6 +1168,10 @@ export interface AgentHlState {
   availableBalance: string;
   marginUsed: string;
   totalUnrealizedPnl: number;
+  /** Realized PnL from closed trades (sum of closedPnl from user fills) */
+  realizedPnl: number;
+  /** Total PnL = realized + unrealized (holistic view of active + closed trades) */
+  totalPnl: number;
   positions: AgentPosition[];
 }
 
@@ -1169,7 +1212,25 @@ export async function getAgentHlBalance(
 }
 
 /**
+ * Compute realized PnL from HL user fills (closed trades).
+ * Sums closedPnl across all fills for holistic closed-trade PnL.
+ */
+export async function getRealizedPnlFromFills(user: Address): Promise<number> {
+  try {
+    const fills = await getUserFills(user);
+    const realized = fills.reduce(
+      (sum, f) => sum + parseFloat(String((f as { closedPnl?: string }).closedPnl ?? "0")),
+      0
+    );
+    return realized;
+  } catch {
+    return 0;
+  }
+}
+
+/**
  * Get the full HL account state including positions for an agent's wallet.
+ * totalPnl = realized (from closed trades) + unrealized (from open positions).
  */
 export async function getAgentHlState(
   agentId: string
@@ -1181,7 +1242,11 @@ export async function getAgentHlState(
   if (!account) return null;
 
   try {
-    const state = await getAccountState(account.address);
+    // Fetch state and fills in parallel for holistic PnL (active + closed trades)
+    const [state, realizedPnl] = await Promise.all([
+      getAccountState(account.address),
+      getRealizedPnlFromFills(account.address),
+    ]);
     const mids = await getInfoClient().allMids();
     
     // Parse positions
@@ -1215,6 +1280,7 @@ export async function getAgentHlState(
       });
 
     const totalUnrealizedPnl = positions.reduce((sum, p) => sum + p.unrealizedPnl, 0);
+    const totalPnl = realizedPnl + totalUnrealizedPnl;
 
     return {
       address: account.address,
@@ -1222,6 +1288,8 @@ export async function getAgentHlState(
       availableBalance: state.withdrawable || "0",
       marginUsed: state.marginSummary?.totalMarginUsed || "0",
       totalUnrealizedPnl,
+      realizedPnl,
+      totalPnl,
       positions,
     };
   } catch (error) {
@@ -1239,6 +1307,8 @@ export async function getAgentHlState(
       availableBalance: "0",
       marginUsed: "0",
       totalUnrealizedPnl: 0,
+      realizedPnl: 0,
+      totalPnl: 0,
       positions: [],
     };
   }

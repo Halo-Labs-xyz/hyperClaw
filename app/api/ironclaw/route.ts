@@ -11,8 +11,11 @@ import {
   sendToIronClaw,
   ironClawHealth,
 } from "@/lib/ironclaw";
+import { verifyApiKey, unauthorizedResponse } from "@/lib/auth";
 
 export async function POST(request: Request) {
+  if (!verifyApiKey(request)) return unauthorizedResponse();
+
   if (!isIronClawConfigured()) {
     return NextResponse.json(
       { error: "IronClaw webhook not configured (set IRONCLAW_WEBHOOK_URL)" },
@@ -60,7 +63,9 @@ export async function POST(request: Request) {
   }
 }
 
-export async function GET() {
+export async function GET(request: Request) {
+  if (!verifyApiKey(request)) return unauthorizedResponse();
+
   const health = await ironClawHealth();
   if (!health.ok) {
     return NextResponse.json(

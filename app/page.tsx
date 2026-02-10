@@ -3,13 +3,11 @@
 import { usePrivy } from "@privy-io/react-auth";
 import { useAccount, useBalance } from "wagmi";
 import { useState, useEffect } from "react";
-import { InstallPWA } from "./components/InstallPWA";
-import { NetworkToggle } from "./components/NetworkToggle";
 import Link from "next/link";
 import type { Agent, HclawState } from "@/lib/types";
 
 export default function Dashboard() {
-  const { ready, login } = usePrivy();
+  const { ready, authenticated, login } = usePrivy();
   const { address, isConnected } = useAccount();
   const { data: balance } = useBalance({ address });
   const [agents, setAgents] = useState<Agent[]>([]);
@@ -29,12 +27,21 @@ export default function Dashboard() {
     address?: string;
     accountValue?: string;
     availableBalance?: string;
+    totalPnl?: number;
   }>>([]);
 
   // Phase 1: Fetch critical data (agents list + token state) — fast, unblocks render
   useEffect(() => {
-    // Fire-and-forget startup (don't await — this runs in background)
-    fetch("/api/startup").catch(() => {});
+    // Run startup init once per browser session to avoid repeated heavy calls.
+    const startupKey = "hyperclaw-startup-init-v1";
+    if (typeof window !== "undefined" && !sessionStorage.getItem(startupKey)) {
+      sessionStorage.setItem(startupKey, "1");
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 4000);
+      fetch("/api/startup", { signal: controller.signal })
+        .catch(() => {})
+        .finally(() => clearTimeout(timeoutId));
+    }
 
     async function fetchCritical() {
       try {
@@ -61,11 +68,14 @@ export default function Dashboard() {
     async function fetchWallets() {
       // Fetch HL status (non-critical)
       try {
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 5000);
         const statusRes = await fetch("/api/fund", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ action: "status" }),
-        });
+          signal: controller.signal,
+        }).finally(() => clearTimeout(timeoutId));
         if (!cancelled) {
           const statusData = await statusRes.json();
           setHlStatus(statusData);
@@ -74,42 +84,55 @@ export default function Dashboard() {
         // non-critical
       }
 
-      // Fetch each agent's wallet balance individually — render each as it arrives
-      for (const a of agents) {
-        if (cancelled) break;
-        try {
-          const res = await fetch("/api/fund", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ action: "agent-balance", agentId: a.id }),
-            signal: AbortSignal.timeout(12000), // 12s max per agent — don't stall the whole page
-          });
-          const data = await res.json();
-          if (!cancelled) {
-            setAgentWallets((prev) => {
-              const filtered = prev.filter((w) => w.agentId !== a.id);
-              return [
-                ...filtered,
-                {
-                  agentId: a.id,
-                  agentName: a.name,
-                  hasWallet: data.hasWallet || false,
-                  address: data.address,
-                  accountValue: data.accountValue,
-                  availableBalance: data.availableBalance,
-                },
-              ];
-            });
-          }
-        } catch {
-          if (!cancelled) {
-            setAgentWallets((prev) => {
-              if (prev.some((w) => w.agentId === a.id)) return prev;
-              return [...prev, { agentId: a.id, agentName: a.name, hasWallet: false }];
-            });
+      // Fetch balances in bounded parallel batches to avoid long sequential timeouts.
+      const queue = [...agents];
+      const concurrency = Math.min(4, queue.length);
+
+      const fetchOne = async () => {
+        while (!cancelled) {
+          const a = queue.shift();
+          if (!a) return;
+
+          try {
+            const controller = new AbortController();
+            const timeoutId = setTimeout(() => controller.abort(), 7000);
+            const res = await fetch("/api/fund", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ action: "agent-balance", agentId: a.id, includePnl: true }),
+              signal: controller.signal,
+            }).finally(() => clearTimeout(timeoutId));
+
+            const data = await res.json();
+            if (!cancelled) {
+              setAgentWallets((prev) => {
+                const filtered = prev.filter((w) => w.agentId !== a.id);
+                return [
+                  ...filtered,
+                  {
+                    agentId: a.id,
+                    agentName: a.name,
+                    hasWallet: data.hasWallet || false,
+                    address: data.address,
+                    accountValue: data.accountValue,
+                    availableBalance: data.availableBalance,
+                    totalPnl: typeof data.totalPnl === "number" ? data.totalPnl : undefined,
+                  },
+                ];
+              });
+            }
+          } catch {
+            if (!cancelled) {
+              setAgentWallets((prev) => {
+                if (prev.some((w) => w.agentId === a.id)) return prev;
+                return [...prev, { agentId: a.id, agentName: a.name, hasWallet: false }];
+              });
+            }
           }
         }
-      }
+      };
+
+      await Promise.all(Array.from({ length: concurrency }, () => fetchOne()));
     }
     fetchWallets();
     return () => { cancelled = true; };
@@ -135,8 +158,16 @@ export default function Dashboard() {
   }
 
   const totalTvl = agents.reduce((sum, a) => sum + a.vaultTvlUsd, 0);
-  const totalPnl = agents.reduce((sum, a) => sum + a.totalPnl, 0);
+  const totalPnl = (() => {
+    const fromWallets = agentWallets.reduce(
+      (sum, w) => sum + (typeof w.totalPnl === "number" ? w.totalPnl : 0),
+      0
+    );
+    if (agentWallets.some((w) => typeof w.totalPnl === "number")) return fromWallets;
+    return agents.reduce((sum, a) => sum + a.totalPnl, 0);
+  })();
   const activeAgents = agents.filter((a) => a.status === "active").length;
+  const canLogin = !authenticated && !isConnected;
 
   return (
     <div className="min-h-screen bg-background relative overflow-hidden">
@@ -166,7 +197,7 @@ export default function Dashboard() {
           </nav>
 
           <div className="flex items-center gap-2 sm:gap-3">
-            <NetworkToggle />
+            <div className="hidden" />
             {isConnected && address ? (
               <div className="flex items-center gap-2 sm:gap-3">
                 <div className="hidden sm:flex items-center gap-2 px-3 py-1.5 rounded-lg bg-surface border border-card-border">
@@ -185,7 +216,10 @@ export default function Dashboard() {
               </div>
             ) : (
               <button
-                onClick={login}
+                onClick={() => {
+                  if (canLogin) login();
+                }}
+                disabled={!canLogin}
                 className="btn-primary px-5 py-2.5 text-sm"
               >
                 Connect Wallet
@@ -211,6 +245,9 @@ export default function Dashboard() {
             Deposit Monad assets. AI agents trade perpetual futures on Hyperliquid autonomously. Withdraw with profits anytime.
           </p>
           <div className="flex items-center justify-center gap-3 mt-10 animate-fade-in-up animate-delay-300">
+            <Link href="/arena" className="btn-secondary px-6 py-3 text-sm">
+              Live Arena
+            </Link>
             <Link href="/agents" className="btn-primary px-6 py-3 text-sm">
               Explore Agents
             </Link>
@@ -486,6 +523,12 @@ export default function Dashboard() {
             </svg>
             <span className="text-[10px] text-accent font-medium">Home</span>
           </Link>
+          <Link href="/arena" className="flex flex-col items-center gap-1 py-2 px-4">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-muted">
+              <path d="M12 3v18" /><path d="M3 12h18" /><path d="M7 7l10 10" /><path d="M17 7L7 17" />
+            </svg>
+            <span className="text-[10px] text-muted font-medium">Arena</span>
+          </Link>
           <Link href="/agents" className="flex flex-col items-center gap-1 py-2 px-4">
             <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-muted">
               <rect x="3" y="3" width="7" height="7" /><rect x="14" y="3" width="7" height="7" /><rect x="14" y="14" width="7" height="7" /><rect x="3" y="14" width="7" height="7" />
@@ -501,7 +544,7 @@ export default function Dashboard() {
         </div>
       </nav>
 
-      <InstallPWA />
+      {/* <InstallPWA /> */}
     </div>
   );
 }
@@ -541,8 +584,9 @@ function StatCard({
 
 function AgentCard({ agent, hlWallet }: {
   agent: Agent;
-  hlWallet?: { hasWallet: boolean; address?: string; accountValue?: string; availableBalance?: string };
+  hlWallet?: { hasWallet: boolean; address?: string; accountValue?: string; availableBalance?: string; totalPnl?: number };
 }) {
+  const pnl = typeof hlWallet?.totalPnl === "number" ? hlWallet.totalPnl : agent.totalPnl;
   return (
     <Link href={`/agents/${agent.id}`}>
       <div className="glass-card p-5 md:p-6 cursor-pointer h-full flex flex-col">
@@ -586,8 +630,8 @@ function AgentCard({ agent, hlWallet }: {
         <div className="grid grid-cols-2 gap-x-4 gap-y-2 text-xs pt-4 border-t border-card-border">
           <div className="flex justify-between">
             <span className="text-dim">PnL</span>
-            <span className={`font-medium mono-nums ${agent.totalPnl >= 0 ? "text-success" : "text-danger"}`}>
-              {agent.totalPnl >= 0 ? "+" : ""}${agent.totalPnl.toLocaleString()}
+            <span className={`font-medium mono-nums ${pnl >= 0 ? "text-success" : "text-danger"}`}>
+              {pnl >= 0 ? "+" : ""}${pnl.toLocaleString()}
             </span>
           </div>
           <div className="flex justify-between">
