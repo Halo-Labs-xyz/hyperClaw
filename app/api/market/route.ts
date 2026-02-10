@@ -80,10 +80,21 @@ export async function GET(request: Request) {
         );
     }
   } catch (error) {
-    console.error("Market API error:", error);
-    return NextResponse.json(
-      { error: "Failed to fetch market data" },
-      { status: 500 }
-    );
+    // Log concisely — no full stack traces for expected timeout/network errors
+    const msg = error instanceof Error ? error.message : String(error);
+    const isTimeout = msg.toLowerCase().includes("timeout");
+    if (isTimeout) {
+      console.warn(`[Market] HL API timeout for action="${action}" — returning empty data`);
+    } else {
+      console.error(`[Market] Error for action="${action}": ${msg.slice(0, 150)}`);
+    }
+    // Return empty data with stale flag instead of 500 — lets frontend degrade gracefully
+    return NextResponse.json({
+      error: isTimeout ? "Hyperliquid API timeout" : "Failed to fetch market data",
+      stale: true,
+      mids: {},
+      markets: [],
+      assets: [],
+    });
   }
 }

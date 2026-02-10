@@ -88,7 +88,9 @@ flowchart LR
 
 Each agent is an independent trading entity with:
 
-- **Dedicated Hyperliquid wallet** (generated on creation, key encrypted at rest)
+- **Dedicated Hyperliquid wallet** with dual signing modes:
+  - **PKP (Programmable Key Pair)**: Distributed signing via Lit Protocol with cryptographic constraints
+  - **Traditional**: AES-256 encrypted private key storage
 - **Market selection** (perps and/or spot, e.g. BTC, ETH, SOL)
 - **Risk parameters**: max leverage (1-50x), stop loss (1-25%), aggressiveness (0-100)
 - **Autonomy mode**:
@@ -96,6 +98,7 @@ Each agent is an independent trading entity with:
   - `semi_auto` -- requests approval via Telegram before executing
   - `manual` -- AI suggests, human executes
 - **Status**: active, paused, stopped
+- **Autonomous execution**: The agent runner automatically detects wallet type and uses appropriate signing method (PKP or traditional) for all trading operations including entries, stop-losses, and take-profits
 
 ### Vault System
 
@@ -119,12 +122,66 @@ Each agent is an independent trading entity with:
 - Minimum execution confidence: 0.6
 - Risk tiers: Conservative (2-5% SL), Moderate (3-8% SL), Aggressive (5-15% SL)
 - Model-agnostic interface via `lib/ai.ts` -- swap the underlying LLM without touching agent logic
+- Indicator-aware: supports RSI divergence, Smart Money Concepts, and custom indicators
 
-### Account Manager
+### Reliability & Resilience
 
-- AES-256-CBC encrypted private key storage in `.data/accounts.json`
+The system is designed to handle Hyperliquid API instability gracefully:
+
+- **Retry with exponential backoff**: All HL API calls (account state, market data, candles, etc.) retry up to 3 times with jittered delays (1s, 2s, 4s). Retries on timeouts, network errors, and 5xx responses.
+- **Graceful tick degradation**: If market data or account state is unavailable, the agent runner logs a "hold" decision instead of crashing, preserving the trade log timeline.
+- **Adaptive agent backoff**: After 3+ consecutive failures, agents probabilistically skip ticks to reduce API pressure while still attempting recovery.
+- **Staggered agent starts**: When multiple agents start, each gets a random 0-5s delay to avoid thundering-herd API calls.
+- **Partial API responses**: Fund/balance endpoints return `{ stale: true }` with last-known data on timeout, so the frontend can still render.
+- **Adaptive frontend polling**: The agent detail page starts at 15s intervals but backs off to 60s when HL API errors are sustained, reducing load.
+- **Concise error logging**: Timeout errors are logged as one-line warnings instead of full stack traces, keeping the terminal readable.
+
+### Key Management & Account Manager
+
+HyperClaw supports **two wallet modes** with automatic builder code approval:
+
+#### PKP Mode (Recommended for Production)
+- **Distributed key management** via Lit Protocol
+- Private keys **never exist in full form**
+- Threshold signing across Lit Network nodes (>2/3 consensus)
+- **Cryptographically enforced trading constraints** via Lit Actions:
+  - Max position size limits
+  - Allowed coins/markets
+  - Price deviation bounds
+  - Rate limiting per time period
+- **Full trading execution** - agents place orders, stop-losses, and take-profits via PKP signing
+- Builder codes auto-approved via PKP signing during wallet creation
+- Maximum security - no single point of failure
+- **Analysis & execution mode** - PKP agents analyze markets AND execute trades autonomously
+
+#### Traditional Mode (Development/Testing)
+- **AES-256-CBC encrypted** private key storage in `.data/accounts.json`
+- Keys encrypted at rest, decrypted only for signing
+- Builder codes auto-approved via private key signing during wallet creation
+- Fast setup for development
 - Supports trading accounts (with keys) and read-only accounts (address only)
-- Per-agent wallet isolation
+
+**Both modes implement Vincent-style auto-approval:**
+- ✅ Builder code approved automatically on wallet provisioning
+- ✅ Auto-approved on first trade if not done during provisioning
+- ✅ Zero user friction - no manual approval steps
+- ✅ Guaranteed builder fee revenue on all trades
+
+**Mode Selection:**
+```bash
+# Enable PKP mode
+USE_LIT_PKP=true
+LIT_NETWORK=datil
+
+# Traditional mode (default)
+USE_LIT_PKP=false
+```
+
+See: [`docs/LIT_PROTOCOL_INTEGRATION.md`](docs/LIT_PROTOCOL_INTEGRATION.md) and [`docs/PKP_BUILDER_CODE_INTEGRATION.md`](docs/PKP_BUILDER_CODE_INTEGRATION.md)
+
+### IronClaw (fund manager assistant)
+
+**IronClaw** (Rust, in `ironclaw/`) is the **overarching agent fund manager assistant** for all hyperClaw agentic operations. Users get the best experience by interacting through **IronClaw’s sidecar UI/UX** (TUI, web, Telegram, etc.): one secure place to query agents, positions, PnL, start/stop agents, and get natural-language answers. hyperClaw remains the execution layer; IronClaw gets fund-manager capabilities by connecting to hyperClaw as an MCP server or via HTTP tools. Optional: set `IRONCLAW_WEBHOOK_URL` so the web app can proxy “Ask the fund manager” to IronClaw. See [`docs/IRONCLAW_INTEGRATION.md`](docs/IRONCLAW_INTEGRATION.md).
 
 ### Network Switching
 
@@ -353,6 +410,86 @@ See [`lib/unibase-agent-configs.ts`](./lib/unibase-agent-configs.ts) for detaile
 
 ---
 
+## Builder Codes Integration (Vincent-Style Auto-Approval)
+
+HyperClaw is integrated with **Hyperliquid Builder Codes**, allowing the platform to earn a small fee on every trade. This provides sustainable revenue without impacting user trading performance.
+
+### How Builder Codes Work
+
+Builder codes are processed entirely on-chain as part of Hyperliquid's fee logic. HyperClaw implements **automatic builder code approval** (Vincent-style):
+
+- **Agent wallets**: Auto-approved when created
+- **First trade**: Auto-approved if not already approved
+- **Zero friction**: No manual user action required
+
+### Fee Structure
+
+- **Perp trades**: 0.1% builder fee (configurable)
+- **Spot trades**: 1% max builder fee (configurable)
+- **User approval**: One-time, gas-free signature
+- **Fee claiming**: Automatic accumulation, manual claim
+
+### Configuration
+
+Set these environment variables:
+
+```bash
+# Builder wallet address (receives fees)
+NEXT_PUBLIC_BUILDER_ADDRESS=0x...
+
+# Builder fee in tenths of basis points (10 = 1bp = 0.1%)
+NEXT_PUBLIC_BUILDER_FEE=10
+```
+
+### User Flow (Vincent-Style)
+
+1. **Agent Creation**: Builder code automatically approved during wallet provisioning
+2. **First Trade**: If not already approved, auto-approved silently during first trade
+3. **Subsequent Trades**: All orders automatically include builder code
+4. **Transparency**: Builder fee shown in UI, no manual action needed
+
+**Result**: Zero-friction trading with guaranteed builder fee revenue.
+
+### API Endpoints
+
+| Method | Route                            | Description                        |
+|--------|----------------------------------|------------------------------------|
+| GET    | `/api/builder/info`              | Get builder config & user approval |
+| POST   | `/api/builder/approve`           | Submit builder approval signature  |
+| GET    | `/api/builder/approve/typed-data`| Get EIP-712 data for signing       |
+| GET    | `/api/builder/claim`             | View claimable fees                |
+| POST   | `/api/builder/claim`             | Claim accumulated builder fees     |
+
+### Frontend Component (Optional)
+
+Builder approval is now automatic, but you can show an informational banner:
+
+```tsx
+import BuilderApproval from "@/app/components/BuilderApproval";
+
+// Info mode: Shows banner that builder fees are auto-approved (optional)
+<BuilderApproval mode="info" />
+
+// Approval mode: Manual pre-approval option (not required)
+<BuilderApproval mode="approval" />
+```
+
+**Note**: The component is now optional since builder codes auto-approve on wallet creation and first trade.
+
+### Claiming Fees
+
+Builder fees accumulate on-chain and can be claimed via the referral system:
+
+```bash
+# View claimable fees
+curl http://localhost:3000/api/builder/claim
+
+# Claim fees (requires HYPERLIQUID_PRIVATE_KEY to match NEXT_PUBLIC_BUILDER_ADDRESS)
+curl -X POST http://localhost:3000/api/builder/claim
+```
+
+---
+
 ## Tech Stack
 
 | Layer          | Technology                                    |
@@ -362,7 +499,7 @@ See [`lib/unibase-agent-configs.ts`](./lib/unibase-agent-configs.ts) for detaile
 | Styling        | Tailwind CSS, custom design system            |
 | Auth           | Privy (embedded wallets, social login)        |
 | Blockchain     | Viem, Wagmi (Monad EVM)                       |
-| Exchange       | `@nktkas/hyperliquid` SDK                     |
+| Exchange       | `@nktkas/hyperliquid` SDK + Builder Codes     |
 | AI             | LLM via OpenAI-compatible API                 |
 | Real-time      | WebSockets (Hyperliquid), SSE (client)        |
 | State          | TanStack Query                                |
@@ -437,6 +574,21 @@ Design system: dark terminal aesthetic. Neon green (`#30e8a0`, Hyperliquid), pur
 | `/api/stream/prices`         | Live mid prices            |
 | `/api/stream/book`           | Live L2 order book         |
 
+### Lifecycle & Monitoring
+
+| Method | Route                        | Description                        |
+|--------|------------------------------|------------------------------------|
+| GET    | `/api/lifecycle`             | Agent lifecycle summary (health)   |
+| GET    | `/api/startup`               | Initialize agent lifecycle on boot |
+
+### MCP (IronClaw fund manager)
+
+| Method | Route            | Description                                                                 |
+|--------|------------------|-----------------------------------------------------------------------------|
+| POST   | `/api/mcp`       | MCP JSON-RPC: `initialize`, `tools/list`, `tools/call`. Auth: `HYPERCLAW_API_KEY` or `MCP_API_KEY`. |
+
+Used by IronClaw as the fund-manager MCP server (agents, lifecycle, positions, market). See [`docs/IRONCLAW_INTEGRATION.md`](docs/IRONCLAW_INTEGRATION.md).
+
 ### Other
 
 | Method | Route                        | Description                        |
@@ -506,18 +658,26 @@ hyperClaw/
 ├── lib/
 │   ├── types.ts                    # All type definitions, constants, tiers
 │   ├── ai.ts                       # AI trade decision engine
-│   ├── agent-runner.ts             # Autonomous execution loop
-│   ├── hyperliquid.ts              # HL SDK wrapper (trading, data, wallets)
+│   ├── agent-runner.ts             # Autonomous execution loop (retry + backoff)
+│   ├── agent-lifecycle.ts          # Lifecycle manager (start/stop/health)
+│   ├── hyperliquid.ts              # HL SDK wrapper (trading, data, wallets, retry)
 │   ├── account-manager.ts          # Encrypted multi-account management
+│   ├── builder.ts                  # Builder code auto-approval (Vincent-style)
 │   ├── deposit-relay.ts            # Monad → Hyperliquid capital bridge
 │   ├── vault.ts                    # Vault ABI and helpers
 │   ├── hclaw.ts                    # $HCLAW token state and tier logic
+│   ├── indicators.ts               # Technical indicator calculations
 │   ├── telegram.ts                 # Telegram bot (notifications, approvals)
 │   ├── network.ts                  # Runtime network switching
 │   ├── store-backend.ts            # Storage abstraction (local / S3)
 │   ├── store.ts                    # Agent + trade data persistence
 │   ├── watchers.ts                 # WebSocket stream managers
 │   ├── sse.ts                      # SSE response helper
+│   ├── auth.ts                     # API key authentication
+│   ├── env.ts                      # Environment variable helpers
+│   ├── lit-protocol.ts             # Lit Protocol client setup
+│   ├── lit-signing.ts              # PKP signing for HL trades
+│   ├── phala.ts                    # Phala CVM integration
 │   ├── unibase-aip.ts              # Unibase AIP A2A protocol integration
 │   ├── unibase-agent-configs.ts    # Example AIP agent configurations
 │   └── hooks/useSSE.ts             # Client-side SSE hook
@@ -568,6 +728,8 @@ cp .env.example .env.local
 | `MONAD_PRIVATE_KEY`                  | Yes      | Monad deployer/admin private key                      |
 | `NEXT_PUBLIC_MONAD_TESTNET`          | No       | `"true"` for Monad testnet (default: true)            |
 | `NEXT_PUBLIC_HCLAW_TOKEN_ADDRESS`    | No       | $HCLAW token address (after deployment)               |
+| `NEXT_PUBLIC_BUILDER_ADDRESS`       | No       | Builder wallet address (for earning fees on trades)   |
+| `NEXT_PUBLIC_BUILDER_FEE`           | No       | Builder fee in tenths of basis points (default: 10)   |
 | `PHALA_API_KEY`                     | No       | Phala Cloud API key (for CVM management)              |
 | `PHALA_CVM_ID`                      | No       | CVM VM ID (UUID) to connect to                        |
 | `PHALA_APP_ID`                      | No       | Phala App ID for the CVM workload                     |

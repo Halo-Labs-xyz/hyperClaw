@@ -341,11 +341,37 @@ export interface StreamPrice {
 export interface HlAccount {
   alias: string;
   address: Address;
-  type: "trading" | "readonly";
+  type: "trading" | "readonly" | "pkp";
   isDefault: boolean;
-  encryptedKey?: string; // encrypted private key, absent for readonly
+  encryptedKey?: string; // encrypted private key, absent for readonly/pkp
   agentId?: string; // linked agent
   createdAt: number;
+  // PKP-specific fields (for type === "pkp")
+  pkp?: PKPAccountInfo;
+}
+
+/**
+ * PKP (Programmable Key Pair) account info
+ * Used for Lit Protocol distributed key management
+ */
+export interface PKPAccountInfo {
+  tokenId: string; // NFT token ID on Lit Chronicle chain
+  publicKey: string; // Compressed public key
+  ethAddress: Address; // Derived Ethereum address (same as account.address)
+  litActionCid?: string; // IPFS CID of the permitted Lit Action
+  constraints?: PKPTradingConstraints; // Trading constraints enforced by Lit Action
+}
+
+/**
+ * Trading constraints enforced at the cryptographic layer by Lit Actions
+ */
+export interface PKPTradingConstraints {
+  maxPositionSizeUsd: number;
+  allowedCoins: string[];
+  maxLeverage: number;
+  requireStopLoss: boolean;
+  maxDailyTrades: number;
+  cooldownMs: number;
 }
 
 // ============================================

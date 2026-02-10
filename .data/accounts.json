@@ -3,7 +3,7 @@
     "alias": "agent-c0d03487",
     "address": "0xb07E2AB8AA2A00cFD09701ebeA36c71fC9e59be5",
     "type": "trading",
-    "isDefault": false,
+    "isDefault": true,
     "encryptedKey": "f5e773dea493200ece5741c90ae793a8:e71266d3b93cc6f070aa0a8aa17c2f7f49423234a465b9e6d3f5f5105c432956ead62858ac94fc0b5a5fdbb5d79fb2470f10831a5f0075b39534f349c72bc47d8a2155857b80921c3d1a42e38522164d",
     "agentId": "c0d034873babb9ec",
     "createdAt": 1770512037573
@@ -16,5 +16,80 @@
     "encryptedKey": "97b1943f70f6089bbbb93ea119804d17:b06639c455a6ecbb75f07bdc4d2f721a2e0820880a24e53085109398ec45a0ef9e70d9b812fc5e57eca523b52c2502cd12281c4be4382eccdf05f52285e88fa917d0d8f187e7443e4fffc4fc85912840",
     "agentId": "512ff00c9c2311ec",
     "createdAt": 1770513763518
+  },
+  {
+    "alias": "agent-da9b290b",
+    "address": "0xb137B5Fb47A3DE02927854eF43A997519A25b41d",
+    "type": "trading",
+    "isDefault": false,
+    "encryptedKey": "40ea4e518355c2b112cb2e436c17eafb:91fa81d176db0279da01272ad569cc2101be4d19a7f9f3168fb123202bb61f8616b3e4512077b4ac47f3bf6e816340e7f909e182afeca858271167e677a3bc343e35b49174547f28ff03a1c794f08620",
+    "agentId": "da9b290bf68bd650",
+    "createdAt": 1770571354708
+  },
+  {
+    "alias": "agent-87dbaf6d",
+    "address": "0x1CE557c828d44a16c975bc5927f026BC4cC03696",
+    "type": "trading",
+    "isDefault": false,
+    "encryptedKey": "553c4649a5d30c23df0cc9202afc9cd8:2d8872543b3756a1a053632f28eb47822e7fc7d31108c8e43c2645fda53fe76ca675121a1941e0ec3c21f79bb1e7cae580d452400dcb7e786aa51665752b7df229be743530c56e2185b391e10b51968d",
+    "agentId": "87dbaf6df992e5c3",
+    "createdAt": 1770574520394
+  },
+  {
+    "alias": "agent-bc50ff7c",
+    "address": "0x0321781B3C226fED809480D1Fa55D7c419560A6e",
+    "type": "trading",
+    "isDefault": false,
+    "encryptedKey": "535a5b72622be6c92f074c564c3bd3df:f37c2f3113de90ba8d54f8bc2c9487414c1ddd298f164589a8b77ad7be7aaa74e9ca841699060fdc28176c6bf828fd6089d2791c7b87d20ab9d556b59e3769ce43247562196c791a0568b10eb74acc61",
+    "agentId": "bc50ff7cbbe647a5",
+    "createdAt": 1770661175469
+  },
+  {
+    "alias": "pkp-agent-b2c94a51",
+    "address": "0x572fB69965e7b9B5c688C95f1229CC67B2A1a0a3",
+    "type": "pkp",
+    "isDefault": false,
+    "agentId": "b2c94a51175b4733",
+    "createdAt": 1770661704173,
+    "pkp": {
+      "tokenId": "7105240129118746867557763673856023649195964264196258696365649539250978607627",
+      "publicKey": "0x04cb29ce0b820a757deb78a26e57b5e9abc1a1f2d1c05f74d211f0ab206bcddcfba1dbfae18c8772e4282d81ae6507af8e0d89f41594fe1afbfd730d4b8264569d",
+      "ethAddress": "0x572fB69965e7b9B5c688C95f1229CC67B2A1a0a3",
+      "constraints": {
+        "maxPositionSizeUsd": 20000,
+        "allowedCoins": [
+          "BTC",
+          "ETH"
+        ],
+        "maxLeverage": 15,
+        "requireStopLoss": true,
+        "maxDailyTrades": 50,
+        "cooldownMs": 60000
+      }
+    }
+  },
+  {
+    "alias": "pkp-agent-38ea8d1a",
+    "address": "0x313f8f4C5e693B0c39F4c74c40E25d051DbF3246",
+    "type": "pkp",
+    "isDefault": false,
+    "agentId": "38ea8d1a5f1c006f",
+    "createdAt": 1770662994620,
+    "pkp": {
+      "tokenId": "6314546027920261145169040546878532711672759158069235561203723758324677326808",
+      "publicKey": "0x04bacc0b37bb4540c001812e8de330dc9758b5f85fa77fb5110bb4960f0c49ad2d0fe9c328b7578c814ce8ea467b33047e613f1b0b61579653f77ae75c0b3df569",
+      "ethAddress": "0x313f8f4C5e693B0c39F4c74c40E25d051DbF3246",
+      "constraints": {
+        "maxPositionSizeUsd": 5000,
+        "allowedCoins": [
+          "BTC",
+          "ETH"
+        ],
+        "maxLeverage": 5,
+        "requireStopLoss": true,
+        "maxDailyTrades": 50,
+        "cooldownMs": 60000
+      }
+    }
   }
 ]

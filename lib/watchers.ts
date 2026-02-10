@@ -7,7 +7,7 @@
  */
 
 import { type Address } from "viem";
-import { getSubscriptionClient, getInfoClient, closeWsTransport } from "./hyperliquid";
+import { getSubscriptionClient, getInfoClient, getAccountState, closeWsTransport } from "./hyperliquid";
 import type {
   StreamPosition,
   StreamOrder,
@@ -372,8 +372,8 @@ function parseBookLevels(
 export async function fetchPositionsSnapshot(
   user: Address
 ): Promise<StreamPosition[]> {
-  const info = getInfoClient();
-  const state = await info.clearinghouseState({ user });
+  // Reuse getAccountState which has dedup + retry built in
+  const state = await getAccountState(user);
 
   return (state.assetPositions || [])
     .filter((p) => parseFloat(p.position.szi) !== 0)
@@ -407,8 +407,8 @@ export async function fetchPositionsSnapshot(
 export async function fetchBalanceSnapshot(
   user: Address
 ): Promise<StreamBalance> {
-  const info = getInfoClient();
-  const state = await info.clearinghouseState({ user });
+  // Reuse getAccountState which has dedup + retry built in
+  const state = await getAccountState(user);
 
   return {
     totalEquity: parseFloat(state.marginSummary?.accountValue || "0"),

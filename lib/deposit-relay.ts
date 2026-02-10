@@ -283,7 +283,12 @@ export async function processDepositTx(txHash: string): Promise<DepositRecord | 
                 console.log(`[DepositRelay] Updated agent hlAddress to ${hlResult.address}`);
               }
             } catch (hlErr) {
-              console.error("[DepositRelay] HL wallet provision/fund failed:", hlErr);
+              const hlMsg = hlErr instanceof Error ? hlErr.message : String(hlErr);
+              if (hlMsg.toLowerCase().includes("timeout")) {
+                console.warn(`[DepositRelay] HL wallet provision timed out for ${agentIdHex} — will retry on next deposit`);
+              } else {
+                console.error(`[DepositRelay] HL wallet provision/fund failed: ${hlMsg.slice(0, 150)}`);
+              }
               record.hlFunded = false;
             }
           }

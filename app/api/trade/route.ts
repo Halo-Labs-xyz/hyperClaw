@@ -47,6 +47,9 @@ export async function POST(request: Request) {
 
     // Resolve exchange client: agent wallet or operator
     let exchange = undefined;
+    let agentAddress = undefined;
+    let agentPrivateKey = undefined;
+    
     if (body.agentId) {
       const pk = await getPrivateKeyForAgent(body.agentId);
       if (!pk) {
@@ -55,7 +58,36 @@ export async function POST(request: Request) {
           { status: 400 }
         );
       }
+      
+      // Get agent account info for builder approval
+      const { getAccountForAgent } = await import("@/lib/account-manager");
+      const account = await getAccountForAgent(body.agentId);
+      
+      if (account) {
+        agentAddress = account.address;
+        agentPrivateKey = pk;
+      }
+      
       exchange = getExchangeClientForAgent(pk);
+    }
+
+    // Auto-approve builder code on first trade (Vincent-style)
+    // Supports both traditional and PKP wallets
+    if (agentAddress && body.agentId) {
+      try {
+        const { ensureBuilderApproval } = await import("@/lib/builder");
+        const approved = await ensureBuilderApproval(
+          agentAddress, 
+          agentPrivateKey, // undefined for PKP
+          body.agentId      // used for PKP signing
+        );
+        if (!approved) {
+          console.warn("[Trade] Builder approval failed, proceeding anyway");
+        }
+      } catch (err) {
+        console.error("[Trade] Builder approval check error:", err);
+        // Don't block trade if approval check fails
+      }
     }
 
     const result = await executeOrder(body, exchange);

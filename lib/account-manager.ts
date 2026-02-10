@@ -2,16 +2,21 @@
  * Account Manager
  *
  * Multi-account management for Hyperliquid trading accounts.
- * Mirrors CLI's `hl account add/ls/remove/set-default` pattern.
- * Uses JSON file store (hackathon-appropriate) instead of SQLite.
+ * Supports three account types:
+ * - "trading": Traditional accounts with encrypted private keys
+ * - "readonly": Watch-only accounts (no signing capability)
+ * - "pkp": Lit Protocol PKP accounts (distributed key management)
  *
- * Accounts are stored in .data/accounts.json with encrypted private keys.
+ * PKP accounts are the most secure option - private keys never exist
+ * in full form and signing is done via Lit Protocol's threshold network.
+ *
+ * Accounts are stored in .data/accounts.json.
  */
 
 import { createCipheriv, createDecipheriv, randomBytes, createHash } from "crypto";
 import { privateKeyToAccount } from "viem/accounts";
 import { type Address } from "viem";
-import type { HlAccount } from "./types";
+import type { HlAccount, PKPAccountInfo, PKPTradingConstraints } from "./types";
 import { readJSON, writeJSON } from "./store-backend";
 
 const ACCOUNTS_FILE = "accounts.json";
@@ -75,14 +80,16 @@ async function writeAccounts(accounts: HlAccount[]): Promise<void> {
 // ============================================
 
 /**
- * Add a new trading or read-only account
+ * Add a new trading, read-only, or PKP account
  */
 export async function addAccount(params: {
   alias: string;
-  privateKey?: string; // omit for read-only
-  address?: Address; // required for read-only, derived for trading
+  privateKey?: string; // omit for read-only and PKP
+  address?: Address; // required for read-only, derived for trading/PKP
   isDefault?: boolean;
   agentId?: string;
+  // PKP-specific params
+  pkp?: PKPAccountInfo;
 }): Promise<HlAccount> {
   const accounts = await readAccounts();
 
@@ -93,9 +100,15 @@ export async function addAccount(params: {
 
   let address: Address;
   let encryptedKey: string | undefined;
-  let type: "trading" | "readonly";
+  let type: "trading" | "readonly" | "pkp";
+  let pkp: PKPAccountInfo | undefined;
 
-  if (params.privateKey) {
+  if (params.pkp) {
+    // PKP account: distributed key via Lit Protocol
+    address = params.pkp.ethAddress;
+    type = "pkp";
+    pkp = params.pkp;
+  } else if (params.privateKey) {
     // Trading account: derive address from key
     const account = privateKeyToAccount(params.privateKey as `0x${string}`);
     address = account.address;
@@ -106,7 +119,7 @@ export async function addAccount(params: {
     address = params.address;
     type = "readonly";
   } else {
-    throw new Error("Either privateKey or address must be provided");
+    throw new Error("Either privateKey, address, or pkp must be provided");
   }
 
   // If setting as default, unset others
@@ -124,11 +137,116 @@ export async function addAccount(params: {
     encryptedKey,
     agentId: params.agentId,
     createdAt: Date.now(),
+    pkp,
   };
 
   accounts.push(account);
   await writeAccounts(accounts);
   return account;
+}
+
+/**
+ * Add a PKP (Programmable Key Pair) account for an agent
+ *
+ * This is the secure way to create agent wallets - the private key
+ * never exists in full form and signing is done via Lit Protocol.
+ */
+export async function addPKPAccount(params: {
+  alias: string;
+  agentId: string;
+  pkpTokenId: string;
+  pkpPublicKey: string;
+  pkpEthAddress: Address;
+  litActionCid?: string;
+  constraints?: PKPTradingConstraints;
+  isDefault?: boolean;
+}): Promise<HlAccount> {
+  return addAccount({
+    alias: params.alias,
+    agentId: params.agentId,
+    isDefault: params.isDefault,
+    pkp: {
+      tokenId: params.pkpTokenId,
+      publicKey: params.pkpPublicKey,
+      ethAddress: params.pkpEthAddress,
+      litActionCid: params.litActionCid,
+      constraints: params.constraints,
+    },
+  });
+}
+
+/**
+ * Get PKP info for an agent's account
+ */
+export async function getPKPForAgent(
+  agentId: string
+): Promise<PKPAccountInfo | null> {
+  const accounts = await readAccounts();
+  const account = accounts.find((a) => a.agentId === agentId && a.type === "pkp");
+  return account?.pkp || null;
+}
+
+/**
+ * Update PKP constraints for an account
+ *
+ * Note: This updates the stored constraints, but to actually enforce new
+ * constraints you need to deploy a new Lit Action and update the PKP permissions.
+ */
+export async function updatePKPConstraints(
+  alias: string,
+  constraints: PKPTradingConstraints
+): Promise<void> {
+  const accounts = await readAccounts();
+  const account = accounts.find((a) => a.alias === alias);
+  
+  if (!account) throw new Error(`Account "${alias}" not found`);
+  if (account.type !== "pkp") throw new Error(`Account "${alias}" is not a PKP account`);
+  if (!account.pkp) throw new Error(`Account "${alias}" has no PKP info`);
+  
+  account.pkp.constraints = constraints;
+  await writeAccounts(accounts);
+}
+
+/**
+ * Update the Lit Action CID for a PKP account
+ */
+export async function updatePKPLitAction(
+  alias: string,
+  litActionCid: string
+): Promise<void> {
+  const accounts = await readAccounts();
+  const account = accounts.find((a) => a.alias === alias);
+  
+  if (!account) throw new Error(`Account "${alias}" not found`);
+  if (account.type !== "pkp") throw new Error(`Account "${alias}" is not a PKP account`);
+  if (!account.pkp) throw new Error(`Account "${alias}" has no PKP info`);
+  
+  account.pkp.litActionCid = litActionCid;
+  await writeAccounts(accounts);
+}
+
+/**
+ * Check if an account is a PKP account
+ */
+export async function isPKPAccount(aliasOrAgentId: string): Promise<boolean> {
+  const accounts = await readAccounts();
+  const account = accounts.find(
+    (a) => a.alias === aliasOrAgentId || a.agentId === aliasOrAgentId
+  );
+  return account?.type === "pkp";
+}
+
+/**
+ * List all PKP accounts
+ */
+export async function listPKPAccounts(): Promise<
+  Array<Omit<HlAccount, "encryptedKey">>
+> {
+  const accounts = await readAccounts();
+  return accounts
+    .filter((a) => a.type === "pkp")
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    .map(({ encryptedKey, ...rest }) => rest);
 }
 
 /**

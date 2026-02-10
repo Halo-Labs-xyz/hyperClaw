@@ -45,7 +45,12 @@ import { getAgent, updateAgent } from "@/lib/store";
 export async function POST(request: Request) {
   if (!verifyApiKey(request)) return unauthorizedResponse();
   try {
-    const body = await request.json();
+    let body: Record<string, unknown>;
+    try {
+      body = await request.json();
+    } catch {
+      return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
+    }
     const action = body.action || "status";
 
     switch (action) {
@@ -142,20 +147,36 @@ export async function POST(request: Request) {
             { status: 400 }
           );
         }
-        const balance = await getAgentHlBalance(body.agentId);
-        if (!balance) {
+        try {
+          const balance = await getAgentHlBalance(body.agentId);
+          if (!balance) {
+            return NextResponse.json({
+              agentId: body.agentId,
+              hasWallet: false,
+              network: isTestnet() ? "testnet" : "mainnet",
+            });
+          }
           return NextResponse.json({
             agentId: body.agentId,
-            hasWallet: false,
+            hasWallet: true,
+            ...balance,
+            network: isTestnet() ? "testnet" : "mainnet",
+          });
+        } catch (balError) {
+          const msg = balError instanceof Error ? balError.message : String(balError);
+          console.warn(`[Fund] agent-balance for ${body.agentId} failed: ${msg.slice(0, 100)}`);
+          const account = await getAccountForAgent(body.agentId);
+          return NextResponse.json({
+            agentId: body.agentId,
+            hasWallet: !!account,
+            address: account?.address || null,
+            accountValue: "0",
+            availableBalance: "0",
+            marginUsed: "0",
+            stale: true,
             network: isTestnet() ? "testnet" : "mainnet",
           });
         }
-        return NextResponse.json({
-          agentId: body.agentId,
-          hasWallet: true,
-          ...balance,
-          network: isTestnet() ? "testnet" : "mainnet",
-        });
       }
 
       // ========== Agent HL state with positions ==========
@@ -166,20 +187,42 @@ export async function POST(request: Request) {
             { status: 400 }
           );
         }
-        const state = await getAgentHlState(body.agentId);
-        if (!state) {
+        try {
+          const state = await getAgentHlState(body.agentId);
+          if (!state) {
+            return NextResponse.json({
+              agentId: body.agentId,
+              hasWallet: false,
+              network: isTestnet() ? "testnet" : "mainnet",
+            });
+          }
           return NextResponse.json({
             agentId: body.agentId,
-            hasWallet: false,
+            hasWallet: true,
+            ...state,
+            network: isTestnet() ? "testnet" : "mainnet",
+          });
+        } catch (stateError) {
+          // Return partial data on timeout instead of 500
+          const msg = stateError instanceof Error ? stateError.message : String(stateError);
+          console.warn(`[Fund] agent-state for ${body.agentId} failed: ${msg.slice(0, 100)}`);
+          
+          // Try to at least get wallet address
+          const account = await getAccountForAgent(body.agentId);
+          return NextResponse.json({
+            agentId: body.agentId,
+            hasWallet: !!account,
+            address: account?.address || null,
+            accountValue: "0",
+            availableBalance: "0",
+            marginUsed: "0",
+            totalUnrealizedPnl: 0,
+            positions: [],
+            stale: true,
+            error: msg.includes("timeout") ? "API timeout - data may be stale" : msg.slice(0, 100),
             network: isTestnet() ? "testnet" : "mainnet",
           });
         }
-        return NextResponse.json({
-          agentId: body.agentId,
-          hasWallet: true,
-          ...state,
-          network: isTestnet() ? "testnet" : "mainnet",
-        });
       }
 
       // ========== HL native vault deposit ==========
@@ -233,14 +276,28 @@ export async function POST(request: Request) {
             { status: 400 }
           );
         }
-        const state = await getAccountState(user);
-        return NextResponse.json({
-          user,
-          accountValue: state.marginSummary?.accountValue || "0",
-          availableBalance: state.withdrawable || "0",
-          marginUsed: state.marginSummary?.totalMarginUsed || "0",
-          network: isTestnet() ? "testnet" : "mainnet",
-        });
+        try {
+          const state = await getAccountState(user);
+          return NextResponse.json({
+            user,
+            accountValue: state.marginSummary?.accountValue || "0",
+            availableBalance: state.withdrawable || "0",
+            marginUsed: state.marginSummary?.totalMarginUsed || "0",
+            network: isTestnet() ? "testnet" : "mainnet",
+          });
+        } catch (balError) {
+          const msg = balError instanceof Error ? balError.message : String(balError);
+          console.warn(`[Fund] balance for ${user} failed: ${msg.slice(0, 100)}`);
+          return NextResponse.json({
+            user,
+            accountValue: "0",
+            availableBalance: "0",
+            marginUsed: "0",
+            stale: true,
+            error: msg.includes("timeout") ? "API timeout" : msg.slice(0, 100),
+            network: isTestnet() ? "testnet" : "mainnet",
+          });
+        }
       }
 
       // ========== System status ==========
@@ -270,9 +327,14 @@ export async function POST(request: Request) {
           );
         }
         
-        // Check if agent has wallet with balance
-        const agentBalance = await getAgentHlBalance(body.agentId);
-        if (!agentBalance || parseFloat(agentBalance.accountValue || "0") < 1) {
+        // Check if agent has wallet with balance (allow activation even if API times out)
+        let agentBalance;
+        try {
+          agentBalance = await getAgentHlBalance(body.agentId);
+        } catch {
+          console.warn(`[Fund] Balance check for ${body.agentId} timed out, proceeding with activation`);
+        }
+        if (agentBalance && parseFloat(agentBalance.accountValue || "0") < 1) {
           return NextResponse.json(
             { error: "Agent needs at least $1 balance to activate. Fund the agent first." },
             { status: 400 }
@@ -304,9 +366,10 @@ export async function POST(request: Request) {
         );
     }
   } catch (error) {
-    console.error("Fund API error:", error);
+    const msg = error instanceof Error ? error.message : String(error);
+    console.error(`[Fund] API error: ${msg.slice(0, 200)}`);
     return NextResponse.json(
-      { error: error instanceof Error ? error.message : "Fund operation failed" },
+      { error: msg.includes("timeout") ? "Hyperliquid API timeout" : "Fund operation failed" },
       { status: 500 }
     );
   }

@@ -72,6 +72,8 @@ export default function AgentDetailPage() {
     availableBalance?: string;
     marginUsed?: string;
     network?: string;
+    stale?: boolean;
+    error?: string;
   } | null>(null);
 
   const [hlPositions, setHlPositions] = useState<{
@@ -88,6 +90,7 @@ export default function AgentDetailPage() {
   }[]>([]);
   
   const [totalUnrealizedPnl, setTotalUnrealizedPnl] = useState<number>(0);
+  const [hlFetchErrors, setHlFetchErrors] = useState(0); // Track consecutive HL fetch errors
 
   // Agent tick (manual trigger)
   const [ticking, setTicking] = useState(false);
@@ -188,21 +191,28 @@ export default function AgentDetailPage() {
         setLifecycle(data.lifecycle);
       }
 
-      // Also fetch HL balance and positions
+      // Also fetch HL balance and positions — abort after 15s to not stall the UI
       try {
         const hlRes = await fetch("/api/fund", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ action: "agent-state", agentId }),
+          signal: AbortSignal.timeout(15000),
         });
         const hlData = await hlRes.json();
         setHlBalance(hlData);
-        if (hlData.positions) {
+        if (hlData.positions && hlData.positions.length > 0) {
           setHlPositions(hlData.positions);
           setTotalUnrealizedPnl(hlData.totalUnrealizedPnl || 0);
         }
+        // Track stale data / errors from the backend
+        if (hlData.stale) {
+          setHlFetchErrors(prev => prev + 1);
+        } else {
+          setHlFetchErrors(0); // Reset on success
+        }
       } catch {
-        // HL state fetch is non-critical
+        setHlFetchErrors(prev => prev + 1);
       }
 
       // Also fetch lifecycle summary for runner status
@@ -241,14 +251,21 @@ export default function AgentDetailPage() {
 
   useEffect(() => {
     fetchAgent();
-    // Auto-refresh positions every 10 seconds when agent is active
+    // Adaptive polling: slow down when HL API is having issues
+    // Base: 15s active, 30s paused. Backoff: up to 60s on errors.
+    const getInterval = () => {
+      const base = agent?.status === "active" ? 15000 : 30000;
+      if (hlFetchErrors >= 5) return 60000; // 1 min during sustained errors
+      if (hlFetchErrors >= 2) return 30000; // 30s after a couple failures
+      return base;
+    };
+
     const refreshInterval = setInterval(() => {
-      if (agent?.status === "active") {
-        fetchAgent();
-      }
-    }, 10000);
+      fetchAgent();
+    }, getInterval());
     return () => clearInterval(refreshInterval);
-  }, [fetchAgent, agent?.status]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [fetchAgent, agent?.status, hlFetchErrors]);
 
   // Sync settings form when agent loads
   useEffect(() => {
@@ -939,11 +956,11 @@ export default function AgentDetailPage() {
             },
             { label: "Vault TVL", value: `$${agent.vaultTvlUsd.toLocaleString()}`, color: "text-foreground" },
             {
-              label: "HL Balance",
+              label: hlBalance?.stale ? "HL Balance (stale)" : "HL Balance",
               value: hlBalance?.hasWallet
                 ? `$${parseFloat(hlBalance.accountValue || "0").toFixed(2)}`
                 : "No wallet",
-              color: hlBalance?.hasWallet ? "text-accent" : "text-dim",
+              color: hlBalance?.stale ? "text-warning" : hlBalance?.hasWallet ? "text-accent" : "text-dim",
             },
             {
               label: "Active Positions",
@@ -985,6 +1002,17 @@ export default function AgentDetailPage() {
         <div className="animate-fade-in-up">
           {tab === "overview" && (
             <div className="space-y-4">
+              {/* Stale data warning */}
+              {hlBalance?.stale && (
+                <div className="p-3 rounded-xl bg-warning/5 border border-warning/20 flex items-center gap-3">
+                  <div className="w-2 h-2 rounded-full bg-warning shrink-0" />
+                  <p className="text-xs text-warning">
+                    Hyperliquid API is slow — balance and position data may be stale.
+                    {hlBalance.error && <span className="text-dim ml-1">({hlBalance.error})</span>}
+                  </p>
+                </div>
+              )}
+
               {/* Active Positions */}
               {hlPositions.length > 0 && (
                 <div className="card rounded-2xl p-6 md:p-8">

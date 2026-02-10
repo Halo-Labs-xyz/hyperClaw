@@ -14,4 +14,13 @@ export default withSerwist({
       "api.nadapp.net",
     ],
   },
+  webpack: (config) => {
+    // Silence MetaMask SDK warning about @react-native-async-storage/async-storage
+    // This module is only needed in React Native and safely ignored in web builds
+    config.resolve.fallback = {
+      ...config.resolve.fallback,
+      "@react-native-async-storage/async-storage": false,
+    };
+    return config;
+  },
 });

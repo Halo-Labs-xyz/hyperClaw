@@ -31,6 +31,9 @@ import { randomBytes } from "crypto";
 const runnerStates = new Map<string, AgentRunnerState>();
 const runnerIntervals = new Map<string, ReturnType<typeof setInterval>>();
 
+// Track consecutive failures per agent for adaptive backoff
+const consecutiveFailures = new Map<string, number>();
+
 export function getRunnerState(agentId: string): AgentRunnerState | null {
   return runnerStates.get(agentId) || null;
 }
@@ -68,12 +71,25 @@ export async function startAgent(
   };
 
   runnerStates.set(agentId, state);
+  consecutiveFailures.set(agentId, 0);
 
-  // Run first tick immediately
-  executeTick(agentId).catch(() => {});
+  // Stagger first tick by a random 0-5s to avoid all agents hitting API at once
+  const stagger = Math.random() * 5000;
+  setTimeout(() => {
+    executeTick(agentId).catch(() => {});
+  }, stagger);
 
-  // Set up interval
+  // Set up interval with jitter to prevent thundering herd
   const interval = setInterval(() => {
+    const failures = consecutiveFailures.get(agentId) || 0;
+    // Adaptive backoff: if many consecutive failures, skip some ticks
+    if (failures >= 3) {
+      const skipChance = Math.min(0.8, failures * 0.15);
+      if (Math.random() < skipChance) {
+        console.log(`[Agent ${agentId}] Skipping tick due to ${failures} consecutive failures (backoff)`);
+        return;
+      }
+    }
     executeTick(agentId).catch(() => {});
   }, tickInterval);
 
@@ -106,14 +122,20 @@ export async function executeTick(agentId: string): Promise<TradeLog> {
 
   const state = runnerStates.get(agentId);
 
-  // Resolve agent's exchange client so trades use the agent's HL wallet
-  const agentPk = await getPrivateKeyForAgent(agentId);
-  const agentExchange = agentPk ? getExchangeClientForAgent(agentPk) : null;
-
-  // Resolve the canonical HL address from account-manager (may differ from stale agent.hlAddress)
-  const { getAccountForAgent } = await import("./account-manager");
+  // Detect signing method: PKP or traditional
+  const { getAccountForAgent, isPKPAccount } = await import("./account-manager");
   const agentAccount = await getAccountForAgent(agentId);
   const hlAddress = agentAccount?.address ?? agent.hlAddress;
+  
+  const isPKP = agentAccount ? await isPKPAccount(agentId) : false;
+  const signingMethod = isPKP ? "pkp" : "traditional";
+
+  // For traditional accounts, get exchange client
+  let agentExchange: ReturnType<typeof getExchangeClientForAgent> | null = null;
+  if (!isPKP) {
+    const agentPk = await getPrivateKeyForAgent(agentId);
+    agentExchange = agentPk ? getExchangeClientForAgent(agentPk) : null;
+  }
 
   // Sync agent.hlAddress if it drifted
   if (agentAccount && agent.hlAddress !== agentAccount.address) {
@@ -121,17 +143,71 @@ export async function executeTick(agentId: string): Promise<TradeLog> {
     await updateAgent(agentId, { hlAddress: agentAccount.address });
   }
 
-  const ex = agentExchange ?? undefined;
-  if (!ex) {
-    console.warn(`[Agent ${agentId}] No HL key found; tick will analyze but not execute orders`);
+  // Check if agent can execute trades
+  const canExecute = isPKP || agentExchange;
+  if (!canExecute && !agentAccount) {
+    console.warn(`[Agent ${agentId}] No wallet found; tick will analyze but not execute orders`);
+  } else if (isPKP) {
+    console.log(`[Agent ${agentId}] Using PKP signing for trade execution`);
   }
+
+  const ex = agentExchange ?? undefined;
 
   try {
     // 1. Fetch enriched market data (includes funding, OI, volume)
-    const markets = await getEnrichedMarketData();
+    let markets;
+    try {
+      markets = await getEnrichedMarketData();
+    } catch (marketError) {
+      const msg = marketError instanceof Error ? marketError.message : String(marketError);
+      console.warn(`[Agent ${agentId}] Market data fetch failed: ${msg.slice(0, 100)}`);
+      // Can't make decisions without market data — record and bail gracefully
+      const failCount = (consecutiveFailures.get(agentId) || 0) + 1;
+      consecutiveFailures.set(agentId, failCount);
+      if (state) {
+        state.errors.push({ timestamp: Date.now(), message: `Market data: ${msg.slice(0, 100)}` });
+        if (state.errors.length > 50) state.errors = state.errors.slice(-50);
+        state.lastTickAt = Date.now();
+        state.nextTickAt = Date.now() + state.intervalMs;
+      }
+      // Return a "hold" log instead of throwing
+      const holdLog: TradeLog = {
+        id: randomBytes(8).toString("hex"),
+        agentId,
+        timestamp: Date.now(),
+        decision: { action: "hold", asset: "-", size: 0, leverage: 1, confidence: 0, reasoning: `Market data unavailable: ${msg.slice(0, 80)}` },
+        executed: false,
+      };
+      await appendTradeLog(holdLog);
+      return holdLog;
+    }
 
     // 2. Fetch current positions (agent's actual funded wallet)
-    const accountState = await getAccountState(hlAddress);
+    let accountState;
+    try {
+      accountState = await getAccountState(hlAddress);
+    } catch (accError) {
+      const msg = accError instanceof Error ? accError.message : String(accError);
+      console.warn(`[Agent ${agentId}] Account state fetch failed: ${msg.slice(0, 100)}`);
+      const failCount = (consecutiveFailures.get(agentId) || 0) + 1;
+      consecutiveFailures.set(agentId, failCount);
+      if (state) {
+        state.errors.push({ timestamp: Date.now(), message: `Account state: ${msg.slice(0, 100)}` });
+        if (state.errors.length > 50) state.errors = state.errors.slice(-50);
+        state.lastTickAt = Date.now();
+        state.nextTickAt = Date.now() + state.intervalMs;
+      }
+      const holdLog: TradeLog = {
+        id: randomBytes(8).toString("hex"),
+        agentId,
+        timestamp: Date.now(),
+        decision: { action: "hold", asset: "-", size: 0, leverage: 1, confidence: 0, reasoning: `Account data unavailable: ${msg.slice(0, 80)}` },
+        executed: false,
+      };
+      await appendTradeLog(holdLog);
+      return holdLog;
+    }
+
     const positions = (accountState.assetPositions || [])
       .filter((p) => parseFloat(p.position.szi) !== 0)
       .map((p) => ({
@@ -197,8 +273,11 @@ export async function executeTick(agentId: string): Promise<TradeLog> {
         const assetIndex = await getAssetIndex(decision.asset);
         console.log(`[Agent ${agentId}] Asset index for ${decision.asset}: ${assetIndex}`);
 
-        // Set leverage first (must use agent's exchange client)
-        if (ex) {
+        // Set leverage first
+        if (isPKP) {
+          // TODO: Implement PKP leverage update via Lit Action
+          console.log(`[Agent ${agentId}] PKP leverage update not yet implemented, using default`);
+        } else if (ex) {
           await updateLeverage(assetIndex, decision.leverage, true, ex);
           console.log(`[Agent ${agentId}] Leverage set to ${decision.leverage}x`);
         } else {
@@ -235,7 +314,13 @@ export async function executeTick(agentId: string): Promise<TradeLog> {
             slippagePercent: 1,
           };
 
-          if (ex) {
+          // Execute order based on signing method
+          if (isPKP) {
+            console.log(`[Agent ${agentId}] Executing PKP-signed order:`, JSON.stringify(entryParams));
+            const { executeOrderWithPKP } = await import("./lit-signing");
+            await executeOrderWithPKP(agentId, entryParams);
+            console.log(`[Agent ${agentId}] PKP order executed successfully!`);
+          } else if (ex) {
             console.log(`[Agent ${agentId}] Executing order:`, JSON.stringify(entryParams));
             await executeOrder(entryParams, ex);
             console.log(`[Agent ${agentId}] Order executed successfully!`);
@@ -252,10 +337,10 @@ export async function executeTick(agentId: string): Promise<TradeLog> {
           };
 
           // Place stop-loss if specified and not closing
-          if (ex && decision.stopLoss && decision.action !== "close") {
+          if ((isPKP || ex) && decision.stopLoss && decision.action !== "close") {
             try {
               const slSide = decision.action === "long" ? "sell" : "buy";
-              await executeOrder({
+              const slParams: PlaceOrderParams = {
                 coin: decision.asset,
                 side: slSide,
                 size: orderSize,
@@ -264,17 +349,24 @@ export async function executeTick(agentId: string): Promise<TradeLog> {
                 triggerPrice: decision.stopLoss,
                 isTpsl: true,
                 reduceOnly: true,
-              }, ex);
+              };
+              
+              if (isPKP) {
+                const { executeOrderWithPKP } = await import("./lit-signing");
+                await executeOrderWithPKP(agentId, slParams);
+              } else {
+                await executeOrder(slParams, ex);
+              }
             } catch (slError) {
               console.error(`[Agent ${agentId}] Stop-loss placement failed:`, slError);
             }
           }
 
           // Place take-profit if specified and not closing
-          if (ex && decision.takeProfit && decision.action !== "close") {
+          if ((isPKP || ex) && decision.takeProfit && decision.action !== "close") {
             try {
               const tpSide = decision.action === "long" ? "sell" : "buy";
-              await executeOrder({
+              const tpParams: PlaceOrderParams = {
                 coin: decision.asset,
                 side: tpSide,
                 size: orderSize,
@@ -283,7 +375,14 @@ export async function executeTick(agentId: string): Promise<TradeLog> {
                 triggerPrice: decision.takeProfit,
                 isTpsl: true,
                 reduceOnly: true,
-              }, ex);
+              };
+              
+              if (isPKP) {
+                const { executeOrderWithPKP } = await import("./lit-signing");
+                await executeOrderWithPKP(agentId, tpParams);
+              } else {
+                await executeOrder(tpParams, ex);
+              }
             } catch (tpError) {
               console.error(`[Agent ${agentId}] Take-profit placement failed:`, tpError);
             }
@@ -327,15 +426,29 @@ export async function executeTick(agentId: string): Promise<TradeLog> {
       state.tickCount++;
     }
 
+    // Reset consecutive failures on success
+    consecutiveFailures.set(agentId, 0);
+
     return tradeLog;
   } catch (error) {
-    console.error(`[Agent ${agentId}] Tick failed:`, error);
+    // Log concisely — avoid dumping massive stack traces
+    const msg = error instanceof Error ? error.message : String(error);
+    const isTimeout = msg.toLowerCase().includes("timeout");
+    if (isTimeout) {
+      console.warn(`[Agent ${agentId}] Tick failed (timeout): ${msg.slice(0, 120)}`);
+    } else {
+      console.error(`[Agent ${agentId}] Tick failed: ${msg.slice(0, 200)}`);
+    }
+
+    const failCount = (consecutiveFailures.get(agentId) || 0) + 1;
+    consecutiveFailures.set(agentId, failCount);
 
     if (state) {
       state.errors.push({
         timestamp: Date.now(),
-        message: error instanceof Error ? error.message : "Tick failed",
+        message: msg.slice(0, 200),
       });
+      if (state.errors.length > 50) state.errors = state.errors.slice(-50);
       state.lastTickAt = Date.now();
       state.nextTickAt = Date.now() + (state?.intervalMs ?? 60000);
     }

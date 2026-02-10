@@ -59,7 +59,8 @@ export async function getHclawState(
   network: "mainnet" | "testnet" = "mainnet"
 ): Promise<HclawState | null> {
   const tokenAddress = process.env.NEXT_PUBLIC_HCLAW_TOKEN_ADDRESS as Address | undefined;
-  if (!tokenAddress) return null;
+  // Skip if not configured or still a placeholder
+  if (!tokenAddress || !tokenAddress.startsWith("0x") || tokenAddress.length !== 42) return null;
 
   const config = NADFUN_CONFIG[network];
 

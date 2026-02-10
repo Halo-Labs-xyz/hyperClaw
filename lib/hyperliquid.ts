@@ -25,6 +25,122 @@ const DEFAULT_ORDER_CONFIG: OrderConfig = {
   defaultTif: "Gtc" as TimeInForce,
 };
 
+// ============================================
+// Retry / Back-off Utility
+// ============================================
+
+interface RetryOptions {
+  maxRetries?: number;
+  baseDelayMs?: number;
+  maxDelayMs?: number;
+  label?: string;
+}
+
+/**
+ * Execute an async function with exponential backoff retry.
+ * Retries on timeout errors and transient HTTP errors.
+ * Only logs on first failure and final give-up to avoid log flooding.
+ */
+async function withRetry<T>(
+  fn: () => Promise<T>,
+  opts: RetryOptions = {}
+): Promise<T> {
+  const { maxRetries = 2, baseDelayMs = 800, maxDelayMs = 5000, label = "API call" } = opts;
+
+  let lastError: unknown;
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    try {
+      return await fn();
+    } catch (error: unknown) {
+      lastError = error;
+      const isRetryable = isRetryableError(error);
+      if (!isRetryable || attempt === maxRetries) {
+        if (attempt > 0) {
+          console.warn(`[HL] ${label} failed after ${attempt + 1} attempts: ${getErrorMessage(error)}`);
+        }
+        throw error;
+      }
+      const delay = Math.min(baseDelayMs * Math.pow(2, attempt) + Math.random() * 500, maxDelayMs);
+      // Only log the first retry to keep logs clean
+      if (attempt === 0) {
+        console.warn(`[HL] ${label} timed out, retrying (up to ${maxRetries} retries)...`);
+      }
+      await sleep(delay);
+    }
+  }
+  throw lastError;
+}
+
+function isRetryableError(error: unknown): boolean {
+  if (!error) return false;
+  const msg = getErrorMessage(error).toLowerCase();
+  // Retry on timeouts, network errors, 429 rate limits, 5xx server errors
+  return (
+    msg.includes("timeout") ||
+    msg.includes("aborted") ||
+    msg.includes("econnreset") ||
+    msg.includes("econnrefused") ||
+    msg.includes("enotfound") ||
+    msg.includes("fetch failed") ||
+    msg.includes("network") ||
+    msg.includes("429") ||
+    msg.includes("502") ||
+    msg.includes("503") ||
+    msg.includes("504")
+  );
+}
+
+function getErrorMessage(error: unknown): string {
+  if (error instanceof Error) return error.message;
+  return String(error);
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+// ============================================
+// In-flight Request Deduplication
+// ============================================
+// Prevents thundering-herd: if 5 callers ask for clearinghouseState("0xABC")
+// at the same time, only 1 real API call is made and all 5 share the result.
+
+const inflightRequests = new Map<string, Promise<unknown>>();
+
+async function dedup<T>(key: string, fn: () => Promise<T>): Promise<T> {
+  const existing = inflightRequests.get(key);
+  if (existing) return existing as Promise<T>;
+
+  const promise = fn().finally(() => {
+    inflightRequests.delete(key);
+  });
+  inflightRequests.set(key, promise);
+  return promise;
+}
+
+// ============================================
+// Negative Cache (failure cooldown)
+// ============================================
+// After all retries fail for a given key, remember the failure for COOLDOWN_MS
+// so subsequent requests get an immediate rejection instead of waiting 30s again.
+
+const FAILURE_COOLDOWN_MS = 30_000; // 30s cooldown after a timeout failure
+const failureCache = new Map<string, { error: Error; expiry: number }>();
+
+function checkFailureCache(key: string): Error | null {
+  const entry = failureCache.get(key);
+  if (!entry) return null;
+  if (Date.now() > entry.expiry) {
+    failureCache.delete(key);
+    return null;
+  }
+  return entry.error;
+}
+
+function setFailureCache(key: string, error: Error): void {
+  failureCache.set(key, { error, expiry: Date.now() + FAILURE_COOLDOWN_MS });
+}
+
 /**
  * Format a price for Hyperliquid API (max 5 significant figures, no trailing zeros).
  */
@@ -68,7 +184,10 @@ onNetworkChange(() => {
 
 export function getInfoClient(): InfoClient {
   if (!infoClient) {
-    const transport = new HttpTransport({ isTestnet: isHlTestnet() });
+    const transport = new HttpTransport({ 
+      isTestnet: isHlTestnet(),
+      timeout: 10000, // 10 second timeout — fast-fail for dashboard, retries handle transients
+    });
     infoClient = new InfoClient({ transport });
   }
   return infoClient;
@@ -79,7 +198,10 @@ export function getExchangeClient(): ExchangeClient {
     const pk = process.env.HYPERLIQUID_PRIVATE_KEY;
     if (!pk) throw new Error("HYPERLIQUID_PRIVATE_KEY not set");
     const wallet = privateKeyToAccount(pk as `0x${string}`);
-    const transport = new HttpTransport({ isTestnet: isHlTestnet() });
+    const transport = new HttpTransport({ 
+      isTestnet: isHlTestnet(),
+      timeout: 15000, // 15 second timeout for exchange operations
+    });
     exchangeClient = new ExchangeClient({ transport, wallet });
   }
   return exchangeClient;
@@ -93,7 +215,10 @@ export function getExchangeClientForAgent(
   let client = agentExchangeClients.get(cacheKey);
   if (!client) {
     const wallet = privateKeyToAccount(privateKey as `0x${string}`);
-    const transport = new HttpTransport({ isTestnet: isHlTestnet() });
+    const transport = new HttpTransport({ 
+      isTestnet: isHlTestnet(),
+      timeout: 30000, // 30 second timeout
+    });
     client = new ExchangeClient({ transport, wallet });
     agentExchangeClients.set(cacheKey, client);
   }
@@ -154,12 +279,15 @@ export function getApiUrl(): string {
 
 export async function getAllMids(): Promise<Record<string, string>> {
   const info = getInfoClient();
-  return await info.allMids();
+  return await withRetry(() => info.allMids(), { label: "allMids" });
 }
 
 export async function getMarketData(): Promise<MarketData[]> {
   const info = getInfoClient();
-  const [mids, meta] = await Promise.all([info.allMids(), info.meta()]);
+  const [mids, meta] = await Promise.all([
+    withRetry(() => info.allMids(), { label: "allMids" }),
+    withRetry(() => info.meta(), { label: "meta" }),
+  ]);
 
   return meta.universe.map((asset) => ({
     coin: asset.name,
@@ -174,9 +302,9 @@ export async function getMarketData(): Promise<MarketData[]> {
 export async function getEnrichedMarketData(): Promise<MarketData[]> {
   const info = getInfoClient();
   const [mids, meta, assetCtxs] = await Promise.all([
-    info.allMids(),
-    info.meta(),
-    info.metaAndAssetCtxs(),
+    withRetry(() => info.allMids(), { label: "allMids" }),
+    withRetry(() => info.meta(), { label: "meta" }),
+    withRetry(() => info.metaAndAssetCtxs(), { label: "metaAndAssetCtxs" }),
   ]);
 
   const ctxs = assetCtxs[1]; // second element is the asset contexts array
@@ -196,12 +324,12 @@ export async function getEnrichedMarketData(): Promise<MarketData[]> {
 
 export async function getL2Book(coin: string) {
   const info = getInfoClient();
-  return await info.l2Book({ coin, nSigFigs: 5 });
+  return await withRetry(() => info.l2Book({ coin, nSigFigs: 5 }), { label: `l2Book(${coin})` });
 }
 
 export async function getFundingHistory(coin: string, startTime: number) {
   const info = getInfoClient();
-  return await info.fundingHistory({ coin, startTime });
+  return await withRetry(() => info.fundingHistory({ coin, startTime }), { label: `fundingHistory(${coin})` });
 }
 
 /**
@@ -227,12 +355,15 @@ export async function getCandleData(
     startTime = endTime - (intervalMs * 100);
   }
   
-  return await info.candleSnapshot({
-    coin,
-    interval,
-    startTime: startTime,
-    endTime: endTime || Date.now(),
-  });
+  return await withRetry(
+    () => info.candleSnapshot({
+      coin,
+      interval,
+      startTime: startTime,
+      endTime: endTime || Date.now(),
+    }),
+    { label: `candleSnapshot(${coin})` }
+  );
 }
 
 /**
@@ -293,18 +424,44 @@ export async function getHistoricalPrices(
 // ============================================
 
 export async function getAccountState(user: Address) {
-  const info = getInfoClient();
-  return await info.clearinghouseState({ user });
+  const cacheKey = `clearinghouseState:${user}`;
+  // Fast-reject if this address recently failed — don't wait 30s again
+  const cached = checkFailureCache(cacheKey);
+  if (cached) throw cached;
+
+  return dedup(cacheKey, async () => {
+    const info = getInfoClient();
+    try {
+      return await withRetry(
+        () => info.clearinghouseState({ user }),
+        { label: `clearinghouseState(${user.slice(0, 8)})` }
+      );
+    } catch (error) {
+      // Cache the failure so next request within 30s returns immediately
+      if (error instanceof Error) setFailureCache(cacheKey, error);
+      throw error;
+    }
+  });
 }
 
 export async function getOpenOrders(user: Address) {
-  const info = getInfoClient();
-  return await info.openOrders({ user });
+  return dedup(`openOrders:${user}`, async () => {
+    const info = getInfoClient();
+    return await withRetry(
+      () => info.openOrders({ user }),
+      { label: `openOrders(${user.slice(0, 8)})` }
+    );
+  });
 }
 
 export async function getUserFills(user: Address) {
-  const info = getInfoClient();
-  return await info.userFills({ user });
+  return dedup(`userFills:${user}`, async () => {
+    const info = getInfoClient();
+    return await withRetry(
+      () => info.userFills({ user }),
+      { label: `userFills(${user.slice(0, 8)})` }
+    );
+  });
 }
 
 export async function getUserFillsByTime(
@@ -313,16 +470,18 @@ export async function getUserFillsByTime(
   endTime?: number
 ) {
   const info = getInfoClient();
-  return await info.userFillsByTime({
-    user,
-    startTime,
-    endTime,
-  });
+  return await withRetry(
+    () => info.userFillsByTime({ user, startTime, endTime }),
+    { label: `userFillsByTime(${user.slice(0, 8)})` }
+  );
 }
 
 export async function getSpotState(user: Address) {
   const info = getInfoClient();
-  return await info.spotClearinghouseState({ user });
+  return await withRetry(
+    () => info.spotClearinghouseState({ user }),
+    { label: `spotState(${user.slice(0, 8)})` }
+  );
 }
 
 // ============================================
@@ -337,8 +496,14 @@ export async function placeOrder(params: {
   reduceOnly: boolean;
   orderType: "Gtc" | "Ioc" | "Alo";
   vaultAddress?: Address;
+  builder?: { b: string; f: number };
 }, exchange?: ExchangeClient) {
   const exchangeClient = exchange ?? getExchangeClient();
+  
+  // Add builder code if available
+  const { getBuilderParam } = await import("./builder");
+  const builderParam = params.builder ?? getBuilderParam();
+  
   return await exchangeClient.order({
     orders: [
       {
@@ -352,6 +517,7 @@ export async function placeOrder(params: {
     ],
     grouping: "na",
     ...(params.vaultAddress ? { vaultAddress: params.vaultAddress } : {}),
+    ...(builderParam ? { builder: builderParam } : {}),
   });
 }
 
@@ -413,6 +579,7 @@ export async function placeMarketOrder(params: {
   slippagePercent?: number;
   reduceOnly?: boolean;
   vaultAddress?: Address;
+  builder?: { b: string; f: number };
 }, exchange?: ExchangeClient) {
   const info = getInfoClient();
   const meta = await info.meta();
@@ -445,6 +612,7 @@ export async function placeMarketOrder(params: {
     reduceOnly: params.reduceOnly ?? false,
     orderType: "Ioc",
     vaultAddress: params.vaultAddress,
+    builder: params.builder,
   }, exchange);
 }
 
@@ -456,6 +624,7 @@ export async function placeStopLossOrder(params: {
   triggerPrice: string;
   isTpsl?: boolean;
   vaultAddress?: Address;
+  builder?: { b: string; f: number };
 }, exchange?: ExchangeClient) {
   const exchangeClient = exchange ?? getExchangeClient();
   const info = getInfoClient();
@@ -464,6 +633,10 @@ export async function placeStopLossOrder(params: {
   const formattedSize = parseFloat(params.size).toFixed(szDecimals);
   const formattedPrice = formatHlPrice(parseFloat(params.price));
   const formattedTrigger = formatHlPrice(parseFloat(params.triggerPrice));
+  
+  // Add builder code if available
+  const { getBuilderParam } = await import("./builder");
+  const builderParam = params.builder ?? getBuilderParam();
   
   return await exchangeClient.order({
     orders: [
@@ -484,6 +657,7 @@ export async function placeStopLossOrder(params: {
     ],
     grouping: params.isTpsl ? "positionTpsl" : "na",
     ...(params.vaultAddress ? { vaultAddress: params.vaultAddress } : {}),
+    ...(builderParam ? { builder: builderParam } : {}),
   });
 }
 
@@ -495,6 +669,7 @@ export async function placeTakeProfitOrder(params: {
   triggerPrice: string;
   isTpsl?: boolean;
   vaultAddress?: Address;
+  builder?: { b: string; f: number };
 }, exchange?: ExchangeClient) {
   const exchangeClient = exchange ?? getExchangeClient();
   const info = getInfoClient();
@@ -503,6 +678,10 @@ export async function placeTakeProfitOrder(params: {
   const formattedSize = parseFloat(params.size).toFixed(szDecimals);
   const formattedPrice = formatHlPrice(parseFloat(params.price));
   const formattedTrigger = formatHlPrice(parseFloat(params.triggerPrice));
+  
+  // Add builder code if available
+  const { getBuilderParam } = await import("./builder");
+  const builderParam = params.builder ?? getBuilderParam();
   
   return await exchangeClient.order({
     orders: [
@@ -523,6 +702,7 @@ export async function placeTakeProfitOrder(params: {
     ],
     grouping: params.isTpsl ? "positionTpsl" : "na",
     ...(params.vaultAddress ? { vaultAddress: params.vaultAddress } : {}),
+    ...(builderParam ? { builder: builderParam } : {}),
   });
 }
 
@@ -538,6 +718,10 @@ export async function executeOrder(
   const isBuy =
     params.side === "buy" || params.side === "long";
 
+  // Get builder param if available
+  const { getBuilderParam } = await import("./builder");
+  const builderParam = getBuilderParam();
+
   switch (params.orderType) {
     case "market":
       return placeMarketOrder({
@@ -547,6 +731,7 @@ export async function executeOrder(
         slippagePercent: params.slippagePercent,
         reduceOnly: params.reduceOnly,
         vaultAddress: params.vaultAddress,
+        builder: builderParam,
       }, exchange);
 
     case "limit":
@@ -559,6 +744,7 @@ export async function executeOrder(
         reduceOnly: params.reduceOnly ?? false,
         orderType: params.tif ?? DEFAULT_ORDER_CONFIG.defaultTif,
         vaultAddress: params.vaultAddress,
+        builder: builderParam,
       }, exchange);
 
     case "stop-loss":
@@ -572,6 +758,7 @@ export async function executeOrder(
         triggerPrice: params.triggerPrice.toString(),
         isTpsl: params.isTpsl,
         vaultAddress: params.vaultAddress,
+        builder: builderParam,
       }, exchange);
 
     case "take-profit":
@@ -585,6 +772,7 @@ export async function executeOrder(
         triggerPrice: params.triggerPrice.toString(),
         isTpsl: params.isTpsl,
         vaultAddress: params.vaultAddress,
+        builder: builderParam,
       }, exchange);
 
     default:
@@ -633,7 +821,7 @@ export function getAssetIndexSync(coin: string): number | undefined {
 export async function getAssetIndex(coin: string): Promise<number> {
   if (!assetMap) {
     const info = getInfoClient();
-    const meta = await info.meta();
+    const meta = await withRetry(() => info.meta(), { label: "meta (asset index)" });
     assetMap = {};
     meta.universe.forEach((asset, index) => {
       assetMap![asset.name] = index;
@@ -681,6 +869,11 @@ export async function sendUsdToAgent(
 /**
  * Generate a brand new Hyperliquid wallet for an agent.
  * Returns the private key and derived address.
+ *
+ * NOTE: For production, consider using provisionPKPWallet() instead
+ * which provides distributed key management via Lit Protocol.
+ *
+ * @deprecated Use provisionPKPWallet for better security
  */
 export function generateAgentWallet(): { privateKey: string; address: Address } {
   // Generate random private key (32 bytes)
@@ -691,28 +884,94 @@ export function generateAgentWallet(): { privateKey: string; address: Address } 
 }
 
 /**
- * Provision and fund a new HL testnet wallet for an agent.
+ * Provision a PKP (Programmable Key Pair) wallet for an agent.
  *
- * 1. Generate new wallet
- * 2. Store it encrypted via account-manager
+ * This is the secure alternative to generateAgentWallet():
+ * - Private key never exists in full form
+ * - Distributed via Lit Protocol's threshold network
+ * - Trading constraints enforced at cryptographic layer
+ *
+ * @param agentId - The agent ID to provision wallet for
+ * @param constraints - Optional trading constraints to enforce
+ */
+export async function provisionPKPWallet(
+  agentId: string,
+  constraints?: {
+    maxPositionSizeUsd?: number;
+    allowedCoins?: string[];
+    maxLeverage?: number;
+    requireStopLoss?: boolean;
+  }
+): Promise<{
+  address: Address;
+  pkpTokenId: string;
+  signingMethod: "pkp";
+} | null> {
+  try {
+    const { provisionPKPForAgent } = await import("./lit-signing");
+    
+    const result = await provisionPKPForAgent(agentId, constraints);
+    
+    if (!result.success || !result.address || !result.pkpTokenId) {
+      console.error("[HL] Failed to provision PKP:", result.error);
+      return null;
+    }
+    
+    return {
+      address: result.address,
+      pkpTokenId: result.pkpTokenId,
+      signingMethod: "pkp",
+    };
+  } catch (error) {
+    console.error("[HL] Error provisioning PKP wallet:", error);
+    return null;
+  }
+}
+
+/**
+ * Provision and fund a new HL wallet for an agent.
+ *
+ * Supports two modes:
+ * - "pkp" (recommended): Uses Lit Protocol for distributed key management
+ * - "traditional": Uses encrypted private key storage
+ *
+ * Flow:
+ * 1. Generate new wallet (PKP or traditional)
+ * 2. Store it via account-manager
  * 3. Send USDC from operator to the new wallet
- * 4. Return the wallet info
+ * 4. Auto-approve builder code (if traditional mode)
+ * 5. Return the wallet info
  */
 export async function provisionAgentWallet(
   agentId: string,
-  fundingAmountUsd: number
+  fundingAmountUsd: number,
+  options?: {
+    mode?: "pkp" | "traditional";
+    constraints?: {
+      maxPositionSizeUsd?: number;
+      allowedCoins?: string[];
+      maxLeverage?: number;
+      requireStopLoss?: boolean;
+    };
+  }
 ): Promise<{
   address: Address;
   funded: boolean;
   fundedAmount: number;
   txResult: unknown;
+  builderApproved?: boolean;
+  signingMethod: "pkp" | "traditional";
 }> {
+  const mode = options?.mode || (process.env.USE_LIT_PKP === "true" ? "pkp" : "traditional");
+  
   // Dynamic import to avoid circular deps
-  const { addAccount, getAccountForAgent } = await import("./account-manager");
+  const { addAccount, getAccountForAgent, isPKPAccount } = await import("./account-manager");
 
   // Check if agent already has a wallet
   const existing = await getAccountForAgent(agentId);
   if (existing) {
+    const existingMethod = await isPKPAccount(agentId) ? "pkp" : "traditional";
+    
     // Already has a wallet — just fund it
     if (fundingAmountUsd > 0) {
       try {
@@ -722,14 +981,22 @@ export async function provisionAgentWallet(
           funded: true,
           fundedAmount: fundingAmountUsd,
           txResult: result,
+          signingMethod: existingMethod,
         };
       } catch (err) {
-        console.error("[HL] Failed to fund existing agent wallet:", err);
+        const errMsg = err instanceof Error ? err.message : String(err);
+        const isTimeout = errMsg.toLowerCase().includes("timeout");
+        if (isTimeout) {
+          console.warn(`[HL] Timeout funding agent wallet ${existing.address.slice(0, 8)} — HL API unreachable`);
+        } else {
+          console.error(`[HL] Failed to fund agent wallet ${existing.address.slice(0, 8)}: ${errMsg.slice(0, 150)}`);
+        }
         return {
           address: existing.address,
           funded: false,
           fundedAmount: 0,
-          txResult: err instanceof Error ? err.message : String(err),
+          txResult: errMsg,
+          signingMethod: existingMethod,
         };
       }
     }
@@ -738,19 +1005,61 @@ export async function provisionAgentWallet(
       funded: false,
       fundedAmount: 0,
       txResult: null,
+      signingMethod: existingMethod,
     };
   }
 
-  // Generate new wallet
-  const { privateKey, address } = generateAgentWallet();
+  let address: Address;
+  let signingMethod: "pkp" | "traditional";
+  let privateKey: string | undefined;
 
-  // Store encrypted
-  await addAccount({
-    alias: `agent-${agentId.slice(0, 8)}`,
-    privateKey,
-    agentId,
-    isDefault: false,
-  });
+  let builderApproved = false;
+
+  if (mode === "pkp") {
+    // Use Lit Protocol PKP for secure distributed key management
+    console.log(`[HL] Provisioning PKP wallet for agent ${agentId}`);
+    
+    const pkpResult = await provisionPKPWallet(agentId, options?.constraints);
+    
+    if (!pkpResult) {
+      // Fallback to traditional if PKP fails
+      console.warn("[HL] PKP provisioning failed, falling back to traditional wallet");
+      const generated = generateAgentWallet();
+      privateKey = generated.privateKey;
+      
+      await addAccount({
+        alias: `agent-${agentId.slice(0, 8)}`,
+        privateKey,
+        agentId,
+        isDefault: false,
+      });
+      
+      address = generated.address;
+      signingMethod = "traditional";
+    } else {
+      address = pkpResult.address;
+      signingMethod = "pkp";
+      // Builder approval already handled in provisionPKPWallet
+      builderApproved = pkpResult.builderApproved || false;
+    }
+  } else {
+    // Traditional: generate local wallet with encrypted private key
+    console.log(`[HL] Provisioning traditional wallet for agent ${agentId}`);
+    
+    const generated = generateAgentWallet();
+    privateKey = generated.privateKey;
+
+    // Store encrypted
+    await addAccount({
+      alias: `agent-${agentId.slice(0, 8)}`,
+      privateKey,
+      agentId,
+      isDefault: false,
+    });
+    
+    address = generated.address;
+    signingMethod = "traditional";
+  }
 
   // Fund from operator
   let funded = false;
@@ -765,11 +1074,38 @@ export async function provisionAgentWallet(
     }
   }
 
+  // Auto-approve builder code for new wallet (Vincent-style)
+  // Handles both PKP and traditional wallets
+  if (funded) {
+    try {
+      const { autoApproveBuilderCode } = await import("./builder");
+      const approvalResult = await autoApproveBuilderCode(
+        address, 
+        privateKey, // undefined for PKP
+        agentId      // used for PKP signing
+      );
+      builderApproved = approvalResult.success;
+      
+      if (approvalResult.alreadyApproved) {
+        console.log(`[HL] Builder code already approved for ${address}`);
+      } else if (builderApproved) {
+        console.log(`[HL] Builder code auto-approved for new agent ${address}`);
+      } else {
+        console.warn(`[HL] Failed to auto-approve builder code: ${approvalResult.error}`);
+      }
+    } catch (err) {
+      console.error("[HL] Builder code auto-approval error:", err);
+      // Don't fail wallet provisioning if builder approval fails
+    }
+  }
+
   return {
     address,
     funded,
     fundedAmount: funded ? fundingAmountUsd : 0,
     txResult,
+    builderApproved,
+    signingMethod,
   };
 }
 
@@ -807,26 +1143,29 @@ export async function getAgentHlBalance(
   availableBalance: string;
   marginUsed: string;
 } | null> {
-  const { getAccountForAgent } = await import("./account-manager");
-  const account = await getAccountForAgent(agentId);
-  if (!account) return null;
+  // Dedup: multiple callers for the same agent share one in-flight request
+  return dedup(`agentHlBalance:${agentId}`, async () => {
+    const { getAccountForAgent } = await import("./account-manager");
+    const account = await getAccountForAgent(agentId);
+    if (!account) return null;
 
-  try {
-    const state = await getAccountState(account.address);
-    return {
-      address: account.address,
-      accountValue: state.marginSummary?.accountValue || "0",
-      availableBalance: state.withdrawable || "0",
-      marginUsed: state.marginSummary?.totalMarginUsed || "0",
-    };
-  } catch {
-    return {
-      address: account.address,
-      accountValue: "0",
-      availableBalance: "0",
-      marginUsed: "0",
-    };
-  }
+    try {
+      const state = await getAccountState(account.address);
+      return {
+        address: account.address,
+        accountValue: state.marginSummary?.accountValue || "0",
+        availableBalance: state.withdrawable || "0",
+        marginUsed: state.marginSummary?.totalMarginUsed || "0",
+      };
+    } catch {
+      return {
+        address: account.address,
+        accountValue: "0",
+        availableBalance: "0",
+        marginUsed: "0",
+      };
+    }
+  });
 }
 
 /**
@@ -835,6 +1174,8 @@ export async function getAgentHlBalance(
 export async function getAgentHlState(
   agentId: string
 ): Promise<AgentHlState | null> {
+  // Dedup: multiple concurrent callers for the same agent share one request
+  return dedup(`agentHlState:${agentId}`, async () => {
   const { getAccountForAgent } = await import("./account-manager");
   const account = await getAccountForAgent(agentId);
   if (!account) return null;
@@ -884,7 +1225,14 @@ export async function getAgentHlState(
       positions,
     };
   } catch (error) {
-    console.error(`Error fetching agent HL state for ${agentId}:`, error);
+    // Log concisely instead of dumping full stack traces
+    const msg = error instanceof Error ? error.message : String(error);
+    const isTimeout = msg.toLowerCase().includes("timeout");
+    if (isTimeout) {
+      console.warn(`[HL] Timeout fetching agent state for ${agentId} — returning cached/empty`);
+    } else {
+      console.error(`[HL] Error fetching agent state for ${agentId}: ${msg}`);
+    }
     return {
       address: account.address,
       accountValue: "0",
@@ -894,6 +1242,7 @@ export async function getAgentHlState(
       positions: [],
     };
   }
+  }); // end dedup
 }
 
 // ============================================
@@ -943,9 +1292,10 @@ export async function getAllMarkets(): Promise<AllMarketsResult> {
   }
 
   const info = getInfoClient();
+  try {
   const [perpMeta, spotMeta] = await Promise.all([
-    info.meta(),
-    info.spotMeta(),
+    withRetry(() => info.meta(), { label: "meta (markets)" }),
+    withRetry(() => info.spotMeta(), { label: "spotMeta (markets)" }),
   ]);
 
   const perps: PerpMarketInfo[] = perpMeta.universe.map((asset, index) => ({
@@ -978,4 +1328,12 @@ export async function getAllMarkets(): Promise<AllMarketsResult> {
   const result: AllMarketsResult = { perps, spots, spotTokens };
   marketsCache = { data: result, timestamp: Date.now() };
   return result;
+  } catch (error) {
+    // If we have stale cache, return it instead of failing
+    if (marketsCache) {
+      console.warn("[HL] Markets fetch failed, returning stale cache");
+      return marketsCache.data;
+    }
+    throw error; // No cache at all — let caller handle
+  }
 }

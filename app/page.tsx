@@ -31,68 +31,97 @@ export default function Dashboard() {
     availableBalance?: string;
   }>>([]);
 
+  // Phase 1: Fetch critical data (agents list + token state) — fast, unblocks render
   useEffect(() => {
-    async function fetchData() {
+    // Fire-and-forget startup (don't await — this runs in background)
+    fetch("/api/startup").catch(() => {});
+
+    async function fetchCritical() {
       try {
-        // Initialize agent lifecycle on app load (starts all active agents)
-        fetch("/api/startup").catch(() => {});
-        
         const [agentsRes, tokenRes] = await Promise.all([
-          fetch("/api/agents").then((r) => r.json()),
-          fetch("/api/token").then((r) => r.json()),
+          fetch("/api/agents").then((r) => r.json()).catch(() => ({ agents: [] })),
+          fetch("/api/token").then((r) => r.json()).catch(() => ({ configured: false })),
         ]);
         setAgents(agentsRes.agents || []);
         if (tokenRes.configured) setHclawState(tokenRes);
-
-        // Fetch HL status
-        try {
-          const statusRes = await fetch("/api/fund", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ action: "status" }),
-          });
-          const statusData = await statusRes.json();
-          setHlStatus(statusData);
-
-          // Operator balance is derived from agent wallets below
-        } catch {
-          // non-critical
-        }
-
-        // Fetch HL wallets for each agent
-        const agentList = agentsRes.agents || [];
-        if (agentList.length > 0) {
-          const walletPromises = agentList.map(async (a: Agent) => {
-            try {
-              const res = await fetch("/api/fund", {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ action: "agent-balance", agentId: a.id }),
-              });
-              const data = await res.json();
-              return {
-                agentId: a.id,
-                agentName: a.name,
-                hasWallet: data.hasWallet || false,
-                address: data.address,
-                accountValue: data.accountValue,
-                availableBalance: data.availableBalance,
-              };
-            } catch {
-              return { agentId: a.id, agentName: a.name, hasWallet: false };
-            }
-          });
-          const wallets = await Promise.all(walletPromises);
-          setAgentWallets(wallets);
-        }
       } catch (e) {
         console.error("Dashboard fetch error:", e);
       } finally {
         setLoading(false);
       }
     }
-    fetchData();
+    fetchCritical();
   }, []);
+
+  // Phase 2: Lazy-load HL wallet data after initial render (non-blocking)
+  useEffect(() => {
+    if (loading || agents.length === 0) return;
+
+    let cancelled = false;
+    async function fetchWallets() {
+      // Fetch HL status (non-critical)
+      try {
+        const statusRes = await fetch("/api/fund", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ action: "status" }),
+        });
+        if (!cancelled) {
+          const statusData = await statusRes.json();
+          setHlStatus(statusData);
+        }
+      } catch {
+        // non-critical
+      }
+
+      // Fetch each agent's wallet balance individually — render each as it arrives
+      for (const a of agents) {
+        if (cancelled) break;
+        try {
+          const res = await fetch("/api/fund", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ action: "agent-balance", agentId: a.id }),
+            signal: AbortSignal.timeout(12000), // 12s max per agent — don't stall the whole page
+          });
+          const data = await res.json();
+          if (!cancelled) {
+            setAgentWallets((prev) => {
+              const filtered = prev.filter((w) => w.agentId !== a.id);
+              return [
+                ...filtered,
+                {
+                  agentId: a.id,
+                  agentName: a.name,
+                  hasWallet: data.hasWallet || false,
+                  address: data.address,
+                  accountValue: data.accountValue,
+                  availableBalance: data.availableBalance,
+                },
+              ];
+            });
+          }
+        } catch {
+          if (!cancelled) {
+            setAgentWallets((prev) => {
+              if (prev.some((w) => w.agentId === a.id)) return prev;
+              return [...prev, { agentId: a.id, agentName: a.name, hasWallet: false }];
+            });
+          }
+        }
+      }
+    }
+    fetchWallets();
+    return () => { cancelled = true; };
+  }, [loading, agents]);
+
+  // Track whether wallet fetching is done
+  const [walletsLoaded, setWalletsLoaded] = useState(false);
+  useEffect(() => {
+    if (!loading && agents.length > 0 && agentWallets.length >= agents.length) {
+      setWalletsLoaded(true);
+    }
+  }, [loading, agents.length, agentWallets.length]);
 
   if (!ready) {
     return (
@@ -278,10 +307,29 @@ export default function Dashboard() {
                       </div>
                     </div>
                   ))}
+                  {/* Streaming indicator while remaining wallets load */}
+                  {!walletsLoaded && agents.length > agentWallets.length && (
+                    <div className="p-3 flex items-center justify-center gap-2">
+                      <div className="w-3 h-3 border border-accent/30 border-t-accent rounded-full animate-spin" />
+                      <span className="text-[10px] text-dim">Loading {agents.length - agentWallets.length} more...</span>
+                    </div>
+                  )}
                 </div>
               ) : (
                 <div className="p-6 text-center text-sm text-dim">
-                  {loading ? "Loading wallets..." : "No agent wallets yet. Deposit MON to auto-provision."}
+                  {loading ? (
+                    <div className="flex items-center justify-center gap-2">
+                      <div className="w-4 h-4 border-2 border-accent/30 border-t-accent rounded-full animate-spin" />
+                      <span>Loading wallets...</span>
+                    </div>
+                  ) : !walletsLoaded && agents.length > 0 ? (
+                    <div className="flex items-center justify-center gap-2">
+                      <div className="w-4 h-4 border-2 border-accent/30 border-t-accent rounded-full animate-spin" />
+                      <span>Fetching wallet balances...</span>
+                    </div>
+                  ) : (
+                    "No agent wallets yet. Deposit MON to auto-provision."
+                  )}
                 </div>
               )}
 

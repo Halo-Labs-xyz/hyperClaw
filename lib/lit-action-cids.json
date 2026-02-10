@@ -1,0 +1,61 @@
+{
+  "generatedAt": "2026-02-09T17:54:28.644Z",
+  "network": "naga-dev",
+  "presets": {
+    "conservative": {
+      "ipfsCid": "local_31333da3d5d6c857f04be2830a172014",
+      "constraints": {
+        "maxPositionSizeUsd": 1000,
+        "allowedCoins": [
+          "BTC",
+          "ETH"
+        ],
+        "maxLeverage": 3,
+        "requireStopLoss": true,
+        "maxDailyTrades": 10,
+        "cooldownMs": 300000
+      }
+    },
+    "moderate": {
+      "ipfsCid": "local_4b3e7003e9e4cb4daf58b27b98b26e8c",
+      "constraints": {
+        "maxPositionSizeUsd": 5000,
+        "allowedCoins": [
+          "BTC",
+          "ETH",
+          "SOL",
+          "ARB",
+          "AVAX"
+        ],
+        "maxLeverage": 10,
+        "requireStopLoss": true,
+        "maxDailyTrades": 30,
+        "cooldownMs": 60000
+      }
+    },
+    "aggressive": {
+      "ipfsCid": "local_b9df0e4af86e662e20653ca7b88bbcc6",
+      "constraints": {
+        "maxPositionSizeUsd": 20000,
+        "allowedCoins": [
+          "BTC",
+          "ETH",
+          "SOL",
+          "ARB",
+          "AVAX",
+          "DOGE",
+          "MATIC",
+          "LINK",
+          "OP",
+          "SUI",
+          "APT",
+          "INJ"
+        ],
+        "maxLeverage": 20,
+        "requireStopLoss": false,
+        "maxDailyTrades": 100,
+        "cooldownMs": 30000
+      }
+    }
+  }
+}
