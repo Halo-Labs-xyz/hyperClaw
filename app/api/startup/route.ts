@@ -6,14 +6,15 @@
  */
 
 import { NextResponse } from "next/server";
-import { initializeAgentLifecycle, getLifecycleSummary } from "@/lib/agent-lifecycle";
+import { getLifecycleSummary } from "@/lib/agent-lifecycle";
+import { ensureRuntimeBootstrap } from "@/lib/runtime-bootstrap";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 export async function GET() {
   try {
-    await initializeAgentLifecycle();
+    const bootstrap = await ensureRuntimeBootstrap("startup");
     
     const summary = await getLifecycleSummary();
     
@@ -21,6 +22,7 @@ export async function GET() {
       success: true,
       message: "Agent lifecycle initialized",
       summary,
+      bootstrap,
     });
   } catch (error) {
     console.error("[Startup] Error:", error);

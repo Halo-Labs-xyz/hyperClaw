@@ -64,6 +64,9 @@ Railway has an **ephemeral filesystem** — `.data/` is lost on redeploy. You mu
 |----------|-------------|
 | `MONAD_PRIVATE_KEY` | Vault deployer / deposit relay |
 | `TELEGRAM_BOT_TOKEN` | Notifications + vault chat |
+| `TELEGRAM_WEBHOOK_URL` | Optional explicit Telegram webhook URL (full path) |
+| `PUBLIC_BASE_URL` | Optional base URL used for Telegram webhook auto-sync |
+| `TELEGRAM_WEBHOOK_SECRET` | Optional Telegram secret token for webhook validation |
 | `NEXT_PUBLIC_WEB_PUSH_PUBLIC_KEY` | Web push (with `WEB_PUSH_PRIVATE_KEY`) |
 | `GEMINI_API_KEY` | Fallback AI when OpenAI is limited |
 | `MCP_API_KEY` | IronClaw MCP auth |
@@ -118,7 +121,20 @@ For private agents, use `AIP_DEPLOYMENT_MODE=POLLING` (default).
 
 ## Health check
 
-Railway uses `railway.json` to configure a health check at `/`. The app should respond with 200 when healthy.
+Railway uses `railway.json` to configure a health check at `/api/health`.
+
+On each health probe, Hyperclaw:
+
+- Ensures the agent lifecycle manager is initialized
+- Reconciles active agent runners
+- Periodically syncs the Telegram webhook to the current public deployment URL
+
+Webhook URL resolution priority:
+
+1. `TELEGRAM_WEBHOOK_URL` (full URL)
+2. `PUBLIC_BASE_URL` (builds `${PUBLIC_BASE_URL}/api/telegram/webhook`)
+3. Railway domain env vars (`RAILWAY_STATIC_URL`, `RAILWAY_PUBLIC_DOMAIN`)
+4. `AGENT_PUBLIC_URL` / `VERCEL_URL` fallback
 
 ## Troubleshooting
 

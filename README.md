@@ -612,6 +612,7 @@ Design system: dark terminal aesthetic. Neon green (`#30e8a0`, Hyperliquid), pur
 | Method | Route                        | Description                        |
 |--------|------------------------------|------------------------------------|
 | GET    | `/api/lifecycle`             | Agent lifecycle summary (health)   |
+| GET    | `/api/health`                | Runtime liveness + bootstrap hook  |
 | GET    | `/api/startup`               | Initialize agent lifecycle on boot |
 
 ### MCP (IronClaw fund manager)
@@ -782,6 +783,9 @@ cp .env.example .env.local
 | `AGENT_AI_OFF_HOURS_DECISION_MIN_INTERVAL_MS` | No | Minimum AI decision spacing outside hot hours        |
 | `AGENT_TICK_INTERVAL`                | No       | Agent runner interval in ms (default: 60000)          |
 | `TELEGRAM_BOT_TOKEN`                 | No       | Telegram bot token from @BotFather                    |
+| `TELEGRAM_WEBHOOK_URL`               | No       | Explicit full webhook URL for Telegram                 |
+| `PUBLIC_BASE_URL`                    | No       | Public app base URL for Telegram webhook auto-sync     |
+| `TELEGRAM_WEBHOOK_SECRET`            | No       | Optional Telegram webhook secret token                 |
 | `ACCOUNT_ENCRYPTION_KEY`             | Yes      | AES-256-CBC key for stored private keys               |
 | `NEXT_PUBLIC_VAULT_ADDRESS`          | Yes      | Deployed HyperclawVault contract address              |
 | `MONAD_PRIVATE_KEY`                  | Yes      | Monad deployer/admin private key                      |

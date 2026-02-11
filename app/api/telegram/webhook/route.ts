@@ -38,6 +38,7 @@ import { executeOrderWithPKP } from "@/lib/lit-signing";
 import { handleMcpRequest } from "@/lib/mcp-server";
 import { getTelegramPrivyLink, linkTelegramPrivy } from "@/lib/telegram-privy-link";
 import { isIronClawConfigured, sendToIronClaw } from "@/lib/ironclaw";
+import { ensureRuntimeBootstrap } from "@/lib/runtime-bootstrap";
 
 const TELEGRAM_API = "https://api.telegram.org/bot";
 const MAX_TELEGRAM_MESSAGE = 3900;
@@ -146,6 +147,7 @@ type SendHtmlOptions = {
  */
 export async function POST(request: Request) {
   try {
+    await ensureRuntimeBootstrap("telegram-webhook");
     const update = (await request.json()) as TelegramUpdate;
     await ensureTelegramCommandsConfigured();
 
