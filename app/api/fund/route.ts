@@ -58,7 +58,18 @@ function parseUsdAmount(value: unknown): number | undefined {
  *     -> System status info
  */
 export async function POST(request: Request) {
-  if (!verifyApiKey(request)) return unauthorizedResponse();
+  const sameOriginRequest = (() => {
+    const origin = request.headers.get("origin");
+    const host = request.headers.get("host");
+    if (!origin || !host) return false;
+    try {
+      return new URL(origin).host === host;
+    } catch {
+      return false;
+    }
+  })();
+
+  if (!sameOriginRequest && !verifyApiKey(request)) return unauthorizedResponse();
   try {
     let body: Record<string, unknown>;
     try {

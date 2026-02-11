@@ -771,7 +771,7 @@ export default function AgentDetailPage() {
     );
   }
 
-  if (!isOwner && summaryAgent) {
+  if (summaryAgent && (!isOwner || !agent)) {
     const pnlTone = summaryAgent.totalPnl >= 0 ? "text-success" : "text-danger";
     return (
       <div className="min-h-screen page-bg relative overflow-hidden">
@@ -791,6 +791,11 @@ export default function AgentDetailPage() {
         </header>
 
         <main className="max-w-6xl mx-auto px-4 sm:px-6 py-8 md:py-10 relative z-10">
+          {isOwner && !agent ? (
+            <div className="mb-4 p-3 rounded-lg border border-warning/30 bg-warning/10 text-xs text-warning">
+              {viewError || "Detailed agent data is temporarily unavailable. Showing summary data."}
+            </div>
+          ) : null}
           <section className="glass-card rounded-2xl p-5 md:p-6 mb-6">
             <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-4">
               <div className="flex items-start gap-3 min-w-0">

@@ -4,6 +4,7 @@ import { getAccountForAgent } from "@/lib/account-manager";
 import { stopAgent } from "@/lib/agent-runner";
 import { handleStatusChange, getLifecycleState } from "@/lib/agent-lifecycle";
 import { getNetworkState } from "@/lib/network";
+import type { TradeLog } from "@/lib/types";
 
 function normalizeString(value: unknown): string | undefined {
   if (typeof value !== "string") return undefined;
@@ -106,11 +107,23 @@ export async function GET(
       });
     }
 
-    // Resolve hlAddress from account-manager (source of truth for HL wallet)
-    const account = await getAccountForAgent(params.id);
-    const resolvedAgent = { ...agent, hlAddress: account?.address ?? agent.hlAddress };
+    // Resolve hlAddress from account-manager (source of truth for HL wallet).
+    // This backend can fail independently (e.g., S3 credentials), so degrade gracefully.
+    let resolvedAgent = agent;
+    try {
+      const account = await getAccountForAgent(params.id);
+      resolvedAgent = { ...agent, hlAddress: account?.address ?? agent.hlAddress };
+    } catch (accountError) {
+      console.warn(`[Agent ${params.id}] Failed to resolve HL account:`, accountError);
+    }
 
-    const trades = await getTradeLogsForAgent(params.id);
+    // Trade history backend can also fail independently; return agent details with empty trades.
+    let trades: TradeLog[] = [];
+    try {
+      trades = await getTradeLogsForAgent(params.id);
+    } catch (tradesError) {
+      console.warn(`[Agent ${params.id}] Failed to load trade logs:`, tradesError);
+    }
     const lifecycle = getLifecycleState(params.id);
 
     return NextResponse.json({ agent: resolvedAgent, trades, lifecycle });

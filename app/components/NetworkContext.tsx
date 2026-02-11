@@ -91,6 +91,10 @@ export function NetworkProvider({ children }: { children: ReactNode }) {
 
   const setNetwork = useCallback(
     async (update: { monadTestnet?: boolean; hlTestnet?: boolean }) => {
+      const previous = {
+        monadTestnet: monadTest,
+        hlTestnet: hlTest,
+      };
       const optimistic = {
         monadTestnet: update.monadTestnet ?? monadTest,
         hlTestnet: update.hlTestnet ?? hlTest,
@@ -101,7 +105,7 @@ export function NetworkProvider({ children }: { children: ReactNode }) {
       setHlTest(optimistic.hlTestnet);
       persistNetworkState(optimistic);
 
-      let resolved = optimistic;
+      let resolved = previous;
 
       try {
         const res = await fetch("/api/network", {
@@ -121,12 +125,18 @@ export function NetworkProvider({ children }: { children: ReactNode }) {
           persistNetworkState(resolved);
         } else {
           console.warn(
-            "[Network] Server-side switch failed; using local network state:",
+            "[Network] Server-side switch failed; reverting to previous network state:",
             data.error || `HTTP ${res.status}`
           );
+          setMonadTest(previous.monadTestnet);
+          setHlTest(previous.hlTestnet);
+          persistNetworkState(previous);
         }
       } catch (e) {
-        console.warn("[Network] Server request failed; using local network state:", e);
+        console.warn("[Network] Server request failed; reverting to previous network state:", e);
+        setMonadTest(previous.monadTestnet);
+        setHlTest(previous.hlTestnet);
+        persistNetworkState(previous);
       } finally {
         const targetChainId = resolved.monadTestnet
           ? monadTestnet.id

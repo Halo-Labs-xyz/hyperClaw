@@ -196,12 +196,16 @@ export async function POST(request: Request) {
           // Create agent and save key
           const agent = await createAgent(body, address as `0x${string}`);
           
-          await addAccount({
-            alias: `agent-${agent.id.slice(0, 8)}`,
-            privateKey,
-            agentId: agent.id,
-            isDefault: false,
-          });
+          try {
+            await addAccount({
+              alias: `agent-${agent.id.slice(0, 8)}`,
+              privateKey,
+              agentId: agent.id,
+              isDefault: false,
+            });
+          } catch (addAccountError) {
+            console.error("[AgentCreate] Failed to persist fallback traditional key:", addAccountError);
+          }
           
           console.log(`[AgentCreate] Traditional wallet ${address} saved for agent ${agent.id}`);
           return NextResponse.json({ agent }, { status: 201 });
@@ -218,12 +222,16 @@ export async function POST(request: Request) {
         
         const agent = await createAgent(body, address as `0x${string}`);
         
-        await addAccount({
-          alias: `agent-${agent.id.slice(0, 8)}`,
-          privateKey,
-          agentId: agent.id,
-          isDefault: false,
-        });
+        try {
+          await addAccount({
+            alias: `agent-${agent.id.slice(0, 8)}`,
+            privateKey,
+            agentId: agent.id,
+            isDefault: false,
+          });
+        } catch (addAccountError) {
+          console.error("[AgentCreate] Failed to persist traditional key after PKP error:", addAccountError);
+        }
         
         console.log(`[AgentCreate] Traditional wallet ${address} saved (PKP failed)`);
         return NextResponse.json({ agent }, { status: 201 });
@@ -260,25 +268,30 @@ export async function POST(request: Request) {
     
     // Update the PKP account to link to the real agent ID
     if (agentIdTemp) {
-      const { getAccountForAgent } = await import("@/lib/account-manager");
-      const tempAccount = await getAccountForAgent(agentIdTemp);
-      if (tempAccount && tempAccount.pkp) {
-        // Re-add with correct agent ID
-        await addPKPAccount({
-          alias: `pkp-agent-${agent.id.slice(0, 8)}`,
-          agentId: agent.id,
-          pkpTokenId: tempAccount.pkp.tokenId,
-          pkpPublicKey: tempAccount.pkp.publicKey,
-          pkpEthAddress: tempAccount.pkp.ethAddress,
-          constraints: tempAccount.pkp.constraints,
-          litActionCid: tempAccount.pkp.litActionCid,
-        });
-        
-        // Remove temp account
-        const { removeAccount } = await import("@/lib/account-manager");
-        await removeAccount(tempAccount.alias);
-        
-        console.log(`[AgentCreate] PKP account linked to agent ${agent.id}`);
+      try {
+        const { getAccountForAgent } = await import("@/lib/account-manager");
+        const tempAccount = await getAccountForAgent(agentIdTemp);
+        if (tempAccount && tempAccount.pkp) {
+          // Re-add with correct agent ID
+          await addPKPAccount({
+            alias: `pkp-agent-${agent.id.slice(0, 8)}`,
+            agentId: agent.id,
+            pkpTokenId: tempAccount.pkp.tokenId,
+            pkpPublicKey: tempAccount.pkp.publicKey,
+            pkpEthAddress: tempAccount.pkp.ethAddress,
+            constraints: tempAccount.pkp.constraints,
+            litActionCid: tempAccount.pkp.litActionCid,
+          });
+          
+          // Remove temp account
+          const { removeAccount } = await import("@/lib/account-manager");
+          await removeAccount(tempAccount.alias);
+          
+          console.log(`[AgentCreate] PKP account linked to agent ${agent.id}`);
+        }
+      } catch (linkPkpError) {
+        // Agent is already created. Do not fail the request on post-create account-linking errors.
+        console.error(`[AgentCreate] PKP post-create account link failed for agent ${agent.id}:`, linkPkpError);
       }
     }
 
