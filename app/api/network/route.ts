@@ -77,7 +77,7 @@ export async function POST(request: Request) {
         return NextResponse.json(
           {
             error:
-              "Cannot switch Hyperliquid to mainnet without builder config. Set NEXT_PUBLIC_BUILDER_ADDRESS and NEXT_PUBLIC_BUILDER_FEE first.",
+              "Cannot switch Hyperliquid to mainnet without builder config. Set BUILDER_ADDRESS/BUILDER_FEE (or NEXT_PUBLIC_BUILDER_ADDRESS/NEXT_PUBLIC_BUILDER_FEE) first.",
           },
           { status: 400 }
         );

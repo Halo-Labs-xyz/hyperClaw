@@ -23,8 +23,10 @@ let invalidFeeWarned = false;
 
 export function getBuilderConfig(opts: { logIfMissing?: boolean } = {}): BuilderConfig | null {
   const { logIfMissing = true } = opts;
-  const address = process.env.NEXT_PUBLIC_BUILDER_ADDRESS;
-  const feePoints = process.env.NEXT_PUBLIC_BUILDER_FEE;
+  // Prefer server-only runtime vars to avoid build-time NEXT_PUBLIC inlining issues.
+  // Fallback to NEXT_PUBLIC vars for compatibility with existing setups.
+  const address = process.env.BUILDER_ADDRESS ?? process.env.NEXT_PUBLIC_BUILDER_ADDRESS;
+  const feePoints = process.env.BUILDER_FEE ?? process.env.NEXT_PUBLIC_BUILDER_FEE;
 
   if (!address || !feePoints) {
     if (logIfMissing && !missingConfigWarned) {
@@ -32,7 +34,7 @@ export function getBuilderConfig(opts: { logIfMissing?: boolean } = {}): Builder
         console.warn("[Builder] Builder codes not configured (testnet mode)");
       } else {
         console.error(
-          "[Builder] Builder codes are required on mainnet. Set NEXT_PUBLIC_BUILDER_ADDRESS and NEXT_PUBLIC_BUILDER_FEE."
+          "[Builder] Builder codes are required on mainnet. Set BUILDER_ADDRESS/BUILDER_FEE (or NEXT_PUBLIC_BUILDER_ADDRESS/NEXT_PUBLIC_BUILDER_FEE)."
         );
       }
       missingConfigWarned = true;
@@ -44,7 +46,7 @@ export function getBuilderConfig(opts: { logIfMissing?: boolean } = {}): Builder
   if (!Number.isFinite(parsedFeePoints) || parsedFeePoints <= 0) {
     if (!invalidFeeWarned) {
       console.error(
-        "[Builder] NEXT_PUBLIC_BUILDER_FEE must be a positive integer (tenths of basis points)."
+        "[Builder] BUILDER_FEE (or NEXT_PUBLIC_BUILDER_FEE) must be a positive integer (tenths of basis points)."
       );
       invalidFeeWarned = true;
     }
@@ -66,7 +68,7 @@ export function assertBuilderConfiguredForTrading(): void {
   const config = getBuilderConfig();
   if (!config) {
     throw new Error(
-      "Builder codes are required for Hyperliquid mainnet. Configure NEXT_PUBLIC_BUILDER_ADDRESS and NEXT_PUBLIC_BUILDER_FEE."
+      "Builder codes are required for Hyperliquid mainnet. Configure BUILDER_ADDRESS/BUILDER_FEE (or NEXT_PUBLIC_BUILDER_ADDRESS/NEXT_PUBLIC_BUILDER_FEE)."
     );
   }
 }
