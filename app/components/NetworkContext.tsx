@@ -41,6 +41,18 @@ export function NetworkProvider({ children }: { children: ReactNode }) {
   const [hlTest, setHlTest] = useState(true);
   const [switching, setSwitching] = useState(false);
   const { switchChainAsync } = useSwitchChain();
+  const persistNetworkState = useCallback(
+    (next: { monadTestnet: boolean; hlTestnet: boolean }) => {
+      localStorage.setItem(
+        "hyperclaw-network",
+        JSON.stringify({
+          monadTestnet: next.monadTestnet,
+          hlTestnet: next.hlTestnet,
+        })
+      );
+    },
+    []
+  );
 
   // Load initial state from server, fall back to localStorage if unavailable.
   useEffect(() => {
@@ -79,9 +91,19 @@ export function NetworkProvider({ children }: { children: ReactNode }) {
 
   const setNetwork = useCallback(
     async (update: { monadTestnet?: boolean; hlTestnet?: boolean }) => {
+      const optimistic = {
+        monadTestnet: update.monadTestnet ?? monadTest,
+        hlTestnet: update.hlTestnet ?? hlTest,
+      };
+
       setSwitching(true);
+      setMonadTest(optimistic.monadTestnet);
+      setHlTest(optimistic.hlTestnet);
+      persistNetworkState(optimistic);
+
+      let resolved = optimistic;
+
       try {
-        // Update server
         const res = await fetch("/api/network", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -89,26 +111,24 @@ export function NetworkProvider({ children }: { children: ReactNode }) {
         });
         const data = await res.json().catch(() => ({} as { error?: string }));
 
-        if (!res.ok || !data.success) {
-          throw new Error(
-            data.error || `Failed to switch network (HTTP ${res.status})`
+        if (res.ok && data.success) {
+          resolved = {
+            monadTestnet: Boolean(data.monadTestnet),
+            hlTestnet: Boolean(data.hlTestnet),
+          };
+          setMonadTest(resolved.monadTestnet);
+          setHlTest(resolved.hlTestnet);
+          persistNetworkState(resolved);
+        } else {
+          console.warn(
+            "[Network] Server-side switch failed; using local network state:",
+            data.error || `HTTP ${res.status}`
           );
         }
-
-        setMonadTest(data.monadTestnet);
-        setHlTest(data.hlTestnet);
-
-        // Persist to localStorage
-        localStorage.setItem(
-          "hyperclaw-network",
-          JSON.stringify({
-            monadTestnet: data.monadTestnet,
-            hlTestnet: data.hlTestnet,
-          })
-        );
-
-        // Switch wallet chain
-        const targetChainId = data.monadTestnet
+      } catch (e) {
+        console.warn("[Network] Server request failed; using local network state:", e);
+      } finally {
+        const targetChainId = resolved.monadTestnet
           ? monadTestnet.id
           : monadMainnet.id;
         try {
@@ -116,13 +136,10 @@ export function NetworkProvider({ children }: { children: ReactNode }) {
         } catch {
           // User may reject or already on chain
         }
-      } catch (e) {
-        console.error("Network switch failed:", e);
-      } finally {
         setSwitching(false);
       }
     },
-    [switchChainAsync]
+    [hlTest, monadTest, persistNetworkState, switchChainAsync]
   );
 
   const toggleNetwork = useCallback(async () => {

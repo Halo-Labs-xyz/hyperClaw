@@ -41,6 +41,42 @@ import { isIronClawConfigured, sendToIronClaw } from "@/lib/ironclaw";
 
 const TELEGRAM_API = "https://api.telegram.org/bot";
 const MAX_TELEGRAM_MESSAGE = 3900;
+const COMMAND_SYNC_INTERVAL_MS = 6 * 60 * 60 * 1000;
+
+const TELEGRAM_BOT_COMMANDS: Array<{ command: string; description: string }> = [
+  { command: "start", description: "Initialize chat and scope" },
+  { command: "help", description: "Show full command surface" },
+  { command: "arena", description: "Live standings and leaderboard view" },
+  { command: "agents", description: "List scoped agents" },
+  { command: "status", description: "Status snapshot (all or one agent)" },
+  { command: "positions", description: "Open positions for an agent" },
+  { command: "orders", description: "Open orders for an agent" },
+  { command: "exposure", description: "Portfolio exposure and warnings" },
+  { command: "daily", description: "Trade summary for last 24h" },
+  { command: "health", description: "Runner health view" },
+  { command: "market", description: "Market snapshot for a coin" },
+  { command: "book", description: "Order book depth view for a coin" },
+  { command: "trade", description: "Submit market order" },
+  { command: "buy", description: "Shortcut for /trade buy" },
+  { command: "sell", description: "Shortcut for /trade sell" },
+  { command: "close", description: "Close open position" },
+  { command: "lev", description: "Set leverage for a market" },
+  { command: "run", description: "Run one strategy tick now" },
+  { command: "pause", description: "Pause one agent" },
+  { command: "resume", description: "Resume one agent" },
+  { command: "link", description: "Link Telegram user to Privy user" },
+  { command: "ask", description: "Ask IronClaw in this scope" },
+];
+
+const QUICK_COMMAND_ROWS: string[][] = [
+  ["/arena", "/agents", "/status"],
+  ["/positions", "/orders", "/exposure"],
+  ["/daily", "/market BTC", "/book BTC"],
+  ["/trade", "/health", "/help"],
+];
+
+let lastCommandSyncAt = 0;
+let commandSyncInFlight: Promise<void> | null = null;
 
 type TelegramUser = {
   id?: number | string;
@@ -99,6 +135,10 @@ type AgentExecutionContext = {
   signingMethod: "pkp" | "traditional";
 };
 
+type SendHtmlOptions = {
+  replyMarkup?: Record<string, unknown>;
+};
+
 /**
  * POST /api/telegram/webhook
  *
@@ -107,6 +147,7 @@ type AgentExecutionContext = {
 export async function POST(request: Request) {
   try {
     const update = (await request.json()) as TelegramUpdate;
+    await ensureTelegramCommandsConfigured();
 
     if (update.callback_query) {
       await handleCallbackQuery(update.callback_query);
@@ -175,6 +216,11 @@ async function handleMessageText(ctx: CommandContext, text: string): Promise<voi
   const trimmed = text.trim();
   if (!trimmed) return;
 
+  if (trimmed === "/") {
+    await handleHelp(ctx.chatId);
+    return;
+  }
+
   // Legacy approval shortcuts
   if (trimmed.startsWith("/approve_")) {
     const approvalId = trimmed.replace("/approve_", "").trim();
@@ -208,6 +254,10 @@ async function handleMessageText(ctx: CommandContext, text: string): Promise<voi
       break;
     case "agents":
       await handleAgents(ctx);
+      break;
+    case "arena":
+    case "standings":
+      await handleArena(ctx);
       break;
     case "status":
       await handleStatus(ctx, cmd.args);
@@ -264,7 +314,8 @@ async function handleMessageText(ctx: CommandContext, text: string): Promise<voi
     default:
       await sendHtmlMessage(
         ctx.chatId,
-        "Unknown command. Run <code>/help</code> for the full command surface."
+        "Unknown command. Use <code>/help</code> or select from the command keyboard.",
+        { replyMarkup: quickCommandKeyboard() }
       );
       break;
   }
@@ -308,12 +359,12 @@ async function handleStart(ctx: CommandContext, args: string[]): Promise<void> {
     linkLine,
     `Agent scope: <code>${scoped.scopeType}</code> (${scoped.agents.length} agents)`,
     "",
-    "Use <code>/help</code> to view commands.",
+    "Use <code>/help</code> or tap commands below.",
   ]
     .filter(Boolean)
     .join("\n");
 
-  await sendHtmlMessage(ctx.chatId, message);
+  await sendHtmlMessage(ctx.chatId, message, { replyMarkup: quickCommandKeyboard() });
 }
 
 async function handleHelp(chatId: string): Promise<void> {
@@ -321,6 +372,7 @@ async function handleHelp(chatId: string): Promise<void> {
     "<b>Hyperclaw Telegram Commands</b>",
     "",
     "<pre>",
+    "/arena",
     "/agents",
     "/status [agent]",
     "/positions [agent]",
@@ -343,10 +395,10 @@ async function handleHelp(chatId: string): Promise<void> {
     "</pre>",
     "",
     "<b>Examples</b>",
-    "<pre>/status\n/exposure\n/trade alpha long BTC 0.01 5\n/close alpha BTC\n/market ETH\n/ask summarize risk right now</pre>",
+    "<pre>/arena\n/status alpha\n/exposure\n/trade alpha long BTC 0.01 5\n/close alpha BTC\n/market ETH\n/ask summarize risk right now</pre>",
   ].join("\n");
 
-  await sendHtmlMessage(chatId, help);
+  await sendHtmlMessage(chatId, help, { replyMarkup: quickCommandKeyboard() });
 }
 
 async function handleLink(ctx: CommandContext, args: string[]): Promise<void> {
@@ -434,6 +486,74 @@ async function handleAgents(ctx: CommandContext): Promise<void> {
       `<pre>${escapeHtml([header, ...lines].join("\n"))}</pre>`,
     ].join("\n")
   );
+}
+
+async function handleArena(ctx: CommandContext): Promise<void> {
+  const scoped = await getScopedAgents(ctx);
+  if (scoped.agents.length === 0) {
+    await sendHtmlMessage(ctx.chatId, "No scoped agents found.");
+    return;
+  }
+
+  const lifecycle = await getLifecycleSummary();
+  const lifecycleById = new Map(lifecycle.agents.map((row) => [row.id, row]));
+  const snapshots = await Promise.all(
+    scoped.agents.map(async (agent) => {
+      const state = await getAgentHlState(agent.id).catch(() => null);
+      const row = lifecycleById.get(agent.id);
+      return {
+        agent,
+        row,
+        pnl: state?.totalPnl ?? agent.totalPnl,
+        equity: state ? toFiniteNumber(state.accountValue) : 0,
+        winRate: Number.isFinite(agent.winRate) ? agent.winRate : 0,
+        positions: state?.positions.length ?? 0,
+      };
+    })
+  );
+
+  snapshots.sort((a, b) => {
+    if (b.pnl !== a.pnl) return b.pnl - a.pnl;
+    if (b.winRate !== a.winRate) return b.winRate - a.winRate;
+    return b.equity - a.equity;
+  });
+
+  const maxAbsPnl = Math.max(1, ...snapshots.map((s) => Math.abs(s.pnl)));
+  const header = "RK NAME         PNL(USD)     EQUITY      WIN%   POS  RUN  MOMENTUM";
+  const rows = snapshots.map((s, idx) =>
+    [
+      pad(String(idx + 1), 2),
+      pad(trim(s.agent.name, 12), 12),
+      pad(formatSignedCompact(s.pnl, 2), 11),
+      pad(formatCompact(s.equity, 2), 10),
+      pad(formatCompact(s.winRate * 100, 1), 6),
+      pad(String(s.positions), 4),
+      pad(s.row?.runnerActive ? "ON" : "OFF", 4),
+      centeredBar(s.pnl, maxAbsPnl, 13),
+    ].join(" ")
+  );
+
+  const leaders = snapshots
+    .slice(0, 3)
+    .map(
+      (s, idx) =>
+        `${idx + 1}. <b>${escapeHtml(s.agent.name)}</b>  PnL <code>${escapeHtml(
+          formatSignedCompact(s.pnl, 2)
+        )}</code>  Win <code>${escapeHtml(formatCompact(s.winRate * 100, 1))}%</code>`
+    )
+    .join("\n");
+
+  const out = [
+    `<b>Live Arena Standings (${snapshots.length})</b>`,
+    `Scope: <code>${scoped.scopeType}${scoped.privyUserId ? `:${escapeHtml(scoped.privyUserId)}` : ""}</code>`,
+    leaders ? `<b>Leaders</b>\n${leaders}` : "",
+    `<pre>${escapeHtml([header, ...rows].join("\n"))}</pre>`,
+    "Refresh: <code>/arena</code>",
+  ]
+    .filter(Boolean)
+    .join("\n");
+
+  await sendHtmlMessage(ctx.chatId, out);
 }
 
 async function handleStatus(ctx: CommandContext, args: string[]): Promise<void> {
@@ -1324,6 +1444,55 @@ async function callMcpTool(
   }
 }
 
+async function ensureTelegramCommandsConfigured(): Promise<void> {
+  const token = getBotToken();
+  if (!token) return;
+
+  const now = Date.now();
+  if (now - lastCommandSyncAt < COMMAND_SYNC_INTERVAL_MS) return;
+  if (commandSyncInFlight) {
+    await commandSyncInFlight;
+    return;
+  }
+
+  commandSyncInFlight = (async () => {
+    const scopes: Array<Record<string, unknown> | null> = [
+      null,
+      { type: "all_private_chats" },
+      { type: "all_group_chats" },
+    ];
+
+    let ok = true;
+    for (const scope of scopes) {
+      const payload = await telegramRequest("setMyCommands", {
+        commands: TELEGRAM_BOT_COMMANDS,
+        ...(scope ? { scope } : {}),
+      });
+      ok = ok && isTelegramOk(payload);
+    }
+
+    // Make sure the client menu opens commands directly.
+    const menuPayload = await telegramRequest("setChatMenuButton", {
+      menu_button: { type: "commands" },
+    });
+    ok = ok && isTelegramOk(menuPayload);
+
+    if (ok) {
+      lastCommandSyncAt = Date.now();
+    } else {
+      console.error("[Telegram webhook] command catalog sync failed");
+    }
+  })()
+    .catch((error) => {
+      console.error("[Telegram webhook] command catalog sync error:", error);
+    })
+    .finally(() => {
+      commandSyncInFlight = null;
+    });
+
+  await commandSyncInFlight;
+}
+
 function parseCommand(text: string): { name: string; rawArgs: string; args: string[] } | null {
   const match = text.match(/^\/([a-zA-Z0-9_]+)(?:@[\w_]+)?(?:\s+([\s\S]+))?$/);
   if (!match) return null;
@@ -1373,7 +1542,16 @@ async function telegramRequest(method: string, body: Record<string, unknown>): P
   }
 }
 
-async function sendHtmlMessage(chatId: string, text: string): Promise<void> {
+function quickCommandKeyboard(): Record<string, unknown> {
+  return {
+    keyboard: QUICK_COMMAND_ROWS.map((row) => row.map((text) => ({ text }))),
+    resize_keyboard: true,
+    is_persistent: true,
+    input_field_placeholder: "Type /help or tap a command",
+  };
+}
+
+async function sendHtmlMessage(chatId: string, text: string, options?: SendHtmlOptions): Promise<void> {
   let safe = text;
   if (text.length > MAX_TELEGRAM_MESSAGE) {
     const plain = text.replace(/<[^>]+>/g, "");
@@ -1384,6 +1562,7 @@ async function sendHtmlMessage(chatId: string, text: string): Promise<void> {
     text: safe,
     parse_mode: "HTML",
     disable_web_page_preview: true,
+    ...(options?.replyMarkup ? { reply_markup: options.replyMarkup } : {}),
   });
 
   if (telegramEntityParseError(payload)) {
@@ -1491,6 +1670,18 @@ function bar(value: number, max: number, width: number): string {
   const ratio = Math.max(0, Math.min(1, value / safeMax));
   const fill = Math.round(ratio * width);
   return `${"█".repeat(fill)}${"░".repeat(width - fill)}`;
+}
+
+function centeredBar(value: number, maxAbs: number, width: number): string {
+  if (width < 3) return "";
+  const side = Math.floor((width - 1) / 2);
+  const safeMax = maxAbs > 0 ? maxAbs : 1;
+  const ratio = Math.max(0, Math.min(1, Math.abs(value) / safeMax));
+  const fill = Math.round(ratio * side);
+  if (value >= 0) {
+    return `${"░".repeat(side)}|${"█".repeat(fill)}${"░".repeat(side - fill)}`;
+  }
+  return `${"░".repeat(side - fill)}${"█".repeat(fill)}|${"░".repeat(side)}`;
 }
 
 function sparkline(values: number[]): string {
