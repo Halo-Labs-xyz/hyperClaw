@@ -6,6 +6,7 @@ import { usePrivy } from "@privy-io/react-auth";
 import { HyperclawLogo } from "@/app/components/HyperclawLogo";
 import { HyperclawIcon } from "@/app/components/HyperclawIcon";
 import { NetworkToggle } from "@/app/components/NetworkToggle";
+import { useNetwork } from "@/app/components/NetworkContext";
 import { TestnetToggle } from "../components/strategy/TestnetToggle";
 import { StrategyBuilder } from "../components/strategy/StrategyBuilder";
 import { BacktestResults } from "../components/strategy/BacktestResults";
@@ -13,7 +14,7 @@ import type { StrategyConfig, TradeLog } from "@/lib/types";
 
 export default function StrategyPage() {
   const { user } = usePrivy();
-  const [isTestnet, setIsTestnet] = useState(true);
+  const { monadTestnet, setNetwork } = useNetwork();
   const [running, setRunning] = useState(false);
   const [trades, setTrades] = useState<TradeLog[]>([]);
   const [startTime, setStartTime] = useState<number>(0);
@@ -59,6 +60,7 @@ export default function StrategyPage() {
     setTotalTicks(numTicks);
 
     try {
+      const network = monadTestnet ? "testnet" : "mainnet";
       // First, create a temporary test agent
       const createRes = await fetch("/api/agents", {
         method: "POST",
@@ -76,6 +78,7 @@ export default function StrategyPage() {
           stopLossPercent: config.stopLossPercent,
           ownerPrivyId: user?.id || undefined,
           ownerWalletAddress: ownerWalletAddress || undefined,
+          network,
         }),
       });
 
@@ -134,7 +137,12 @@ export default function StrategyPage() {
 
           <div className="flex items-center gap-3">
             <NetworkToggle />
-            <TestnetToggle isTestnet={isTestnet} onChange={setIsTestnet} />
+            <TestnetToggle
+              isTestnet={monadTestnet}
+              onChange={(testnet) => {
+                void setNetwork({ monadTestnet: testnet, hlTestnet: testnet });
+              }}
+            />
             <Link
               href="/monitor"
               className="text-xs text-muted hover:text-white transition-colors"

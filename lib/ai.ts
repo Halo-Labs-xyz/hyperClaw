@@ -12,6 +12,7 @@ const OPENAI_MIN_REQUEST_SPACING_MS = Math.max(
   0,
   parseInt(process.env.OPENAI_MIN_REQUEST_SPACING_MS || "1000", 10)
 );
+const OPENAI_MODELS_DEFAULT = ["gpt-4o"];
 const OPENAI_MAX_RETRIES = Math.max(
   0,
   parseInt(process.env.OPENAI_MAX_RETRIES || "2", 10)
@@ -27,6 +28,14 @@ const OPENAI_RATE_LIMIT_MIN_COOLDOWN_MS = Math.max(
 const OPENAI_QUOTA_COOLDOWN_MS = Math.max(
   60_000,
   parseInt(process.env.OPENAI_QUOTA_COOLDOWN_MS || "900000", 10)
+);
+const GEMINI_MAX_CONCURRENT_REQUESTS = Math.max(
+  1,
+  parseInt(process.env.GEMINI_MAX_CONCURRENT_REQUESTS || "1", 10)
+);
+const GEMINI_MIN_REQUEST_SPACING_MS = Math.max(
+  0,
+  parseInt(process.env.GEMINI_MIN_REQUEST_SPACING_MS || "1000", 10)
 );
 const GEMINI_MAX_RETRIES = Math.max(
   0,
@@ -44,14 +53,83 @@ const GEMINI_REQUEST_TIMEOUT_MS = Math.max(
   2000,
   parseInt(process.env.GEMINI_REQUEST_TIMEOUT_MS || "15000", 10)
 );
-const DEFAULT_GEMINI_MODELS = ["gemini-3-flash-preview", "gemini-2.5-flash"];
+const DEFAULT_GEMINI_MODELS = [
+  "gemini-2.5-flash",
+  "gemini-3-flash-preview",
+  "gemini-2.5-flash-lite",
+  "gemma-3-27b-it",
+  "gemma-3-12b-it",
+  "gemma-3-4b-it",
+  "gemma-3-2b-it",
+  "gemma-3-1b-it",
+];
+const AI_NEAR_LIMIT_THRESHOLD = Math.min(
+  0.99,
+  Math.max(0.5, parseFloat(process.env.AI_NEAR_LIMIT_THRESHOLD || "0.85"))
+);
+const AI_NEAR_LIMIT_MIN_COOLDOWN_MS = Math.max(
+  1000,
+  parseInt(process.env.AI_NEAR_LIMIT_MIN_COOLDOWN_MS || "15000", 10)
+);
 
 let openAiInFlight = 0;
 const openAiWaiters: Array<() => void> = [];
 let openAiNextRequestNotBeforeMs = 0;
 let openAiPaceQueue: Promise<void> = Promise.resolve();
 let openAiRateLimitedUntilMs = 0;
+let geminiInFlight = 0;
+const geminiWaiters: Array<() => void> = [];
+let geminiNextRequestNotBeforeMs = 0;
+let geminiPaceQueue: Promise<void> = Promise.resolve();
 let geminiRateLimitedUntilMs = 0;
+const modelCooldownUntilMs = new Map<string, number>();
+
+type AiProvider = "openai" | "gemini";
+
+interface ModelRoute {
+  provider: AiProvider;
+  model: string;
+}
+
+interface ProviderCallResult {
+  content: string;
+  promptTokens?: number;
+  completionTokens?: number;
+}
+
+interface ModelQuota {
+  rpm?: number;
+  tpm?: number;
+  rpd?: number;
+}
+
+interface ModelUsageWindow {
+  minuteWindowStartMs: number;
+  minuteRequests: number;
+  minuteTokens: number;
+  dayWindowStartMs: number;
+  dayRequests: number;
+  dayTokens: number;
+}
+
+const modelUsageByKey = new Map<string, ModelUsageWindow>();
+
+const KNOWN_MODEL_QUOTAS: Record<string, ModelQuota> = {
+  "gemini-2.5-flash": { rpm: 5, tpm: 250_000, rpd: 20 },
+  "gemini-2.5-flash-lite": { rpm: 10, tpm: 250_000, rpd: 20 },
+  "gemini-3-flash": { rpm: 5, tpm: 250_000, rpd: 20 },
+  "gemini-3-flash-preview": { rpm: 5, tpm: 250_000, rpd: 20 },
+  "gemma-3-1b": { rpm: 30, tpm: 15_000, rpd: 14_400 },
+  "gemma-3-2b": { rpm: 30, tpm: 15_000, rpd: 14_400 },
+  "gemma-3-4b": { rpm: 30, tpm: 15_000, rpd: 14_400 },
+  "gemma-3-12b": { rpm: 30, tpm: 15_000, rpd: 14_400 },
+  "gemma-3-27b": { rpm: 30, tpm: 15_000, rpd: 14_400 },
+  "gemma-3-1b-it": { rpm: 30, tpm: 15_000, rpd: 14_400 },
+  "gemma-3-2b-it": { rpm: 30, tpm: 15_000, rpd: 14_400 },
+  "gemma-3-4b-it": { rpm: 30, tpm: 15_000, rpd: 14_400 },
+  "gemma-3-12b-it": { rpm: 30, tpm: 15_000, rpd: 14_400 },
+  "gemma-3-27b-it": { rpm: 30, tpm: 15_000, rpd: 14_400 },
+};
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -76,6 +154,25 @@ function releaseOpenAiSlot(): void {
   if (next) next();
 }
 
+async function acquireGeminiSlot(): Promise<void> {
+  if (geminiInFlight < GEMINI_MAX_CONCURRENT_REQUESTS) {
+    geminiInFlight++;
+    return;
+  }
+  await new Promise<void>((resolve) => {
+    geminiWaiters.push(() => {
+      geminiInFlight++;
+      resolve();
+    });
+  });
+}
+
+function releaseGeminiSlot(): void {
+  geminiInFlight = Math.max(0, geminiInFlight - 1);
+  const next = geminiWaiters.shift();
+  if (next) next();
+}
+
 async function waitForOpenAiPacing(): Promise<void> {
   let releaseCurrent!: () => void;
   const previous = openAiPaceQueue;
@@ -90,6 +187,25 @@ async function waitForOpenAiPacing(): Promise<void> {
       await sleep(openAiNextRequestNotBeforeMs - now);
     }
     openAiNextRequestNotBeforeMs = Date.now() + OPENAI_MIN_REQUEST_SPACING_MS;
+  } finally {
+    releaseCurrent();
+  }
+}
+
+async function waitForGeminiPacing(): Promise<void> {
+  let releaseCurrent!: () => void;
+  const previous = geminiPaceQueue;
+  geminiPaceQueue = new Promise<void>((resolve) => {
+    releaseCurrent = resolve;
+  });
+
+  await previous;
+  try {
+    const now = Date.now();
+    if (now < geminiNextRequestNotBeforeMs) {
+      await sleep(geminiNextRequestNotBeforeMs - now);
+    }
+    geminiNextRequestNotBeforeMs = Date.now() + GEMINI_MIN_REQUEST_SPACING_MS;
   } finally {
     releaseCurrent();
   }
@@ -127,15 +243,169 @@ function setGeminiRateLimitCooldown(ms: number): void {
   }
 }
 
-async function runWithAiProviderGate<T>(
-  fn: () => Promise<T>,
-  waitForCooldown?: () => Promise<void>
-): Promise<T> {
+function normalizeModelId(model: string): string {
+  return model
+    .trim()
+    .toLowerCase()
+    .replace(/^models\//, "")
+    .replace(/\s+/g, "-");
+}
+
+function modelKey(provider: AiProvider, model: string): string {
+  return `${provider}:${normalizeModelId(model)}`;
+}
+
+function estimateTokens(text: string): number {
+  if (!text) return 0;
+  return Math.max(1, Math.ceil(text.length / 4));
+}
+
+function getUtcDayStartMs(nowMs: number): number {
+  const d = new Date(nowMs);
+  return Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate());
+}
+
+function getOrCreateModelUsage(key: string, nowMs: number): ModelUsageWindow {
+  const dayStart = getUtcDayStartMs(nowMs);
+  const minuteStart = nowMs - (nowMs % 60_000);
+  const existing = modelUsageByKey.get(key);
+
+  if (!existing) {
+    const created: ModelUsageWindow = {
+      minuteWindowStartMs: minuteStart,
+      minuteRequests: 0,
+      minuteTokens: 0,
+      dayWindowStartMs: dayStart,
+      dayRequests: 0,
+      dayTokens: 0,
+    };
+    modelUsageByKey.set(key, created);
+    return created;
+  }
+
+  if (existing.minuteWindowStartMs !== minuteStart) {
+    existing.minuteWindowStartMs = minuteStart;
+    existing.minuteRequests = 0;
+    existing.minuteTokens = 0;
+  }
+
+  if (existing.dayWindowStartMs !== dayStart) {
+    existing.dayWindowStartMs = dayStart;
+    existing.dayRequests = 0;
+    existing.dayTokens = 0;
+  }
+
+  return existing;
+}
+
+function getModelQuota(provider: AiProvider, model: string): ModelQuota | null {
+  const normalized = normalizeModelId(model);
+  const fromKnown =
+    KNOWN_MODEL_QUOTAS[normalized] ||
+    KNOWN_MODEL_QUOTAS[normalized.replace(/-latest$/, "")] ||
+    null;
+  if (fromKnown) return fromKnown;
+
+  const prefix = provider === "openai" ? "OPENAI" : "GEMINI";
+  const rpm = parseInt(process.env[`${prefix}_QUOTA_RPM`] || "", 10);
+  const tpm = parseInt(process.env[`${prefix}_QUOTA_TPM`] || "", 10);
+  const rpd = parseInt(process.env[`${prefix}_QUOTA_RPD`] || "", 10);
+
+  const quota: ModelQuota = {};
+  if (Number.isFinite(rpm) && rpm > 0) quota.rpm = rpm;
+  if (Number.isFinite(tpm) && tpm > 0) quota.tpm = tpm;
+  if (Number.isFinite(rpd) && rpd > 0) quota.rpd = rpd;
+  return quota.rpm || quota.tpm || quota.rpd ? quota : null;
+}
+
+function setModelCooldown(provider: AiProvider, model: string, ms: number, reason: string): void {
+  const key = modelKey(provider, model);
+  const cooldownMs = Math.max(AI_NEAR_LIMIT_MIN_COOLDOWN_MS, ms);
+  const nextUntil = Date.now() + cooldownMs;
+  const current = modelCooldownUntilMs.get(key) || 0;
+  if (nextUntil > current) {
+    modelCooldownUntilMs.set(key, nextUntil);
+    console.warn(`[AI] ${provider}:${model} cooling down for ${cooldownMs}ms (${reason})`);
+  }
+}
+
+function getModelCooldownRemainingMs(provider: AiProvider, model: string): number {
+  const until = modelCooldownUntilMs.get(modelKey(provider, model)) || 0;
+  return Math.max(0, until - Date.now());
+}
+
+function enforceNearLimitBudget(
+  provider: AiProvider,
+  model: string,
+  estimatedInputTokens: number
+): void {
+  const now = Date.now();
+  const remainingCooldownMs = getModelCooldownRemainingMs(provider, model);
+  if (remainingCooldownMs > 0) {
+    throw new Error(
+      `${provider}:${model} cooling down (${Math.ceil(remainingCooldownMs / 1000)}s remaining)`
+    );
+  }
+
+  const quota = getModelQuota(provider, model);
+  if (!quota) return;
+
+  const usage = getOrCreateModelUsage(modelKey(provider, model), now);
+  const minuteWindowEndMs = usage.minuteWindowStartMs + 60_000;
+  const dayWindowEndMs = usage.dayWindowStartMs + 86_400_000;
+  const rpmThreshold = quota.rpm ? Math.max(1, Math.floor(quota.rpm * AI_NEAR_LIMIT_THRESHOLD)) : null;
+  const tpmThreshold = quota.tpm ? Math.max(1, Math.floor(quota.tpm * AI_NEAR_LIMIT_THRESHOLD)) : null;
+  const rpdThreshold = quota.rpd ? Math.max(1, Math.floor(quota.rpd * AI_NEAR_LIMIT_THRESHOLD)) : null;
+
+  if (rpmThreshold !== null && usage.minuteRequests + 1 >= rpmThreshold) {
+    setModelCooldown(provider, model, minuteWindowEndMs - now, "near RPM limit");
+    throw new Error(`${provider}:${model} near RPM limit`);
+  }
+
+  if (tpmThreshold !== null && usage.minuteTokens + Math.max(0, estimatedInputTokens) >= tpmThreshold) {
+    setModelCooldown(provider, model, minuteWindowEndMs - now, "near TPM limit");
+    throw new Error(`${provider}:${model} near TPM limit`);
+  }
+
+  if (rpdThreshold !== null && usage.dayRequests + 1 >= rpdThreshold) {
+    setModelCooldown(provider, model, dayWindowEndMs - now, "near RPD limit");
+    throw new Error(`${provider}:${model} near RPD limit`);
+  }
+}
+
+function reserveModelUsage(provider: AiProvider, model: string, estimatedInputTokens: number): void {
+  const usage = getOrCreateModelUsage(modelKey(provider, model), Date.now());
+  usage.minuteRequests += 1;
+  usage.dayRequests += 1;
+  usage.minuteTokens += Math.max(0, estimatedInputTokens);
+  usage.dayTokens += Math.max(0, estimatedInputTokens);
+}
+
+function adjustPromptTokenEstimate(
+  provider: AiProvider,
+  model: string,
+  estimatedInputTokens: number,
+  actualPromptTokens?: number
+): void {
+  if (!Number.isFinite(actualPromptTokens)) return;
+  const usage = getOrCreateModelUsage(modelKey(provider, model), Date.now());
+  const delta = Math.max(0, Math.round(actualPromptTokens || 0)) - Math.max(0, estimatedInputTokens);
+  if (delta !== 0) {
+    usage.minuteTokens += delta;
+    usage.dayTokens += delta;
+  }
+}
+
+function recordCompletionTokens(provider: AiProvider, model: string, completionTokens: number): void {
+  const usage = getOrCreateModelUsage(modelKey(provider, model), Date.now());
+  usage.minuteTokens += Math.max(0, Math.round(completionTokens));
+  usage.dayTokens += Math.max(0, Math.round(completionTokens));
+}
+
+async function runWithOpenAiGate<T>(fn: () => Promise<T>): Promise<T> {
   await acquireOpenAiSlot();
   try {
-    if (waitForCooldown) {
-      await waitForCooldown();
-    }
+    await waitForOpenAiRateLimitCooldown();
     await waitForOpenAiPacing();
     return await fn();
   } finally {
@@ -143,12 +413,15 @@ async function runWithAiProviderGate<T>(
   }
 }
 
-async function runWithOpenAiGate<T>(fn: () => Promise<T>): Promise<T> {
-  return runWithAiProviderGate(fn, waitForOpenAiRateLimitCooldown);
-}
-
 async function runWithGeminiGate<T>(fn: () => Promise<T>): Promise<T> {
-  return runWithAiProviderGate(fn, waitForGeminiRateLimitCooldown);
+  await acquireGeminiSlot();
+  try {
+    await waitForGeminiRateLimitCooldown();
+    await waitForGeminiPacing();
+    return await fn();
+  } finally {
+    releaseGeminiSlot();
+  }
 }
 
 function getOpenAiStatus(error: unknown): number | null {
@@ -192,18 +465,78 @@ function getOpenAiRetryAfterMs(error: unknown): number | null {
   return null;
 }
 
+function getConfiguredOpenAiModels(): string[] {
+  const raw =
+    process.env.AI_OPENAI_MODELS ||
+    process.env.OPENAI_MODELS ||
+    process.env.OPENAI_MODEL ||
+    OPENAI_MODELS_DEFAULT.join(",");
+
+  const normalized = raw
+    .split(",")
+    .map((x) => x.trim())
+    .filter(Boolean);
+
+  return normalized.length > 0 ? normalized : OPENAI_MODELS_DEFAULT;
+}
+
 function getConfiguredGeminiModels(): string[] {
   const raw =
     process.env.GEMINI_MODELS ||
     process.env.GEMINI_MODEL ||
     DEFAULT_GEMINI_MODELS.join(",");
 
-  const normalized = raw
+  const configured = raw
     .split(",")
     .map((x) => x.trim().replace(/\s+/g, "-"))
     .filter(Boolean);
 
-  return normalized.length > 0 ? normalized : DEFAULT_GEMINI_MODELS;
+  return Array.from(new Set([...configured, ...DEFAULT_GEMINI_MODELS]));
+}
+
+function inferProviderFromModel(model: string): AiProvider {
+  const normalized = normalizeModelId(model);
+  if (
+    normalized.startsWith("gpt-") ||
+    normalized.startsWith("o1") ||
+    normalized.startsWith("o3")
+  ) {
+    return "openai";
+  }
+  return "gemini";
+}
+
+function getConfiguredModelChain(): ModelRoute[] {
+  const explicit = (process.env.AI_MODEL_CHAIN || "").trim();
+  const chainItems = explicit
+    ? explicit.split(",").map((x) => x.trim()).filter(Boolean)
+    : [
+        ...getConfiguredOpenAiModels().map((model) => `openai:${model}`),
+        ...getConfiguredGeminiModels().map((model) => `gemini:${model}`),
+      ];
+
+  const routes: ModelRoute[] = [];
+  const seen = new Set<string>();
+
+  for (const item of chainItems) {
+    const sep = item.indexOf(":");
+    const hasPrefix = sep > 0;
+    const providerRaw = hasPrefix ? item.slice(0, sep).toLowerCase() : "";
+    const modelRaw = hasPrefix ? item.slice(sep + 1).trim() : item.trim();
+    if (!modelRaw) continue;
+
+    const provider =
+      providerRaw === "openai" || providerRaw === "gemini"
+        ? (providerRaw as AiProvider)
+        : inferProviderFromModel(modelRaw);
+    const normalizedModel = provider === "gemini" ? modelRaw.replace(/\s+/g, "-") : modelRaw;
+    const key = `${provider}:${normalizeModelId(normalizedModel)}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    routes.push({ provider, model: normalizedModel });
+  }
+
+  return routes;
 }
 
 function getGeminiApiKey(): string | null {
@@ -263,6 +596,11 @@ interface GeminiGenerateContentResponse {
       parts?: Array<{ text?: string }>;
     };
   }>;
+  usageMetadata?: {
+    promptTokenCount?: number;
+    candidatesTokenCount?: number;
+    totalTokenCount?: number;
+  };
   error?: {
     code?: number;
     message?: string;
@@ -270,9 +608,16 @@ interface GeminiGenerateContentResponse {
   };
 }
 
-async function callGeminiModel(model: string, systemPrompt: string, userPrompt: string): Promise<string> {
+async function callGeminiModel(
+  model: string,
+  systemPrompt: string,
+  userPrompt: string
+): Promise<ProviderCallResult> {
   const apiKey = getGeminiApiKey();
   if (!apiKey) throw new Error("Gemini API key missing (set GEMINI_API_KEY or GOOGLE_API_KEY)");
+  const estimatedInputTokens = estimateTokens(systemPrompt) + estimateTokens(userPrompt);
+  enforceNearLimitBudget("gemini", model, estimatedInputTokens);
+  reserveModelUsage("gemini", model, estimatedInputTokens);
 
   const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent?key=${apiKey}`;
   const controller = new AbortController();
@@ -309,7 +654,9 @@ async function callGeminiModel(model: string, systemPrompt: string, userPrompt: 
     if (!response.ok) {
       const retryAfterMs = getRetryAfterFromHeaders(response.headers);
       if (response.status === 429) {
-        setGeminiRateLimitCooldown(retryAfterMs ?? GEMINI_RATE_LIMIT_MIN_COOLDOWN_MS);
+        const cooldownMs = retryAfterMs ?? GEMINI_RATE_LIMIT_MIN_COOLDOWN_MS;
+        setGeminiRateLimitCooldown(cooldownMs);
+        setModelCooldown("gemini", model, cooldownMs, "429");
       }
       const msg = body?.error?.message || `Gemini HTTP ${response.status}`;
       const err = new Error(msg) as Error & { status?: number };
@@ -319,13 +666,34 @@ async function callGeminiModel(model: string, systemPrompt: string, userPrompt: 
 
     const text = body.candidates?.[0]?.content?.parts?.map((p) => p.text || "").join("").trim();
     if (!text) throw new Error(`Gemini empty response for model ${model}`);
-    return text;
+    const promptTokens = body.usageMetadata?.promptTokenCount;
+    const completionTokens =
+      body.usageMetadata?.candidatesTokenCount ??
+      Math.max(
+        1,
+        (body.usageMetadata?.totalTokenCount || 0) - (body.usageMetadata?.promptTokenCount || 0)
+      );
+    adjustPromptTokenEstimate("gemini", model, estimatedInputTokens, promptTokens);
+    if (Number.isFinite(completionTokens)) {
+      recordCompletionTokens("gemini", model, completionTokens || 0);
+    } else {
+      recordCompletionTokens("gemini", model, estimateTokens(text));
+    }
+    return {
+      content: text,
+      promptTokens,
+      completionTokens,
+    };
   } finally {
     clearTimeout(timeout);
   }
 }
 
-async function withGeminiRetry(model: string, systemPrompt: string, userPrompt: string): Promise<string> {
+async function withGeminiRetry(
+  model: string,
+  systemPrompt: string,
+  userPrompt: string
+): Promise<ProviderCallResult> {
   let lastError: unknown;
 
   for (let attempt = 0; attempt <= GEMINI_MAX_RETRIES; attempt++) {
@@ -339,6 +707,7 @@ async function withGeminiRetry(model: string, systemPrompt: string, userPrompt: 
 
       if (rateLimited) {
         setGeminiRateLimitCooldown(GEMINI_RATE_LIMIT_MIN_COOLDOWN_MS);
+        setModelCooldown("gemini", model, GEMINI_RATE_LIMIT_MIN_COOLDOWN_MS, "429");
       }
 
       if (!retryable || attempt === GEMINI_MAX_RETRIES) {
@@ -359,26 +728,7 @@ async function withGeminiRetry(model: string, systemPrompt: string, userPrompt: 
   throw lastError;
 }
 
-async function getGeminiDecisionContent(systemPrompt: string, userPrompt: string): Promise<string> {
-  const models = getConfiguredGeminiModels();
-  let lastError: unknown = null;
-
-  for (const model of models) {
-    try {
-      const content = await withGeminiRetry(model, systemPrompt, userPrompt);
-      console.log(`[AI] Using Gemini fallback model ${model}`);
-      return content;
-    } catch (error) {
-      lastError = error;
-      const msg = error instanceof Error ? error.message : String(error);
-      console.warn(`[AI] Gemini model ${model} failed: ${msg.slice(0, 160)}`);
-    }
-  }
-
-  throw lastError instanceof Error ? lastError : new Error("Gemini fallback failed");
-}
-
-async function withOpenAiRetry<T>(fn: () => Promise<T>, label: string): Promise<T> {
+async function withOpenAiRetry<T>(fn: () => Promise<T>, label: string, model: string): Promise<T> {
   let lastError: unknown;
 
   for (let attempt = 0; attempt <= OPENAI_MAX_RETRIES; attempt++) {
@@ -393,6 +743,7 @@ async function withOpenAiRetry<T>(fn: () => Promise<T>, label: string): Promise<
 
       if (quotaExhausted) {
         setOpenAiRateLimitCooldown(OPENAI_QUOTA_COOLDOWN_MS);
+        setModelCooldown("openai", model, OPENAI_QUOTA_COOLDOWN_MS, "quota exhausted");
         throw error;
       }
 
@@ -405,6 +756,7 @@ async function withOpenAiRetry<T>(fn: () => Promise<T>, label: string): Promise<
             30_000
           );
         setOpenAiRateLimitCooldown(cooldownMs);
+        setModelCooldown("openai", model, cooldownMs, "429");
       }
 
       if (!retryable || attempt === OPENAI_MAX_RETRIES) {
@@ -423,6 +775,59 @@ async function withOpenAiRetry<T>(fn: () => Promise<T>, label: string): Promise<
   }
 
   throw lastError;
+}
+
+async function callOpenAiModel(
+  model: string,
+  systemPrompt: string,
+  userPrompt: string
+): Promise<ProviderCallResult> {
+  const openai = getOpenAI();
+  const estimatedInputTokens = estimateTokens(systemPrompt) + estimateTokens(userPrompt);
+  enforceNearLimitBudget("openai", model, estimatedInputTokens);
+  reserveModelUsage("openai", model, estimatedInputTokens);
+  const response = await withOpenAiRetry(
+    () =>
+      openai.chat.completions.create({
+        model,
+        messages: [
+          { role: "system", content: systemPrompt },
+          { role: "user", content: userPrompt },
+        ],
+        temperature: 0.3,
+        max_tokens: 500,
+        response_format: { type: "json_object" },
+      }),
+    `OpenAI ${model}`,
+    model
+  );
+
+  const content = response.choices[0]?.message?.content ?? "";
+  const promptTokens = response.usage?.prompt_tokens;
+  const completionTokens = response.usage?.completion_tokens;
+  adjustPromptTokenEstimate("openai", model, estimatedInputTokens, promptTokens);
+  if (Number.isFinite(completionTokens)) {
+    recordCompletionTokens("openai", model, completionTokens || 0);
+  } else if (content) {
+    recordCompletionTokens("openai", model, estimateTokens(content));
+  }
+
+  return {
+    content,
+    promptTokens,
+    completionTokens,
+  };
+}
+
+async function callModelRoute(
+  route: ModelRoute,
+  systemPrompt: string,
+  userPrompt: string
+): Promise<ProviderCallResult> {
+  if (route.provider === "openai") {
+    return callOpenAiModel(route.model, systemPrompt, userPrompt);
+  }
+  return withGeminiRetry(route.model, systemPrompt, userPrompt);
 }
 
 function getOpenAI(): OpenAI {
@@ -590,47 +995,40 @@ ${indicatorSection}
 Provide your trading decision as JSON:`;
 
   let content: string | null = null;
+  const modelChain = getConfiguredModelChain();
+  const hasOpenAiKey = Boolean(process.env.OPENAI_API_KEY?.trim());
+  const hasGeminiKey = Boolean(getGeminiApiKey());
+  let lastError: unknown = null;
 
-  try {
-    const openai = getOpenAI();
-    const response = await withOpenAiRetry(
-      () =>
-        openai.chat.completions.create({
-          model: "gpt-4o",
-          messages: [
-            { role: "system", content: SYSTEM_PROMPT },
-            { role: "user", content: userPrompt },
-          ],
-          temperature: 0.3,
-          max_tokens: 500,
-          response_format: { type: "json_object" },
-        }),
-      "getTradeDecision"
-    );
-    content = response.choices[0]?.message?.content ?? null;
-    if (content) {
-      console.log("[AI] Using OpenAI model gpt-4o");
+  for (const route of modelChain) {
+    if (route.provider === "openai" && !hasOpenAiKey) continue;
+    if (route.provider === "gemini" && !hasGeminiKey) continue;
+
+    try {
+      const result = await callModelRoute(route, SYSTEM_PROMPT, userPrompt);
+      const candidate = (result.content || "").trim();
+      if (!candidate) throw new Error(`${route.provider}:${route.model} returned empty content`);
+      content = candidate;
+      console.log(`[AI] Decision model: ${route.provider}:${route.model}`);
+      break;
+    } catch (error) {
+      lastError = error;
+      const msg = error instanceof Error ? error.message : String(error);
+      console.warn(`[AI] ${route.provider}:${route.model} failed: ${msg.slice(0, 160)}`);
     }
-  } catch (error) {
-    const msg = error instanceof Error ? error.message : String(error);
-    console.warn(`[AI] OpenAI unavailable, switching to Gemini fallback: ${msg.slice(0, 160)}`);
   }
 
   if (!content) {
-    try {
-      content = await getGeminiDecisionContent(SYSTEM_PROMPT, userPrompt);
-    } catch (error) {
-      const msg = error instanceof Error ? error.message : String(error);
-      console.error(`[AI] Gemini fallback unavailable: ${msg.slice(0, 160)}`);
-      return {
-        action: "hold",
-        asset: params.allowedMarkets[0] || "BTC",
-        size: 0,
-        leverage: 1,
-        confidence: 0,
-        reasoning: "AI unavailable due to provider rate limit/quota; holding position.",
-      };
-    }
+    const msg = lastError instanceof Error ? lastError.message : String(lastError ?? "unknown");
+    console.error(`[AI] Model chain exhausted: ${msg.slice(0, 160)}`);
+    return {
+      action: "hold",
+      asset: params.allowedMarkets[0] || "BTC",
+      size: 0,
+      leverage: 1,
+      confidence: 0,
+      reasoning: "AI unavailable due to provider rate limit/quota; holding position.",
+    };
   }
 
   if (!content) throw new Error("No response from AI");

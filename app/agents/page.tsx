@@ -14,7 +14,7 @@ type ExploreAgent = {
   id: string;
   name: string;
   description: string;
-  status: "active";
+  status: "active" | "paused" | "stopped";
   markets: string[];
   riskLevel: "conservative" | "moderate" | "aggressive";
 };
@@ -28,6 +28,12 @@ function riskClass(riskLevel: ExploreAgent["riskLevel"]): string {
   if (riskLevel === "conservative") return "text-success";
   if (riskLevel === "moderate") return "text-warning";
   return "text-danger";
+}
+
+function statusClass(status: ExploreAgent["status"]): string {
+  if (status === "active") return "chip-active";
+  if (status === "paused") return "chip-paused";
+  return "chip-stopped";
 }
 
 export default function AgentsPage() {
@@ -96,7 +102,7 @@ export default function AgentsPage() {
     };
   }, [address, canFilterMine, monadTestnet, scope, user?.id]);
 
-  const emptyTitle = scope === "mine" ? "No owned active agents" : "No active agents";
+  const emptyTitle = scope === "mine" ? "No owned agents" : "No active agents";
   const emptyCopy = scope === "mine"
     ? "Create an agent with your connected wallet to see it here."
     : "No active agents are available right now.";
@@ -129,7 +135,7 @@ export default function AgentsPage() {
         <div className="mb-8 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
           <div>
             <h2 className="text-2xl md:text-3xl font-bold mb-2 gradient-title">Explore Agents</h2>
-            <p className="text-muted text-sm">Active agents only. Select a tile for the minimal dashboard.</p>
+            <p className="text-muted text-sm">All Active shows public active agents. My Agents includes your paused and stopped agents.</p>
           </div>
 
           <div className="flex items-center gap-1 bg-surface rounded-xl p-1 border border-card-border w-fit">
@@ -147,7 +153,7 @@ export default function AgentsPage() {
                 scope === "mine" ? "bg-card text-foreground shadow-sm" : "text-muted hover:text-foreground"
               }`}
             >
-              My Active
+              My Agents
             </button>
           </div>
         </div>
@@ -203,9 +209,9 @@ export default function AgentsPage() {
                   </p>
 
                   <div className="pt-3 border-t border-card-border flex items-center justify-between text-[11px]">
-                    <span className="chip chip-active">
-                      <span className="w-1.5 h-1.5 rounded-full bg-current pulse-live" />
-                      active
+                    <span className={`chip ${statusClass(agent.status)}`}>
+                      {agent.status === "active" ? <span className="w-1.5 h-1.5 rounded-full bg-current pulse-live" /> : null}
+                      {agent.status}
                     </span>
                     <span className={`font-medium capitalize ${riskClass(agent.riskLevel)}`}>
                       {agent.riskLevel}

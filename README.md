@@ -774,6 +774,12 @@ cp .env.example .env.local
 | `RELAY_FEE_BPS`                      | No       | Deposit relay fee in basis points (default: 100 = 1%) |
 | `RELAY_STABLE_TOKENS`                | No       | Comma-separated mainnet ERC20 addresses allowed for $1 relay pricing |
 | `OPENAI_API_KEY`                     | Yes      | API key for the AI trading brain                      |
+| `GEMINI_API_KEY`                     | No       | Gemini API key used in model fallback chain           |
+| `AI_MODEL_CHAIN`                     | No       | Ordered `provider:model` fallback list for AI decisions |
+| `AI_NEAR_LIMIT_THRESHOLD`            | No       | Start falling back before hard quota (default: 0.85)  |
+| `AGENT_AI_HOT_HOURS_UTC`             | No       | UTC hot-hour list/ranges for frequent decisions       |
+| `AGENT_AI_HOT_HOURS_DECISION_MIN_INTERVAL_MS` | No | Minimum AI decision spacing during hot hours         |
+| `AGENT_AI_OFF_HOURS_DECISION_MIN_INTERVAL_MS` | No | Minimum AI decision spacing outside hot hours        |
 | `AGENT_TICK_INTERVAL`                | No       | Agent runner interval in ms (default: 60000)          |
 | `TELEGRAM_BOT_TOKEN`                 | No       | Telegram bot token from @BotFather                    |
 | `ACCOUNT_ENCRYPTION_KEY`             | Yes      | AES-256-CBC key for stored private keys               |

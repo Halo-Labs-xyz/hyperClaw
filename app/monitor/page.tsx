@@ -5,6 +5,7 @@ import Link from "next/link";
 import { HyperclawLogo } from "@/app/components/HyperclawLogo";
 import { HyperclawIcon } from "@/app/components/HyperclawIcon";
 import { NetworkToggle } from "@/app/components/NetworkToggle";
+import { useNetwork } from "@/app/components/NetworkContext";
 import { PositionPanel } from "../components/monitor/PositionPanel";
 import { OrderPanel } from "../components/monitor/OrderPanel";
 import { PricePanel } from "../components/monitor/PricePanel";
@@ -16,6 +17,7 @@ import type { Agent } from "@/lib/types";
 import type { Address } from "viem";
 
 export default function MonitorPage() {
+  const { monadTestnet } = useNetwork();
   const [agents, setAgents] = useState<Agent[]>([]);
   const [selectedAgent, setSelectedAgent] = useState<Agent | null>(null);
   const [loading, setLoading] = useState(true);
@@ -23,7 +25,8 @@ export default function MonitorPage() {
   useEffect(() => {
     async function load() {
       try {
-        const res = await fetch("/api/agents");
+        const network = monadTestnet ? "testnet" : "mainnet";
+        const res = await fetch(`/api/agents?network=${network}`);
         const data = await res.json();
         const agentList = data.agents || [];
         setAgents(agentList);
@@ -37,7 +40,7 @@ export default function MonitorPage() {
       }
     }
     load();
-  }, []);
+  }, [monadTestnet]);
 
   if (loading) {
     return (

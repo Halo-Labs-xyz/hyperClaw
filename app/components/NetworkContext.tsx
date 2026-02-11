@@ -42,29 +42,39 @@ export function NetworkProvider({ children }: { children: ReactNode }) {
   const [switching, setSwitching] = useState(false);
   const { switchChainAsync } = useSwitchChain();
 
-  // Load initial state from server
+  // Load initial state from server, fall back to localStorage if unavailable.
   useEffect(() => {
-    fetch("/api/network")
-      .then((r) => r.json())
-      .then((data) => {
+    let cancelled = false;
+    async function loadNetwork() {
+      try {
+        const res = await fetch("/api/network");
+        const data = await res.json();
+        if (cancelled) return;
         setMonadTest(data.monadTestnet ?? true);
         setHlTest(data.hlTestnet ?? true);
-      })
-      .catch(() => {});
-  }, []);
-
-  // Also sync from localStorage on mount
-  useEffect(() => {
-    const stored = localStorage.getItem("hyperclaw-network");
-    if (stored) {
-      try {
-        const parsed = JSON.parse(stored);
-        if (typeof parsed.monadTestnet === "boolean") setMonadTest(parsed.monadTestnet);
-        if (typeof parsed.hlTestnet === "boolean") setHlTest(parsed.hlTestnet);
+        localStorage.setItem(
+          "hyperclaw-network",
+          JSON.stringify({
+            monadTestnet: data.monadTestnet ?? true,
+            hlTestnet: data.hlTestnet ?? true,
+          })
+        );
       } catch {
-        // ignore
+        const stored = localStorage.getItem("hyperclaw-network");
+        if (!stored || cancelled) return;
+        try {
+          const parsed = JSON.parse(stored);
+          if (typeof parsed.monadTestnet === "boolean") setMonadTest(parsed.monadTestnet);
+          if (typeof parsed.hlTestnet === "boolean") setHlTest(parsed.hlTestnet);
+        } catch {
+          // ignore malformed local data
+        }
       }
     }
+    void loadNetwork();
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   const setNetwork = useCallback(

@@ -34,6 +34,7 @@ type RunnerGlobals = {
   runnerIntervals: Map<string, ReturnType<typeof setInterval>>;
   consecutiveFailures: Map<string, number>;
   inFlightTicks: Map<string, Promise<TradeLog>>;
+  decisionCadence: Map<string, { lastDecisionAtMs: number; lastThrottleLogAtMs: number }>;
 };
 
 const runnerGlobals = (globalThis as typeof globalThis & {
@@ -43,12 +44,14 @@ const runnerGlobals = (globalThis as typeof globalThis & {
   runnerIntervals: new Map<string, ReturnType<typeof setInterval>>(),
   consecutiveFailures: new Map<string, number>(),
   inFlightTicks: new Map<string, Promise<TradeLog>>(),
+  decisionCadence: new Map<string, { lastDecisionAtMs: number; lastThrottleLogAtMs: number }>(),
 };
 
 const runnerStates = runnerGlobals.runnerStates;
 const runnerIntervals = runnerGlobals.runnerIntervals;
 const consecutiveFailures = runnerGlobals.consecutiveFailures;
 const inFlightTicks = runnerGlobals.inFlightTicks;
+const decisionCadence = runnerGlobals.decisionCadence;
 
 const HL_HISTORY_FETCH_CONCURRENCY = Math.max(
   1,
@@ -62,6 +65,116 @@ const AGENT_GLOBAL_TICK_CONCURRENCY = Math.max(
   1,
   parseInt(process.env.AGENT_GLOBAL_TICK_CONCURRENCY || "1", 10)
 );
+const AGENT_AI_HOT_HOURS_UTC_RAW = process.env.AGENT_AI_HOT_HOURS_UTC || "12-21";
+const AGENT_AI_HOT_HOURS_DECISION_MIN_INTERVAL_MS = Math.max(
+  15_000,
+  parseInt(
+    process.env.AGENT_AI_HOT_HOURS_DECISION_MIN_INTERVAL_MS ||
+      process.env.AGENT_TICK_INTERVAL ||
+      "60000",
+    10
+  )
+);
+const AGENT_AI_OFF_HOURS_DECISION_MIN_INTERVAL_MS = Math.max(
+  60_000,
+  parseInt(process.env.AGENT_AI_OFF_HOURS_DECISION_MIN_INTERVAL_MS || "1800000", 10)
+);
+const AGENT_AI_THROTTLE_LOG_INTERVAL_MS = Math.max(
+  60_000,
+  parseInt(process.env.AGENT_AI_THROTTLE_LOG_INTERVAL_MS || "900000", 10)
+);
+
+function parseUtcHourToken(token: string): number | null {
+  const n = Number.parseInt(token.trim(), 10);
+  if (!Number.isFinite(n) || n < 0 || n > 23) return null;
+  return n;
+}
+
+function parseUtcHotHours(raw: string): Set<number> {
+  const normalized = raw.trim().toLowerCase();
+  if (!normalized || normalized === "all" || normalized === "*") {
+    return new Set(Array.from({ length: 24 }, (_, i) => i));
+  }
+
+  const result = new Set<number>();
+  const tokens = normalized.split(",").map((x) => x.trim()).filter(Boolean);
+  for (const token of tokens) {
+    if (token.includes("-")) {
+      const [startRaw, endRaw] = token.split("-", 2);
+      const start = parseUtcHourToken(startRaw);
+      const end = parseUtcHourToken(endRaw);
+      if (start === null || end === null) continue;
+      if (start <= end) {
+        for (let h = start; h <= end; h++) result.add(h);
+      } else {
+        for (let h = start; h <= 23; h++) result.add(h);
+        for (let h = 0; h <= end; h++) result.add(h);
+      }
+      continue;
+    }
+
+    const hour = parseUtcHourToken(token);
+    if (hour !== null) result.add(hour);
+  }
+
+  if (result.size === 0) {
+    for (let h = 0; h < 24; h++) result.add(h);
+  }
+  return result;
+}
+
+const AGENT_AI_HOT_HOURS_UTC = parseUtcHotHours(AGENT_AI_HOT_HOURS_UTC_RAW);
+
+function getDecisionCadence(agentId: string): { lastDecisionAtMs: number; lastThrottleLogAtMs: number } {
+  const existing = decisionCadence.get(agentId);
+  if (existing) return existing;
+  const created = { lastDecisionAtMs: 0, lastThrottleLogAtMs: 0 };
+  decisionCadence.set(agentId, created);
+  return created;
+}
+
+function getUtcHour(nowMs: number): number {
+  return new Date(nowMs).getUTCHours();
+}
+
+function evaluateDecisionCadence(agentId: string, nowMs: number): {
+  shouldThrottle: boolean;
+  reason: string;
+  nextEligibleAtMs: number;
+  shouldPersistThrottleLog: boolean;
+} {
+  const cadence = getDecisionCadence(agentId);
+  const hour = getUtcHour(nowMs);
+  const inHotHours = AGENT_AI_HOT_HOURS_UTC.has(hour);
+  const intervalMs = inHotHours
+    ? AGENT_AI_HOT_HOURS_DECISION_MIN_INTERVAL_MS
+    : AGENT_AI_OFF_HOURS_DECISION_MIN_INTERVAL_MS;
+
+  if (cadence.lastDecisionAtMs <= 0 || nowMs - cadence.lastDecisionAtMs >= intervalMs) {
+    cadence.lastDecisionAtMs = nowMs;
+    return {
+      shouldThrottle: false,
+      reason: "",
+      nextEligibleAtMs: nowMs,
+      shouldPersistThrottleLog: false,
+    };
+  }
+
+  const nextEligibleAtMs = cadence.lastDecisionAtMs + intervalMs;
+  const shouldPersistThrottleLog =
+    nowMs - cadence.lastThrottleLogAtMs >= AGENT_AI_THROTTLE_LOG_INTERVAL_MS;
+  if (shouldPersistThrottleLog) {
+    cadence.lastThrottleLogAtMs = nowMs;
+  }
+
+  const modeLabel = inHotHours ? "hot-hour pacing" : "off-hours throttle";
+  return {
+    shouldThrottle: true,
+    reason: `AI decision ${modeLabel} active (UTC hour ${hour}). Next AI evaluation at ${new Date(nextEligibleAtMs).toISOString()}.`,
+    nextEligibleAtMs,
+    shouldPersistThrottleLog,
+  };
+}
 
 async function mapWithConcurrency<T, R>(
   items: readonly T[],
@@ -159,6 +272,9 @@ export async function startAgent(
 
   runnerStates.set(agentId, state);
   consecutiveFailures.set(agentId, 0);
+  if (!decisionCadence.has(agentId)) {
+    decisionCadence.set(agentId, { lastDecisionAtMs: 0, lastThrottleLogAtMs: 0 });
+  }
 
   // Stagger first tick by a random 0-5s to avoid all agents hitting API at once
   const stagger = Math.random() * 5000;
@@ -252,6 +368,42 @@ async function executeTickInternal(agentId: string): Promise<TradeLog> {
   }
 
   const ex = agentExchange ?? undefined;
+  const cadence = evaluateDecisionCadence(agentId, Date.now());
+  if (cadence.shouldThrottle) {
+    const holdLog: TradeLog = {
+      id: randomBytes(8).toString("hex"),
+      agentId,
+      timestamp: Date.now(),
+      decision: {
+        action: "hold",
+        asset: agent.markets[0] || "BTC",
+        size: 0,
+        leverage: 1,
+        confidence: 0,
+        reasoning: cadence.reason,
+      },
+      executed: false,
+    };
+
+    if (state) {
+      state.lastTickAt = holdLog.timestamp;
+      state.nextTickAt = cadence.nextEligibleAtMs;
+      state.tickCount++;
+    }
+
+    consecutiveFailures.set(agentId, 0);
+
+    if (cadence.shouldPersistThrottleLog) {
+      console.log(`[Agent ${agentId}] ${cadence.reason}`);
+      try {
+        await appendTradeLog(holdLog);
+      } catch (logError) {
+        console.warn(`[Agent ${agentId}] Failed to persist throttled hold log:`, logError);
+      }
+    }
+
+    return holdLog;
+  }
 
   try {
     // 1. Fetch enriched market data (includes funding, OI, volume)

@@ -7,10 +7,12 @@ import Link from "next/link";
 import { HyperclawLogo } from "@/app/components/HyperclawLogo";
 import { HyperclawIcon } from "@/app/components/HyperclawIcon";
 import { AgentAvatar } from "@/app/components/AgentAvatar";
+import { useNetwork } from "@/app/components/NetworkContext";
 import type { Agent, HclawState } from "@/lib/types";
 
 export default function Dashboard() {
   const { ready, authenticated, login, logout, linkWallet, user } = usePrivy();
+  const { monadTestnet } = useNetwork();
   const { address, isConnected } = useAccount();
   const { data: balance } = useBalance({ address });
   const { signMessageAsync } = useSignMessage();
@@ -47,8 +49,9 @@ export default function Dashboard() {
 
     async function fetchCritical() {
       try {
+        const network = monadTestnet ? "testnet" : "mainnet";
         const [agentsRes, tokenRes] = await Promise.all([
-          fetch("/api/agents").then((r) => r.json()).catch(() => ({ agents: [] })),
+          fetch(`/api/agents?network=${network}`).then((r) => r.json()).catch(() => ({ agents: [] })),
           fetch("/api/token").then((r) => r.json()).catch(() => ({ configured: false })),
         ]);
         setAgents(agentsRes.agents || []);
@@ -60,7 +63,7 @@ export default function Dashboard() {
       }
     }
     fetchCritical();
-  }, []);
+  }, [monadTestnet]);
 
   useEffect(() => {
     if (!address) return;
@@ -68,7 +71,8 @@ export default function Dashboard() {
 
     async function fetchUserHclawState() {
       try {
-        const res = await fetch(`/api/hclaw/state?user=${address}`);
+        const network = monadTestnet ? "testnet" : "mainnet";
+        const res = await fetch(`/api/hclaw/state?user=${address}&network=${network}`);
         const data = await res.json();
         if (cancelled) return;
         if (data?.state) {
@@ -83,7 +87,7 @@ export default function Dashboard() {
     return () => {
       cancelled = true;
     };
-  }, [address]);
+  }, [address, monadTestnet]);
 
   // Phase 2: Lazy-load HL wallet data after initial render (non-blocking)
   useEffect(() => {

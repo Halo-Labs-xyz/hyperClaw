@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { usePrivy } from "@privy-io/react-auth";
 import { NetworkToggle } from "@/app/components/NetworkToggle";
+import { useNetwork } from "@/app/components/NetworkContext";
 import { HyperclawIcon } from "@/app/components/HyperclawIcon";
 import type { AutonomyMode } from "@/lib/types";
 import type { PerpMarketInfo, SpotMarketInfo } from "@/lib/hyperliquid";
@@ -51,6 +52,7 @@ const PINNED_PERPS = ["BTC", "ETH", "SOL", "DOGE", "AVAX", "ARB", "OP", "LINK", 
 export default function CreateAgentPage() {
   const router = useRouter();
   const { user } = usePrivy();
+  const { monadTestnet } = useNetwork();
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
   const [markets, setMarkets] = useState<string[]>(["BTC", "ETH"]);
@@ -216,6 +218,7 @@ export default function CreateAgentPage() {
     setCreating(true);
     setError("");
     try {
+      const network = monadTestnet ? "testnet" : "mainnet";
       const res = await fetch("/api/agents", {
         method: "POST",
         headers: {
@@ -240,6 +243,7 @@ export default function CreateAgentPage() {
           ownerPrivyId: user?.id || undefined,
           ownerWalletAddress: ownerWalletAddress || undefined,
           isOpenVault,
+          network,
         }),
       });
       if (!res.ok) {

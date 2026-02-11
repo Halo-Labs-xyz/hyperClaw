@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { getAgent, updateAgent, deleteAgent, getTradeLogsForAgent } from "@/lib/store";
+import { getAgent, updateAgent, getTradeLogsForAgent } from "@/lib/store";
 import { getAccountForAgent } from "@/lib/account-manager";
 import { stopAgent } from "@/lib/agent-runner";
 import { handleStatusChange, getLifecycleState } from "@/lib/agent-lifecycle";
@@ -167,18 +167,30 @@ export async function DELETE(
   { params }: { params: { id: string } }
 ) {
   try {
-    // Stop the agent runner if it's running
-    try {
-      await stopAgent(params.id);
-    } catch {
-      // Agent runner might not be running, that's OK
-    }
-
-    const deleted = await deleteAgent(params.id);
-    if (!deleted) {
+    const currentAgent = await getAgent(params.id);
+    if (!currentAgent) {
       return NextResponse.json({ error: "Agent not found" }, { status: 404 });
     }
-    return NextResponse.json({ success: true, message: "Agent deleted" });
+
+    // Soft-delete behavior: pause instead of deleting so history/config remain accessible.
+    if (currentAgent.status !== "paused") {
+      try {
+        await stopAgent(params.id);
+      } catch {
+        // runner may already be stopped
+      }
+      await updateAgent(params.id, { status: "paused" });
+      try {
+        await handleStatusChange(params.id, "paused");
+      } catch {
+        // status was updated; lifecycle catch-up can happen on next cycle
+      }
+    }
+
+    return NextResponse.json({
+      success: true,
+      message: "Agent paused. Delete is disabled to preserve agent data.",
+    });
   } catch (error) {
     console.error("Delete agent error:", error);
     return NextResponse.json(

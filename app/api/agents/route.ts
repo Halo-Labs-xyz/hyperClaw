@@ -68,16 +68,15 @@ export async function GET(request: Request) {
         );
 
       const active = networkScopedAgents.filter((a) => a.status === "active");
-      const scoped = scope === "owned"
-        ? active.filter((a) =>
-            isOwnedByViewer(
-              a.telegram?.ownerPrivyId,
-              a.telegram?.ownerWalletAddress,
-              viewerPrivyId,
-              viewerWalletAddress
-            )
-          )
-        : active;
+      const owned = networkScopedAgents.filter((a) =>
+        isOwnedByViewer(
+          a.telegram?.ownerPrivyId,
+          a.telegram?.ownerWalletAddress,
+          viewerPrivyId,
+          viewerWalletAddress
+        )
+      );
+      const scoped = scope === "owned" ? owned : active;
 
       return NextResponse.json({
         agents: scoped.map((a) => ({
@@ -114,6 +113,7 @@ export async function POST(request: Request) {
   try {
     const body = (await request.json()) as AgentConfig & {
       ownerWalletAddress?: string;
+      network?: string;
     };
 
     // Normalize creator identity from payload and fallback headers.
@@ -160,7 +160,11 @@ export async function POST(request: Request) {
         approvalTimeoutMs: 300000,
       };
     }
-    body.autonomy.deploymentNetwork = getNetworkState().monadTestnet ? "testnet" : "mainnet";
+    const requestedNetwork =
+      parseNetwork(body.network) ??
+      parseNetwork(new URL(request.url).searchParams.get("network"));
+    body.autonomy.deploymentNetwork =
+      requestedNetwork ?? (getNetworkState().monadTestnet ? "testnet" : "mainnet");
 
     // Determine wallet mode: PKP or traditional
     const usePKP = process.env.USE_LIT_PKP === "true";

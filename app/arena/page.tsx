@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { NetworkToggle } from "@/app/components/NetworkToggle";
+import { useNetwork } from "@/app/components/NetworkContext";
 import { HyperclawLogo } from "@/app/components/HyperclawLogo";
 import { HyperclawIcon } from "@/app/components/HyperclawIcon";
 import { AgentAvatar } from "@/app/components/AgentAvatar";
@@ -47,6 +48,7 @@ function buildPath(points: Array<{ x: number; y: number }>): string {
 }
 
 export default function ArenaPage() {
+  const { monadTestnet } = useNetwork();
   const [agents, setAgents] = useState<Agent[]>([]);
   const [pnlMap, setPnlMap] = useState<Record<string, number>>({});
   const [historyMap, setHistoryMap] = useState<Record<string, PnlPoint[]>>({});
@@ -62,7 +64,8 @@ export default function ArenaPage() {
 
     const fetchAgents = async () => {
       try {
-        const res = await fetch("/api/agents");
+        const network = monadTestnet ? "testnet" : "mainnet";
+        const res = await fetch(`/api/agents?network=${network}`);
         const data = await res.json();
         if (!mounted) return;
         setAgents(data.agents || []);
@@ -80,7 +83,7 @@ export default function ArenaPage() {
       mounted = false;
       clearInterval(interval);
     };
-  }, []);
+  }, [monadTestnet]);
 
   useEffect(() => {
     if (agents.length === 0) return;
