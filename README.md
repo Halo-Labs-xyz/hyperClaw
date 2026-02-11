@@ -887,6 +887,35 @@ npm run rotate:dev-secrets
 npm run build && npm run start
 ```
 
+### Production (Docker Compose on VM)
+
+This repository now includes a full stack Compose deployment:
+- `hyperclaw` (Next.js app + API, serves the PWA)
+- `ironclaw` (Rust fund-manager sidecar on `:8080`)
+- `postgres` with `pgvector` (persistent volume)
+
+Setup and run:
+
+```bash
+cp .env.docker.example .env.docker
+# fill .env.docker with real values
+
+npm run docker:up
+npm run docker:ps
+```
+
+Logs and shutdown:
+
+```bash
+npm run docker:logs
+npm run docker:down
+```
+
+Notes:
+- IronClaw requires a valid NEAR AI session token (`NEARAI_SESSION_TOKEN`) or a mounted session file.
+- Public `NEXT_PUBLIC_*` values are baked during image build. Rebuild after changing them.
+- The PWA is served by `hyperclaw` at `http://<vm-ip>:3014/`.
+
 ### Lint
 
 ```bash
@@ -928,6 +957,28 @@ For concurrent-safe, long-term history with heavy inflows, use hybrid storage:
 - S3 (`AWS_S3_BUCKET`) for high-volume trade events (`TRADE_ARCHIVE_PREFIX`)
 
 `AWS_S3_BUCKET` can be a bucket name or an S3 access point alias.
+
+### Railway
+
+Deploy with Docker to Railway. See [docs/RAILWAY_DEPLOY.md](./docs/RAILWAY_DEPLOY.md) for the full guide.
+
+- Connect your GitHub repo; Railway auto-detects the Dockerfile
+- Set env vars in the Railway dashboard (Supabase or S3 required — no persistent `.data/` on Railway)
+- `railway.json` configures health checks and restart policy
+
+### Cloud VM (Docker Compose)
+
+Use `docker-compose.yml` for single-host deployments where the app, IronClaw, and Postgres run together.
+
+```bash
+cp .env.docker.example .env.docker
+npm run docker:up
+```
+
+This runs:
+- `hyperclaw` on `3014`
+- `ironclaw` on `8080`
+- `postgres` on `5432` with persistent volume-backed storage
 
 ### EC2 Orchestrator
 
