@@ -251,8 +251,8 @@ flowchart LR
 
     Client -->|1. Invoke agent + payment| Platform
     Platform -->|2. Route via Gateway| Gateway
-    Gateway -->|3a. POST /invoke (DIRECT)| AIPLib
-    Gateway -.->|3b. Queue task (POLLING)| Gateway
+    Gateway -->|3a. Direct invoke| AIPLib
+    Gateway -.->|3b. Queue task Polling| Gateway
     AIPLib -.->|Poll tasks| Gateway
     AIPLib -->|4. Process request| AgentRunner
     AgentRunner -->|5. Get trade decision| AIBrain
