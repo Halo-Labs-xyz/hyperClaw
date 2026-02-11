@@ -821,6 +821,10 @@ cp .env.example .env.local
 | `ALLOW_RUNTIME_NETWORK_SWITCH` | Keep `false` in production defaults       |
 | `SECRETS_MASTER_KEY`      | Required by IronClaw for encrypted secrets storage |
 
+When `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` are enabled, apply every SQL file in `supabase/migrations/`.
+Required core tables: `hc_agents`, `hc_deposits`, `hc_cursors`, `hc_trades`, `hc_vault_messages`.
+Apply HCLAW tables from `supabase/migrations/20260211_hclaw_rewards.sql` only when HCLAW features are enabled.
+
 ---
 
 ## Setup
@@ -963,8 +967,10 @@ The app deploys to Vercel. `vercel.json` sets extended timeouts for agent tick (
 Storage: In serverless (Vercel), local filesystem is ephemeral. Set `AWS_S3_BUCKET` and AWS credentials to use S3 for persistent `.data/` storage.
 
 For concurrent-safe, long-term history with heavy inflows, use hybrid storage:
-- Supabase (`SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`) for core state (`hc_agents`, `hc_deposits`)
+- Supabase (`SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`) for core state (`hc_agents`, `hc_deposits`, `hc_cursors`, `hc_trades`, `hc_vault_messages`)
 - S3 (`AWS_S3_BUCKET`) for high-volume trade events (`TRADE_ARCHIVE_PREFIX`)
+
+Apply every SQL file in `supabase/migrations/` before enabling Supabase-backed storage in production.
 
 `AWS_S3_BUCKET` can be a bucket name or an S3 access point alias.
 

@@ -49,6 +49,10 @@ Railway has an **ephemeral filesystem** — `.data/` is lost on redeploy. You mu
 | `SUPABASE_URL` | `https://your-project.supabase.co` |
 | `SUPABASE_SERVICE_ROLE_KEY` | Service role key from Supabase |
 
+Before enabling Supabase in Railway, apply every SQL file in `supabase/migrations/`.
+Required core tables: `hc_agents`, `hc_deposits`, `hc_cursors`, `hc_trades`, `hc_vault_messages`.
+If HCLAW features are enabled, also apply `supabase/migrations/20260211_hclaw_rewards.sql`.
+
 **Option B: AWS S3**
 
 | Variable | Description |

@@ -214,6 +214,28 @@ async function supabaseRequest<T>(params: {
   return JSON.parse(text) as T;
 }
 
+function isMissingSupabaseTableError(error: unknown, table: string): boolean {
+  const message = (error instanceof Error ? error.message : String(error)).toLowerCase();
+  const qualified = `public.${table}`.toLowerCase();
+  return (
+    (message.includes("could not find the table") &&
+      (message.includes(qualified) || message.includes(table.toLowerCase()))) ||
+    (message.includes("relation") &&
+      message.includes(table.toLowerCase()) &&
+      message.includes("does not exist"))
+  );
+}
+
+let missingCursorTableWarningLogged = false;
+
+function warnMissingCursorTable(): void {
+  if (missingCursorTableWarningLogged) return;
+  missingCursorTableWarningLogged = true;
+  console.warn(
+    "[SupabaseStore] Missing table public.hc_cursors. Cursor persistence is disabled until migrations are applied."
+  );
+}
+
 function toAgent(row: AgentRow): Agent {
   return {
     id: row.id,
@@ -521,25 +543,41 @@ export async function sbGetDepositsForUser(user: Address): Promise<DepositRow[]>
 }
 
 export async function sbGetCursor(key: string): Promise<string | null> {
-  const rows = await supabaseRequest<CursorRow[]>({
-    method: "GET",
-    table: TABLES.cursors,
-    query: {
-      select: "*",
-      key: `eq.${key}`,
-      limit: "1",
-    },
-  });
-  return rows[0]?.value ?? null;
+  try {
+    const rows = await supabaseRequest<CursorRow[]>({
+      method: "GET",
+      table: TABLES.cursors,
+      query: {
+        select: "*",
+        key: `eq.${key}`,
+        limit: "1",
+      },
+    });
+    return rows[0]?.value ?? null;
+  } catch (error) {
+    if (isMissingSupabaseTableError(error, TABLES.cursors)) {
+      warnMissingCursorTable();
+      return null;
+    }
+    throw error;
+  }
 }
 
 export async function sbSetCursor(key: string, value: string): Promise<void> {
-  await supabaseRequest<CursorRow[]>({
-    method: "POST",
-    table: TABLES.cursors,
-    body: [{ key, value }],
-    prefer: "resolution=merge-duplicates,return=minimal",
-  });
+  try {
+    await supabaseRequest<CursorRow[]>({
+      method: "POST",
+      table: TABLES.cursors,
+      body: [{ key, value }],
+      prefer: "resolution=merge-duplicates,return=minimal",
+    });
+  } catch (error) {
+    if (isMissingSupabaseTableError(error, TABLES.cursors)) {
+      warnMissingCursorTable();
+      return;
+    }
+    throw error;
+  }
 }
 
 export async function sbUpsertHclawLock(row: HclawLockRow): Promise<void> {
