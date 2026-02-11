@@ -5,6 +5,8 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { NetworkProvider } from "./NetworkContext";
 import { monadMainnet, monadTestnet } from "@/lib/chains";
 
+const queryClient = new QueryClient();
+
 type LoadedModules = {
   PrivyProvider: ComponentType<{
     children: ReactNode;
@@ -26,7 +28,6 @@ export default function Providers({
   children: ReactNode;
 }) {
   const [modules, setModules] = useState<LoadedModules | null>(null);
-  const [queryClient] = useState(() => new QueryClient());
 
   useEffect(() => {
     let active = true;
@@ -69,6 +70,7 @@ export default function Providers({
     };
   }, []);
 
+  const useTestnet = process.env.NEXT_PUBLIC_MONAD_TESTNET === "true";
   const wagmiConfig = useMemo(() => {
     if (!modules) return null;
     return modules.createConfig({
@@ -82,12 +84,11 @@ export default function Providers({
 
   if (!modules || !wagmiConfig) return null;
 
-  const useTestnet = process.env.NEXT_PUBLIC_MONAD_TESTNET === "true";
-  const BasePrivyProvider = modules.PrivyProvider;
+  const PrivyProvider = modules.PrivyProvider;
   const WagmiProvider = modules.WagmiProvider;
 
   return (
-    <BasePrivyProvider
+    <PrivyProvider
       appId={process.env.NEXT_PUBLIC_PRIVY_APP_ID || ""}
       clientId={process.env.NEXT_PUBLIC_PRIVY_CLIENT_ID || ""}
       config={{
@@ -120,6 +121,6 @@ export default function Providers({
           <NetworkProvider>{children}</NetworkProvider>
         </WagmiProvider>
       </QueryClientProvider>
-    </BasePrivyProvider>
+    </PrivyProvider>
   );
 }

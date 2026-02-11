@@ -72,10 +72,12 @@ export async function createAgent(
         maxTradesPerDay: config.autonomy?.maxTradesPerDay ?? 10,
         approvalTimeoutMs: config.autonomy?.approvalTimeoutMs ?? 300000,
       },
-      telegram: config.telegramChatId
+      telegram: config.telegramChatId || config.ownerPrivyId || config.ownerWalletAddress
         ? {
-            enabled: true,
-            chatId: config.telegramChatId,
+            enabled: Boolean(config.telegramChatId),
+            chatId: config.telegramChatId ?? "",
+            ownerPrivyId: config.ownerPrivyId,
+            ownerWalletAddress: config.ownerWalletAddress,
             notifyOnTrade: true,
             notifyOnPnl: true,
             notifyOnTierUnlock: true,
@@ -126,10 +128,12 @@ export async function createAgent(
       maxTradesPerDay: config.autonomy?.maxTradesPerDay ?? 10,
       approvalTimeoutMs: config.autonomy?.approvalTimeoutMs ?? 300000, // 5 min default
     },
-    telegram: config.telegramChatId
+    telegram: config.telegramChatId || config.ownerPrivyId || config.ownerWalletAddress
       ? {
-          enabled: true,
-          chatId: config.telegramChatId,
+          enabled: Boolean(config.telegramChatId),
+          chatId: config.telegramChatId ?? "",
+          ownerPrivyId: config.ownerPrivyId,
+          ownerWalletAddress: config.ownerWalletAddress,
           notifyOnTrade: true,
           notifyOnPnl: true,
           notifyOnTierUnlock: true,

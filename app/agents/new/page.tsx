@@ -3,6 +3,7 @@
 import { useState, useEffect, useMemo } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
+import { usePrivy } from "@privy-io/react-auth";
 import { NetworkToggle } from "@/app/components/NetworkToggle";
 import { HyperclawIcon } from "@/app/components/HyperclawIcon";
 import type { AutonomyMode } from "@/lib/types";
@@ -49,6 +50,7 @@ const PINNED_PERPS = ["BTC", "ETH", "SOL", "DOGE", "AVAX", "ARB", "OP", "LINK", 
 
 export default function CreateAgentPage() {
   const router = useRouter();
+  const { user } = usePrivy();
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
   const [markets, setMarkets] = useState<string[]>(["BTC", "ETH"]);
@@ -78,6 +80,32 @@ export default function CreateAgentPage() {
   const [marketSearch, setMarketSearch] = useState("");
   const [marketTab, setMarketTab] = useState<"perps" | "spot">("perps");
   const [showAllPerps, setShowAllPerps] = useState(false);
+
+  const ownerWalletAddress = useMemo(() => {
+    const linked = (user?.linkedAccounts ?? []) as Array<{
+      type?: string;
+      chainType?: string;
+      walletClientType?: string;
+      address?: string;
+    }>;
+
+    const embeddedWallet = linked.find(
+      (account) =>
+        account.type === "wallet" &&
+        account.chainType === "ethereum" &&
+        account.walletClientType === "privy" &&
+        typeof account.address === "string"
+    );
+
+    const firstEthereumWallet = linked.find(
+      (account) =>
+        account.type === "wallet" &&
+        account.chainType === "ethereum" &&
+        typeof account.address === "string"
+    );
+
+    return embeddedWallet?.address ?? firstEthereumWallet?.address;
+  }, [user?.linkedAccounts]);
 
   // Fetch all markets on mount
   useEffect(() => {
@@ -190,7 +218,11 @@ export default function CreateAgentPage() {
     try {
       const res = await fetch("/api/agents", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          ...(user?.id ? { "x-owner-privy-id": user.id } : {}),
+          ...(ownerWalletAddress ? { "x-owner-wallet-address": ownerWalletAddress } : {}),
+        },
         body: JSON.stringify({
           name: name.trim(),
           description: description.trim(),
@@ -205,6 +237,8 @@ export default function CreateAgentPage() {
             approvalTimeoutMs: approvalTimeout * 60000,
           },
           telegramChatId: telegramChatId.trim() || undefined,
+          ownerPrivyId: user?.id || undefined,
+          ownerWalletAddress: ownerWalletAddress || undefined,
           isOpenVault,
         }),
       });

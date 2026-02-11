@@ -33,6 +33,7 @@ type RunnerGlobals = {
   runnerStates: Map<string, AgentRunnerState>;
   runnerIntervals: Map<string, ReturnType<typeof setInterval>>;
   consecutiveFailures: Map<string, number>;
+  inFlightTicks: Map<string, Promise<TradeLog>>;
 };
 
 const runnerGlobals = (globalThis as typeof globalThis & {
@@ -41,11 +42,84 @@ const runnerGlobals = (globalThis as typeof globalThis & {
   runnerStates: new Map<string, AgentRunnerState>(),
   runnerIntervals: new Map<string, ReturnType<typeof setInterval>>(),
   consecutiveFailures: new Map<string, number>(),
+  inFlightTicks: new Map<string, Promise<TradeLog>>(),
 };
 
 const runnerStates = runnerGlobals.runnerStates;
 const runnerIntervals = runnerGlobals.runnerIntervals;
 const consecutiveFailures = runnerGlobals.consecutiveFailures;
+const inFlightTicks = runnerGlobals.inFlightTicks;
+
+const HL_HISTORY_FETCH_CONCURRENCY = Math.max(
+  1,
+  parseInt(process.env.HL_HISTORY_FETCH_CONCURRENCY || "4", 10)
+);
+const HL_MAX_INDICATOR_MARKETS = Math.max(
+  1,
+  parseInt(process.env.HL_MAX_INDICATOR_MARKETS || "1", 10)
+);
+const AGENT_GLOBAL_TICK_CONCURRENCY = Math.max(
+  1,
+  parseInt(process.env.AGENT_GLOBAL_TICK_CONCURRENCY || "1", 10)
+);
+
+async function mapWithConcurrency<T, R>(
+  items: readonly T[],
+  concurrency: number,
+  mapper: (item: T, index: number) => Promise<R>
+): Promise<R[]> {
+  if (items.length === 0) return [];
+
+  const results = new Array<R>(items.length);
+  let nextIndex = 0;
+  const workerCount = Math.min(Math.max(1, concurrency), items.length);
+
+  async function worker(): Promise<void> {
+    while (true) {
+      const currentIndex = nextIndex++;
+      if (currentIndex >= items.length) return;
+      results[currentIndex] = await mapper(items[currentIndex], currentIndex);
+    }
+  }
+
+  await Promise.all(Array.from({ length: workerCount }, () => worker()));
+  return results;
+}
+
+let globalTickInFlight = 0;
+const globalTickWaiters: Array<() => void> = [];
+
+async function acquireGlobalTickSlot(): Promise<void> {
+  if (globalTickInFlight < AGENT_GLOBAL_TICK_CONCURRENCY) {
+    globalTickInFlight++;
+    return;
+  }
+  await new Promise<void>((resolve) => {
+    globalTickWaiters.push(() => {
+      globalTickInFlight++;
+      resolve();
+    });
+  });
+}
+
+function releaseGlobalTickSlot(): void {
+  globalTickInFlight = Math.max(0, globalTickInFlight - 1);
+  const next = globalTickWaiters.shift();
+  if (next) next();
+}
+
+async function runWithGlobalTickGate<T>(fn: () => Promise<T>): Promise<T> {
+  await acquireGlobalTickSlot();
+  try {
+    return await fn();
+  } finally {
+    releaseGlobalTickSlot();
+  }
+}
+
+function getIndicatorMarkets(markets: string[]): string[] {
+  return Array.from(new Set(markets.filter(Boolean))).slice(0, HL_MAX_INDICATOR_MARKETS);
+}
 
 export function getRunnerState(agentId: string): AgentRunnerState | null {
   return runnerStates.get(agentId) || null;
@@ -130,6 +204,20 @@ export async function stopAgent(agentId: string): Promise<void> {
 // ============================================
 
 export async function executeTick(agentId: string): Promise<TradeLog> {
+  const existing = inFlightTicks.get(agentId);
+  if (existing) {
+    console.log(`[Agent ${agentId}] Tick already in progress; reusing in-flight tick`);
+    return existing;
+  }
+
+  const tickPromise = runWithGlobalTickGate(() => executeTickInternal(agentId)).finally(() => {
+    inFlightTicks.delete(agentId);
+  });
+  inFlightTicks.set(agentId, tickPromise);
+  return tickPromise;
+}
+
+async function executeTickInternal(agentId: string): Promise<TradeLog> {
   const agent = await getAgent(agentId);
   if (!agent) throw new Error(`Agent ${agentId} not found`);
 
@@ -237,13 +325,23 @@ export async function executeTick(agentId: string): Promise<TradeLog> {
     if (agent.indicator?.enabled && agent.markets.length > 0) {
       console.log(`[Agent ${agentId}] Fetching historical prices for indicator analysis...`);
       try {
-        // Fetch historical prices for all allowed markets
-        const pricePromises = agent.markets.map(async (coin) => {
-          const data = await getHistoricalPrices(coin, "15m", 50);
-          return { coin, prices: data.prices };
-        });
-        
-        const results = await Promise.all(pricePromises);
+        const indicatorMarkets = getIndicatorMarkets(agent.markets);
+
+        if (indicatorMarkets.length < agent.markets.length) {
+          console.log(
+            `[Agent ${agentId}] Indicator candles capped at ${indicatorMarkets.length}/${agent.markets.length} markets`
+          );
+        }
+
+        const results = await mapWithConcurrency(
+          indicatorMarkets,
+          HL_HISTORY_FETCH_CONCURRENCY,
+          async (coin) => {
+            const data = await getHistoricalPrices(coin, "15m", 50);
+            return { coin, prices: data.prices };
+          }
+        );
+
         for (const { coin, prices } of results) {
           if (prices.length > 0) {
             historicalPrices[coin] = prices;

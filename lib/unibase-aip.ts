@@ -117,6 +117,42 @@ declare global {
 const hyperClawToAIPMap: Map<string, string> = 
   global.__aip_hyperclaw_to_aip || (global.__aip_hyperclaw_to_aip = new Map());
 
+const HL_HISTORY_FETCH_CONCURRENCY = Math.max(
+  1,
+  parseInt(process.env.HL_HISTORY_FETCH_CONCURRENCY || "4", 10)
+);
+const HL_MAX_INDICATOR_MARKETS = Math.max(
+  1,
+  parseInt(process.env.HL_MAX_INDICATOR_MARKETS || "1", 10)
+);
+
+async function mapWithConcurrency<T, R>(
+  items: readonly T[],
+  concurrency: number,
+  mapper: (item: T, index: number) => Promise<R>
+): Promise<R[]> {
+  if (items.length === 0) return [];
+
+  const results = new Array<R>(items.length);
+  let nextIndex = 0;
+  const workerCount = Math.min(Math.max(1, concurrency), items.length);
+
+  async function worker(): Promise<void> {
+    while (true) {
+      const currentIndex = nextIndex++;
+      if (currentIndex >= items.length) return;
+      results[currentIndex] = await mapper(items[currentIndex], currentIndex);
+    }
+  }
+
+  await Promise.all(Array.from({ length: workerCount }, () => worker()));
+  return results;
+}
+
+function getIndicatorMarkets(markets: string[]): string[] {
+  return Array.from(new Set(markets.filter(Boolean))).slice(0, HL_MAX_INDICATOR_MARKETS);
+}
+
 export function getAIPAgentByHyperClawId(hyperClawAgentId: string): RegisteredAIPAgent | null {
   const aipAgentId = hyperClawToAIPMap.get(hyperClawAgentId);
   if (!aipAgentId) return null;
@@ -340,12 +376,17 @@ export function createAgentHandler(hyperClawAgentId: string): AgentHandler {
       const historicalPrices: Record<string, number[]> = {};
       if (agent.indicator?.enabled && agent.markets.length > 0) {
         try {
-          const pricePromises = agent.markets.map(async (coin) => {
-            const data = await getHistoricalPrices(coin, "15m", 50);
-            return { coin, prices: data.prices };
-          });
-          
-          const results = await Promise.all(pricePromises);
+          const indicatorMarkets = getIndicatorMarkets(agent.markets);
+
+          const results = await mapWithConcurrency(
+            indicatorMarkets,
+            HL_HISTORY_FETCH_CONCURRENCY,
+            async (coin) => {
+              const data = await getHistoricalPrices(coin, "15m", 50);
+              return { coin, prices: data.prices };
+            }
+          );
+
           for (const { coin, prices } of results) {
             if (prices.length > 0) {
               historicalPrices[coin] = prices;

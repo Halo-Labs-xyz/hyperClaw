@@ -42,6 +42,8 @@ export interface AutonomyConfig {
 export interface TelegramConfig {
   enabled: boolean;
   chatId: string; // user's Telegram chat ID (from /start command)
+  ownerPrivyId?: string; // Privy user ID that owns this agent
+  ownerWalletAddress?: Address; // Creator wallet address associated with ownerPrivyId
   // Notification preferences
   notifyOnTrade: boolean; // notify when agent executes or proposes a trade
   notifyOnPnl: boolean; // daily PnL summary
@@ -115,6 +117,8 @@ export interface AgentConfig {
   // New fields
   autonomy: AutonomyConfig;
   telegramChatId?: string;
+  ownerPrivyId?: string;
+  ownerWalletAddress?: Address;
   isOpenVault?: boolean;
 }
 

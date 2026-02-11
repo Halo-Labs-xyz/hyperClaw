@@ -1,7 +1,8 @@
 "use client";
 
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import Link from "next/link";
+import { usePrivy } from "@privy-io/react-auth";
 import { HyperclawLogo } from "@/app/components/HyperclawLogo";
 import { HyperclawIcon } from "@/app/components/HyperclawIcon";
 import { NetworkToggle } from "@/app/components/NetworkToggle";
@@ -11,6 +12,7 @@ import { BacktestResults } from "../components/strategy/BacktestResults";
 import type { StrategyConfig, TradeLog } from "@/lib/types";
 
 export default function StrategyPage() {
+  const { user } = usePrivy();
   const [isTestnet, setIsTestnet] = useState(true);
   const [running, setRunning] = useState(false);
   const [trades, setTrades] = useState<TradeLog[]>([]);
@@ -18,6 +20,32 @@ export default function StrategyPage() {
   const [endTime, setEndTime] = useState<number | undefined>();
   const [ticksCompleted, setTicksCompleted] = useState(0);
   const [totalTicks, setTotalTicks] = useState(0);
+
+  const ownerWalletAddress = useMemo(() => {
+    const linked = (user?.linkedAccounts ?? []) as Array<{
+      type?: string;
+      chainType?: string;
+      walletClientType?: string;
+      address?: string;
+    }>;
+
+    const embeddedWallet = linked.find(
+      (account) =>
+        account.type === "wallet" &&
+        account.chainType === "ethereum" &&
+        account.walletClientType === "privy" &&
+        typeof account.address === "string"
+    );
+
+    const firstEthereumWallet = linked.find(
+      (account) =>
+        account.type === "wallet" &&
+        account.chainType === "ethereum" &&
+        typeof account.address === "string"
+    );
+
+    return embeddedWallet?.address ?? firstEthereumWallet?.address;
+  }, [user?.linkedAccounts]);
 
   const runStrategyTest = async (config: StrategyConfig) => {
     setRunning(true);
@@ -34,7 +62,11 @@ export default function StrategyPage() {
       // First, create a temporary test agent
       const createRes = await fetch("/api/agents", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          ...(user?.id ? { "x-owner-privy-id": user.id } : {}),
+          ...(ownerWalletAddress ? { "x-owner-wallet-address": ownerWalletAddress } : {}),
+        },
         body: JSON.stringify({
           name: `[Test] ${config.name}`,
           description: `Strategy test: ${config.riskLevel}, ${config.maxLeverage}x max leverage, ${config.markets.join("/")}`,
@@ -42,6 +74,8 @@ export default function StrategyPage() {
           maxLeverage: config.maxLeverage,
           riskLevel: config.riskLevel,
           stopLossPercent: config.stopLossPercent,
+          ownerPrivyId: user?.id || undefined,
+          ownerWalletAddress: ownerWalletAddress || undefined,
         }),
       });
 

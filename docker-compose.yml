@@ -1,0 +1,154 @@
+name: hyperclaw
+
+services:
+  postgres:
+    image: pgvector/pgvector:pg16
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${PG_USER:-ironclaw}
+      POSTGRES_PASSWORD: ${PG_PASSWORD:-ironclaw}
+      POSTGRES_DB: ${PG_DB:-ironclaw}
+    volumes:
+      - pg_data:/var/lib/postgresql/data
+      - ./docker/postgres/init.sql:/docker-entrypoint-initdb.d/01-init.sql:ro
+    ports:
+      - "${PG_PORT:-5432}:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${PG_USER:-ironclaw} -d ${PG_DB:-ironclaw}"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+      start_period: 10s
+
+  ironclaw:
+    build:
+      context: .
+      dockerfile: ironclaw/Dockerfile
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgres://${PG_USER:-ironclaw}:${PG_PASSWORD:-ironclaw}@postgres:5432/${PG_DB:-ironclaw}
+      SECRETS_MASTER_KEY: ${SECRETS_MASTER_KEY}
+      HTTP_HOST: 0.0.0.0
+      HTTP_PORT: 8080
+      HTTP_WEBHOOK_SECRET: ${HTTP_WEBHOOK_SECRET}
+      CLI_ENABLED: "false"
+      RUST_LOG: ${RUST_LOG:-ironclaw=info}
+      GATEWAY_ENABLED: ${IRONCLAW_GATEWAY_ENABLED:-false}
+      GATEWAY_HOST: 0.0.0.0
+      GATEWAY_PORT: 8081
+      GATEWAY_AUTH_TOKEN: ${GATEWAY_AUTH_TOKEN:-}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      NEARAI_SESSION_PATH: /home/ironclaw/.ironclaw/session.json
+      NEARAI_SESSION_TOKEN: ${NEARAI_SESSION_TOKEN:-}
+      IRONCLAW_SKIP_SESSION_CHECK: ${IRONCLAW_SKIP_SESSION_CHECK:-false}
+    volumes:
+      - ironclaw_home:/home/ironclaw/.ironclaw
+    ports:
+      - "${IRONCLAW_PORT:-8080}:8080"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:8080/health >/dev/null || exit 1"]
+      interval: 10s
+      timeout: 3s
+      retries: 20
+      start_period: 20s
+
+  hyperclaw:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        NEXT_PUBLIC_PRIVY_APP_ID: ${NEXT_PUBLIC_PRIVY_APP_ID:-}
+        NEXT_PUBLIC_PRIVY_CLIENT_ID: ${NEXT_PUBLIC_PRIVY_CLIENT_ID:-}
+        NEXT_PUBLIC_WEB_PUSH_PUBLIC_KEY: ${NEXT_PUBLIC_WEB_PUSH_PUBLIC_KEY:-}
+        NEXT_PUBLIC_HYPERLIQUID_TESTNET: ${NEXT_PUBLIC_HYPERLIQUID_TESTNET:-true}
+        NEXT_PUBLIC_MONAD_TESTNET: ${NEXT_PUBLIC_MONAD_TESTNET:-true}
+        NEXT_PUBLIC_VAULT_ADDRESS: ${NEXT_PUBLIC_VAULT_ADDRESS:-}
+        NEXT_PUBLIC_HCLAW_TOKEN_ADDRESS: ${NEXT_PUBLIC_HCLAW_TOKEN_ADDRESS:-}
+        NEXT_PUBLIC_HCLAW_LOCK_ADDRESS: ${NEXT_PUBLIC_HCLAW_LOCK_ADDRESS:-}
+        NEXT_PUBLIC_HCLAW_POLICY_ADDRESS: ${NEXT_PUBLIC_HCLAW_POLICY_ADDRESS:-}
+        NEXT_PUBLIC_HCLAW_REWARDS_ADDRESS: ${NEXT_PUBLIC_HCLAW_REWARDS_ADDRESS:-}
+        NEXT_PUBLIC_AGENTIC_LP_VAULT_ADDRESS: ${NEXT_PUBLIC_AGENTIC_LP_VAULT_ADDRESS:-}
+        NEXT_PUBLIC_BUILDER_ADDRESS: ${NEXT_PUBLIC_BUILDER_ADDRESS:-}
+        NEXT_PUBLIC_BUILDER_FEE: ${NEXT_PUBLIC_BUILDER_FEE:-}
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      ironclaw:
+        condition: service_healthy
+    environment:
+      NODE_ENV: production
+      PORT: 3014
+      NEXT_PUBLIC_PRIVY_APP_ID: ${NEXT_PUBLIC_PRIVY_APP_ID:-}
+      NEXT_PUBLIC_PRIVY_CLIENT_ID: ${NEXT_PUBLIC_PRIVY_CLIENT_ID:-}
+      NEXT_PUBLIC_WEB_PUSH_PUBLIC_KEY: ${NEXT_PUBLIC_WEB_PUSH_PUBLIC_KEY:-}
+      NEXT_PUBLIC_HYPERLIQUID_TESTNET: ${NEXT_PUBLIC_HYPERLIQUID_TESTNET:-true}
+      NEXT_PUBLIC_MONAD_TESTNET: ${NEXT_PUBLIC_MONAD_TESTNET:-true}
+      NEXT_PUBLIC_VAULT_ADDRESS: ${NEXT_PUBLIC_VAULT_ADDRESS:-}
+      NEXT_PUBLIC_HCLAW_TOKEN_ADDRESS: ${NEXT_PUBLIC_HCLAW_TOKEN_ADDRESS:-}
+      NEXT_PUBLIC_HCLAW_LOCK_ADDRESS: ${NEXT_PUBLIC_HCLAW_LOCK_ADDRESS:-}
+      NEXT_PUBLIC_HCLAW_POLICY_ADDRESS: ${NEXT_PUBLIC_HCLAW_POLICY_ADDRESS:-}
+      NEXT_PUBLIC_HCLAW_REWARDS_ADDRESS: ${NEXT_PUBLIC_HCLAW_REWARDS_ADDRESS:-}
+      NEXT_PUBLIC_AGENTIC_LP_VAULT_ADDRESS: ${NEXT_PUBLIC_AGENTIC_LP_VAULT_ADDRESS:-}
+      NEXT_PUBLIC_BUILDER_ADDRESS: ${NEXT_PUBLIC_BUILDER_ADDRESS:-}
+      NEXT_PUBLIC_BUILDER_FEE: ${NEXT_PUBLIC_BUILDER_FEE:-}
+      WEB_PUSH_EMAIL: ${WEB_PUSH_EMAIL:-}
+      WEB_PUSH_PRIVATE_KEY: ${WEB_PUSH_PRIVATE_KEY:-}
+      HYPERLIQUID_PRIVATE_KEY: ${HYPERLIQUID_PRIVATE_KEY:-}
+      MONAD_PRIVATE_KEY: ${MONAD_PRIVATE_KEY:-}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      SUPABASE_URL: ${SUPABASE_URL:-}
+      SUPABASE_SERVICE_ROLE_KEY: ${SUPABASE_SERVICE_ROLE_KEY:-}
+      SUPABASE_ANON_KEY: ${SUPABASE_ANON_KEY:-}
+      AWS_S3_BUCKET: ${AWS_S3_BUCKET:-}
+      AWS_REGION: ${AWS_REGION:-}
+      AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:-}
+      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:-}
+      TRADE_ARCHIVE_PREFIX: ${TRADE_ARCHIVE_PREFIX:-hyperclaw/trades}
+      ORCHESTRATOR_SECRET: ${ORCHESTRATOR_SECRET:-}
+      HYPERCLAW_API_KEY: ${HYPERCLAW_API_KEY:-}
+      MCP_API_KEY: ${MCP_API_KEY:-}
+      IRONCLAW_WEBHOOK_URL: ${IRONCLAW_WEBHOOK_URL:-http://ironclaw:8080/webhook}
+      IRONCLAW_WEBHOOK_SECRET: ${IRONCLAW_WEBHOOK_SECRET:-}
+      HTTP_WEBHOOK_SECRET: ${HTTP_WEBHOOK_SECRET:-}
+      GATEWAY_AUTH_TOKEN: ${GATEWAY_AUTH_TOKEN:-}
+      ACCOUNT_ENCRYPTION_KEY: ${ACCOUNT_ENCRYPTION_KEY:-}
+      SECRETS_MASTER_KEY: ${SECRETS_MASTER_KEY:-}
+      HCLAW_POINTS_CLOSE_KEY: ${HCLAW_POINTS_CLOSE_KEY:-}
+      HCLAW_BUYBACK_SPLIT_BPS: ${HCLAW_BUYBACK_SPLIT_BPS:-4000}
+      HCLAW_INCENTIVE_SPLIT_BPS: ${HCLAW_INCENTIVE_SPLIT_BPS:-4000}
+      HCLAW_RESERVE_SPLIT_BPS: ${HCLAW_RESERVE_SPLIT_BPS:-2000}
+      HCLAW_EPOCH_DURATION_DAYS: ${HCLAW_EPOCH_DURATION_DAYS:-7}
+      RELAY_STABLE_TOKENS: ${RELAY_STABLE_TOKENS:-}
+      ALLOW_RUNTIME_NETWORK_SWITCH: ${ALLOW_RUNTIME_NETWORK_SWITCH:-false}
+      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
+      PHALA_API_KEY: ${PHALA_API_KEY:-}
+      PHALA_CVM_ID: ${PHALA_CVM_ID:-}
+      PHALA_APP_ID: ${PHALA_APP_ID:-}
+      AIP_ENDPOINT: ${AIP_ENDPOINT:-http://api.aip.unibase.com}
+      GATEWAY_URL: ${GATEWAY_URL:-http://gateway.aip.unibase.com}
+      MEMBASE_ACCOUNT: ${MEMBASE_ACCOUNT:-}
+      AIP_DEPLOYMENT_MODE: ${AIP_DEPLOYMENT_MODE:-POLLING}
+      BOTFATHER_TOKEN: ${BOTFATHER_TOKEN:-}
+    volumes:
+      - hyperclaw_data:/app/.data
+    ports:
+      - "${HYPERCLAW_PORT:-3014}:3014"
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "node -e \"fetch('http://127.0.0.1:3014/api/lifecycle').then((r)=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))\"",
+        ]
+      interval: 10s
+      timeout: 4s
+      retries: 20
+      start_period: 30s
+
+volumes:
+  pg_data:
+  ironclaw_home:
+  hyperclaw_data:

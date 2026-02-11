@@ -4,6 +4,19 @@ import { generateAgentWallet, provisionPKPWallet } from "@/lib/hyperliquid";
 import { addAccount, getAccountForAgent, addPKPAccount } from "@/lib/account-manager";
 import { type AgentConfig } from "@/lib/types";
 
+function normalizeString(value: unknown): string | undefined {
+  if (typeof value !== "string") return undefined;
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? trimmed : undefined;
+}
+
+function normalizeAddress(value: unknown): `0x${string}` | undefined {
+  if (typeof value !== "string") return undefined;
+  const trimmed = value.trim();
+  if (!/^0x[a-fA-F0-9]{40}$/.test(trimmed)) return undefined;
+  return trimmed.toLowerCase() as `0x${string}`;
+}
+
 export async function GET() {
   try {
     const agents = await getAgents();
@@ -28,7 +41,36 @@ export async function GET() {
 
 export async function POST(request: Request) {
   try {
-    const body = (await request.json()) as AgentConfig;
+    const body = (await request.json()) as AgentConfig & {
+      ownerWalletAddress?: string;
+    };
+
+    // Normalize creator identity from payload and fallback headers.
+    // This guarantees ownership metadata is attached across all create entrypoints.
+    const ownerPrivyId =
+      normalizeString(body.ownerPrivyId) ??
+      normalizeString(
+        request.headers.get("x-owner-privy-id") ??
+        request.headers.get("x-privy-user-id")
+      );
+    const ownerWalletAddress =
+      normalizeAddress(body.ownerWalletAddress) ??
+      normalizeAddress(
+        request.headers.get("x-owner-wallet-address") ??
+        request.headers.get("x-wallet-address")
+      );
+
+    if (ownerPrivyId) {
+      body.ownerPrivyId = ownerPrivyId;
+    } else {
+      delete body.ownerPrivyId;
+    }
+
+    if (ownerWalletAddress) {
+      body.ownerWalletAddress = ownerWalletAddress;
+    } else {
+      delete body.ownerWalletAddress;
+    }
 
     // Validate
     if (!body.name || !body.markets?.length) {

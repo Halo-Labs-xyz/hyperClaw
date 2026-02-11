@@ -22,7 +22,11 @@
     "deploy:hclaw-stack": "node scripts/deploy-hclaw-stack.mjs",
     "hclaw:epoch:close": "node scripts/close-hclaw-epoch.mjs",
     "hclaw:report": "node scripts/hclaw-weekly-report.mjs",
-    "hclaw:backfill": "node scripts/backfill-hclaw-day0.mjs"
+    "hclaw:backfill": "node scripts/backfill-hclaw-day0.mjs",
+    "docker:up": "bash scripts/docker-stack.sh up",
+    "docker:down": "bash scripts/docker-stack.sh down",
+    "docker:logs": "bash scripts/docker-stack.sh logs",
+    "docker:ps": "bash scripts/docker-stack.sh ps"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.985.0",

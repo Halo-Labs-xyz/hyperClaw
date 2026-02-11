@@ -42,6 +42,97 @@ interface RetryOptions {
   label?: string;
 }
 
+const HL_MAX_CONCURRENT_REQUESTS = Math.max(
+  1,
+  parseInt(process.env.HL_MAX_CONCURRENT_REQUESTS || "2", 10)
+);
+const HL_MIN_REQUEST_SPACING_MS = Math.max(
+  0,
+  parseInt(process.env.HL_MIN_REQUEST_SPACING_MS || "300", 10)
+);
+const HL_429_FALLBACK_DELAY_MS = Math.max(
+  500,
+  parseInt(process.env.HL_429_FALLBACK_DELAY_MS || "8000", 10)
+);
+const HL_429_MIN_COOLDOWN_MS = Math.max(
+  500,
+  parseInt(process.env.HL_429_MIN_COOLDOWN_MS || "8000", 10)
+);
+
+let hlInFlightRequests = 0;
+const hlRequestWaiters: Array<() => void> = [];
+let nextRequestNotBeforeMs = 0;
+let paceQueue: Promise<void> = Promise.resolve();
+let globalRateLimitedUntilMs = 0;
+
+async function acquireRequestSlot(): Promise<void> {
+  if (hlInFlightRequests < HL_MAX_CONCURRENT_REQUESTS) {
+    hlInFlightRequests++;
+    return;
+  }
+
+  await new Promise<void>((resolve) => {
+    hlRequestWaiters.push(() => {
+      hlInFlightRequests++;
+      resolve();
+    });
+  });
+}
+
+function releaseRequestSlot(): void {
+  hlInFlightRequests = Math.max(0, hlInFlightRequests - 1);
+  const next = hlRequestWaiters.shift();
+  if (next) next();
+}
+
+async function waitForPacing(): Promise<void> {
+  let releaseCurrent!: () => void;
+  const previous = paceQueue;
+  paceQueue = new Promise<void>((resolve) => {
+    releaseCurrent = resolve;
+  });
+
+  await previous;
+  try {
+    const now = Date.now();
+    if (now < nextRequestNotBeforeMs) {
+      await sleep(nextRequestNotBeforeMs - now);
+    }
+    nextRequestNotBeforeMs = Date.now() + HL_MIN_REQUEST_SPACING_MS;
+  } finally {
+    releaseCurrent();
+  }
+}
+
+async function waitForGlobalRateLimitCooldown(): Promise<void> {
+  const now = Date.now();
+  if (globalRateLimitedUntilMs > now) {
+    await sleep(globalRateLimitedUntilMs - now);
+  }
+}
+
+function setGlobalRateLimitCooldown(ms: number, label: string): void {
+  const cooldownMs = Math.max(HL_429_MIN_COOLDOWN_MS, ms);
+  const nextUntil = Date.now() + cooldownMs;
+  if (nextUntil > globalRateLimitedUntilMs) {
+    globalRateLimitedUntilMs = nextUntil;
+    console.warn(`[HL] ${label} hit 429, pausing new requests for ${cooldownMs}ms`);
+  }
+}
+
+async function runWithGlobalRequestGate<T>(
+  fn: () => Promise<T>
+): Promise<T> {
+  await acquireRequestSlot();
+  try {
+    await waitForGlobalRateLimitCooldown();
+    await waitForPacing();
+    return await fn();
+  } finally {
+    releaseRequestSlot();
+  }
+}
+
 /**
  * Execute an async function with exponential backoff retry.
  * Retries on timeout errors and transient HTTP errors.
@@ -56,20 +147,42 @@ async function withRetry<T>(
   let lastError: unknown;
   for (let attempt = 0; attempt <= maxRetries; attempt++) {
     try {
-      return await fn();
+      return await runWithGlobalRequestGate(fn);
     } catch (error: unknown) {
       lastError = error;
       const isRetryable = isRetryableError(error);
+      const rateLimited = isRateLimitError(error);
+
+      if (rateLimited) {
+        const retryAfterMs = getRetryAfterMs(error);
+        const cooldownMs =
+          retryAfterMs ??
+          Math.min(
+            HL_429_FALLBACK_DELAY_MS * Math.pow(2, attempt),
+            Math.max(maxDelayMs, 20_000)
+          );
+        setGlobalRateLimitCooldown(cooldownMs, label);
+      }
+
       if (!isRetryable || attempt === maxRetries) {
         if (attempt > 0) {
           console.warn(`[HL] ${label} failed after ${attempt + 1} attempts: ${getErrorMessage(error)}`);
         }
         throw error;
       }
-      const delay = Math.min(baseDelayMs * Math.pow(2, attempt) + Math.random() * 500, maxDelayMs);
+
+      const attemptBaseDelay = rateLimited
+        ? Math.max(baseDelayMs * Math.pow(2, attempt), HL_429_FALLBACK_DELAY_MS)
+        : baseDelayMs * Math.pow(2, attempt);
+      const retryDelayCap = rateLimited
+        ? Math.max(maxDelayMs, 20_000)
+        : maxDelayMs;
+      const delay = Math.min(attemptBaseDelay + Math.random() * 500, retryDelayCap);
+
       // Only log the first retry to keep logs clean
       if (attempt === 0) {
-        console.warn(`[HL] ${label} timed out, retrying (up to ${maxRetries} retries)...`);
+        const reason = rateLimited ? "rate limited" : "timed out";
+        console.warn(`[HL] ${label} ${reason}, retrying (up to ${maxRetries} retries)...`);
       }
       await sleep(delay);
     }
@@ -94,6 +207,27 @@ function isRetryableError(error: unknown): boolean {
     msg.includes("503") ||
     msg.includes("504")
   );
+}
+
+function isRateLimitError(error: unknown): boolean {
+  const status = Number((error as { response?: { status?: number } } | undefined)?.response?.status);
+  if (status === 429) return true;
+  const msg = getErrorMessage(error).toLowerCase();
+  return msg.includes("429") || msg.includes("too many requests") || msg.includes("rate limit");
+}
+
+function getRetryAfterMs(error: unknown): number | null {
+  const response = (error as { response?: { headers?: Headers } } | undefined)?.response;
+  const retryAfter = response?.headers?.get?.("retry-after");
+  if (!retryAfter) return null;
+
+  const seconds = Number(retryAfter);
+  if (Number.isFinite(seconds)) return Math.max(0, seconds * 1000);
+
+  const dateMs = Date.parse(retryAfter);
+  if (!Number.isNaN(dateMs)) return Math.max(0, dateMs - Date.now());
+
+  return null;
 }
 
 function getErrorMessage(error: unknown): string {
@@ -132,6 +266,15 @@ async function dedup<T>(key: string, fn: () => Promise<T>): Promise<T> {
 
 const FAILURE_COOLDOWN_MS = 30_000; // 30s cooldown after a timeout failure
 const failureCache = new Map<string, { error: Error; expiry: number }>();
+const CANDLE_CACHE_TTL_MS = Math.max(
+  1000,
+  parseInt(process.env.HL_CANDLE_CACHE_TTL_MS || "60000", 10)
+);
+const CANDLE_CACHE_MAX_ENTRIES = Math.max(
+  100,
+  parseInt(process.env.HL_CANDLE_CACHE_MAX_ENTRIES || "1000", 10)
+);
+const candleCache = new Map<string, { data: unknown[]; expiry: number }>();
 
 function checkFailureCache(key: string): Error | null {
   const entry = failureCache.get(key);
@@ -145,6 +288,27 @@ function checkFailureCache(key: string): Error | null {
 
 function setFailureCache(key: string, error: Error): void {
   failureCache.set(key, { error, expiry: Date.now() + FAILURE_COOLDOWN_MS });
+}
+
+function getCandleCache(key: string): unknown[] | null {
+  const entry = candleCache.get(key);
+  if (!entry) return null;
+  if (Date.now() > entry.expiry) {
+    candleCache.delete(key);
+    return null;
+  }
+  return entry.data;
+}
+
+function setCandleCache(key: string, data: unknown[]): void {
+  if (candleCache.has(key)) candleCache.delete(key);
+  candleCache.set(key, { data, expiry: Date.now() + CANDLE_CACHE_TTL_MS });
+
+  while (candleCache.size > CANDLE_CACHE_MAX_ENTRIES) {
+    const firstKey = candleCache.keys().next().value as string | undefined;
+    if (!firstKey) break;
+    candleCache.delete(firstKey);
+  }
 }
 
 /**
@@ -386,39 +550,51 @@ export async function getCandleData(
   endTime?: number
 ) {
   const info = getInfoClient();
-  
+
   // Default to last 100 candles if no time specified
   if (!startTime) {
     const intervalMs = parseInterval(interval);
     endTime = Date.now();
     startTime = endTime - (intervalMs * 100);
   }
-  
-  return await withRetry(
-    () => info.candleSnapshot({
-      coin,
-      interval,
-      startTime: startTime,
-      endTime: endTime || Date.now(),
-    }),
-    { label: `candleSnapshot(${coin})` }
+
+  const resolvedEndTime = endTime || Date.now();
+  const cacheKey = `candleSnapshot:${coin}:${interval}:${startTime}:${resolvedEndTime}`;
+  const cached = getCandleCache(cacheKey);
+  if (cached) return cached;
+
+  const candles = await dedup(cacheKey, () =>
+    withRetry(
+      () => info.candleSnapshot({
+        coin,
+        interval,
+        startTime: startTime,
+        endTime: resolvedEndTime,
+      }),
+      { label: `candleSnapshot(${coin})` }
+    )
   );
+
+  setCandleCache(cacheKey, candles as unknown[]);
+  return candles;
 }
 
 /**
  * Parse interval string to milliseconds
  */
 function parseInterval(interval: string): number {
-  const match = interval.match(/^(\d+)([mhd])$/);
+  const match = interval.match(/^(\d+)([mhdwM])$/);
   if (!match) return 60 * 60 * 1000; // default 1h
-  
+
   const value = parseInt(match[1]);
   const unit = match[2];
-  
+
   switch (unit) {
     case 'm': return value * 60 * 1000;
     case 'h': return value * 60 * 60 * 1000;
     case 'd': return value * 24 * 60 * 60 * 1000;
+    case 'w': return value * 7 * 24 * 60 * 60 * 1000;
+    case 'M': return value * 30 * 24 * 60 * 60 * 1000;
     default: return 60 * 60 * 1000;
   }
 }
@@ -436,16 +612,16 @@ export async function getHistoricalPrices(
 ): Promise<{ prices: number[]; highs: number[]; lows: number[] }> {
   try {
     const intervalMs = parseInterval(interval);
-    const endTime = Date.now();
+    const endTime = Math.floor(Date.now() / intervalMs) * intervalMs;
     const startTime = endTime - (intervalMs * count);
-    
+
     const candles = await getCandleData(coin, interval, startTime, endTime);
-    
+
     if (!candles || candles.length === 0) {
       console.warn(`[HL] No candle data for ${coin}`);
       return { prices: [], highs: [], lows: [] };
     }
-    
+
     // Extract close prices, highs, and lows
     const prices = candles.map((c: any) => parseFloat(c.c)); // close price
     const highs = candles.map((c: any) => parseFloat(c.h)); // high

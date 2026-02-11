@@ -5,7 +5,8 @@
  * market summary. Uses JSON-RPC 2.0 (initialize, tools/list, tools/call).
  */
 
-import { getAgents, getAgent, getRecentTrades } from "@/lib/store";
+import { getAgents, getAgent, getRecentTrades, updateAgent } from "@/lib/store";
+import { getTelegramPrivyLink, linkTelegramPrivy } from "@/lib/telegram-privy-link";
 import { getRunnerState } from "@/lib/agent-runner";
 import {
   getLifecycleSummary,
@@ -62,7 +63,20 @@ const TOOLS: McpTool[] = [
       "List all HyperClaw trading agents with id, name, status, markets, and HL address. Use this to see which agents exist before querying status or positions.",
     inputSchema: {
       type: "object",
-      properties: {},
+      properties: {
+        telegram_user_id: {
+          type: "string",
+          description: "Optional Telegram user id for owner scoping (used when bot is linked).",
+        },
+        telegram_chat_id: {
+          type: "string",
+          description: "Optional Telegram chat id for chat-scoped fallback filtering.",
+        },
+        privy_user_id: {
+          type: "string",
+          description: "Optional Privy user id to scope agents to a specific owner.",
+        },
+      },
     },
   },
   {
@@ -130,6 +144,18 @@ const TOOLS: McpTool[] = [
           type: "boolean",
           description: "Include raw position rows per agent (default: true).",
         },
+        telegram_user_id: {
+          type: "string",
+          description: "Optional Telegram user id for owner scoping (used when bot is linked).",
+        },
+        telegram_chat_id: {
+          type: "string",
+          description: "Optional Telegram chat id for chat-scoped fallback filtering.",
+        },
+        privy_user_id: {
+          type: "string",
+          description: "Optional Privy user id to scope agents to a specific owner.",
+        },
       },
     },
   },
@@ -142,6 +168,18 @@ const TOOLS: McpTool[] = [
       properties: {
         agent: { type: "string", description: "Agent id or name (case-insensitive)." },
         dry_run: { type: "boolean", description: "Validate target and show effect without pausing." },
+        telegram_user_id: {
+          type: "string",
+          description: "Optional Telegram user id for owner scoping (used when bot is linked).",
+        },
+        telegram_chat_id: {
+          type: "string",
+          description: "Optional Telegram chat id for chat-scoped fallback filtering.",
+        },
+        privy_user_id: {
+          type: "string",
+          description: "Optional Privy user id to scope agents to a specific owner.",
+        },
       },
       required: ["agent"],
     },
@@ -162,7 +200,47 @@ const TOOLS: McpTool[] = [
           type: "number",
           description: "Max recent trades to read before filtering by window (default: 2000, max: 5000).",
         },
+        telegram_user_id: {
+          type: "string",
+          description: "Optional Telegram user id for owner scoping (used when bot is linked).",
+        },
+        telegram_chat_id: {
+          type: "string",
+          description: "Optional Telegram chat id for chat-scoped fallback filtering.",
+        },
+        privy_user_id: {
+          type: "string",
+          description: "Optional Privy user id to scope agents to a specific owner.",
+        },
       },
+    },
+  },
+  {
+    name: "hyperclaw_link_telegram_privy",
+    description:
+      "Link a Telegram user to a Privy user id, then optionally claim agents in the same Telegram chat to that owner. Use this first so Telegram workflows only return your agents.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        telegram_user_id: {
+          type: "string",
+          description: "Telegram numeric user id (from bot metadata).",
+        },
+        telegram_chat_id: {
+          type: "string",
+          description: "Optional Telegram chat id to claim existing agents in that chat.",
+        },
+        privy_user_id: {
+          type: "string",
+          description: "Privy user id (e.g. did:privy:...).",
+        },
+        claim_existing_agents: {
+          type: "boolean",
+          description:
+            "If true, assigns ownerPrivyId to agents currently linked to telegram_chat_id.",
+        },
+      },
+      required: ["telegram_user_id", "privy_user_id"],
     },
   },
   {
@@ -209,11 +287,90 @@ function average(values: number[]): number {
   return sum / values.length;
 }
 
-async function resolveAgentReference(reference: string): Promise<Agent> {
+type ToolScope = {
+  privyUserId: string | null;
+  telegramUserId: string | null;
+  telegramChatId: string | null;
+  source: "privy_arg" | "telegram_link" | "none";
+};
+
+function normalizeOptionalString(value: unknown): string | null {
+  if (typeof value !== "string") return null;
+  const trimmed = value.trim();
+  return trimmed ? trimmed : null;
+}
+
+function getAgentOwnerPrivyId(agent: Agent): string | null {
+  return normalizeOptionalString(agent.telegram?.ownerPrivyId);
+}
+
+function getAgentOwnerWalletAddress(agent: Agent): string | null {
+  return normalizeOptionalString(agent.telegram?.ownerWalletAddress);
+}
+
+function getAgentTelegramChatId(agent: Agent): string | null {
+  return normalizeOptionalString(agent.telegram?.chatId);
+}
+
+async function resolveToolScope(args: Record<string, unknown>): Promise<ToolScope> {
+  const explicitPrivy = normalizeOptionalString(args.privy_user_id);
+  const telegramUserId = normalizeOptionalString(args.telegram_user_id);
+  const telegramChatId = normalizeOptionalString(args.telegram_chat_id);
+
+  if (explicitPrivy) {
+    return {
+      privyUserId: explicitPrivy,
+      telegramUserId,
+      telegramChatId,
+      source: "privy_arg",
+    };
+  }
+
+  if (telegramUserId) {
+    const linked = await getTelegramPrivyLink(telegramUserId);
+    if (linked?.privyUserId) {
+      return {
+        privyUserId: linked.privyUserId,
+        telegramUserId,
+        telegramChatId: telegramChatId ?? linked.telegramChatId ?? null,
+        source: "telegram_link",
+      };
+    }
+  }
+
+  return {
+    privyUserId: null,
+    telegramUserId,
+    telegramChatId,
+    source: "none",
+  };
+}
+
+function scopeAgentsByIdentity(agents: Agent[], scope: ToolScope): Agent[] {
+  if (scope.privyUserId) {
+    return agents.filter((a) => getAgentOwnerPrivyId(a) === scope.privyUserId);
+  }
+  if (scope.telegramChatId) {
+    return agents.filter((a) => getAgentTelegramChatId(a) === scope.telegramChatId);
+  }
+  return agents;
+}
+
+function scopeHints(scope: ToolScope): string {
+  if (scope.privyUserId) {
+    return `No agents found for linked Privy user (${scope.privyUserId}).`;
+  }
+  if (scope.telegramChatId) {
+    return `No agents found for this Telegram chat (${scope.telegramChatId}).`;
+  }
+  return "No agents found for this request.";
+}
+
+async function resolveAgentReference(reference: string, scopedAgents?: Agent[]): Promise<Agent> {
   const normalized = reference.trim().toLowerCase();
   if (!normalized) throw new Error("agent reference is empty");
 
-  const agents = await getAgents();
+  const agents = scopedAgents ?? (await getAgents());
   if (agents.length === 0) throw new Error("No agents found");
 
   const idExact = agents.find((a) => a.id === reference.trim());
@@ -408,7 +565,8 @@ async function buildExposureReport(
 async function buildDailyTradeSummary(
   scopeAgent: Agent | null,
   windowHours: number,
-  maxTradesRead: number
+  maxTradesRead: number,
+  scopedAgents?: Agent[]
 ): Promise<Record<string, unknown>> {
   type AgentStats = {
     agentId: string;
@@ -430,13 +588,16 @@ async function buildDailyTradeSummary(
   const now = Date.now();
   const periodStart = now - windowHours * 60 * 60 * 1000;
 
-  const [agents, recentTrades] = await Promise.all([getAgents(), getRecentTrades(maxTradesRead)]);
+  const agents = scopedAgents ?? (await getAgents());
+  const recentTrades = await getRecentTrades(maxTradesRead);
+  const allowedAgentIds = new Set<string>(agents.map((a) => a.id));
   const agentById = new Map<string, Agent>(agents.map((a) => [a.id, a]));
 
   const trades = recentTrades
     .filter(
       (t) =>
         t.timestamp >= periodStart &&
+        allowedAgentIds.has(t.agentId) &&
         (!scopeAgent || t.agentId === scopeAgent.id)
     )
     .sort((a, b) => a.timestamp - b.timestamp);
@@ -793,8 +954,16 @@ async function callTool(
 ): Promise<string | Record<string, unknown>> {
   switch (name) {
     case "hyperclaw_list_agents": {
-      const agents = await getAgents();
+      const allAgents = await getAgents();
+      const scope = await resolveToolScope(args);
+      const agents = scopeAgentsByIdentity(allAgents, scope);
       return {
+        scopedBy:
+          scope.privyUserId
+            ? { type: "privy_user_id", value: scope.privyUserId, source: scope.source }
+            : scope.telegramChatId
+              ? { type: "telegram_chat_id", value: scope.telegramChatId, source: scope.source }
+              : { type: "none" },
         agents: agents.map((a) => ({
           id: a.id,
           name: a.name,
@@ -803,6 +972,9 @@ async function callTool(
           hlAddress: a.hlAddress,
           riskLevel: a.riskLevel,
           autonomy: a.autonomy?.mode,
+          ownerPrivyId: getAgentOwnerPrivyId(a),
+          ownerWalletAddress: getAgentOwnerWalletAddress(a),
+          telegramChatId: getAgentTelegramChatId(a),
         })),
       };
     }
@@ -919,20 +1091,38 @@ async function callTool(
     }
 
     case "hyperclaw_exposure": {
+      const allAgents = await getAgents();
+      const scopeCtx = await resolveToolScope(args);
+      const scopedAgents = scopeAgentsByIdentity(allAgents, scopeCtx);
+      if (scopedAgents.length === 0) {
+        throw new Error(
+          `${scopeHints(scopeCtx)} Link your Telegram user to Privy with hyperclaw_link_telegram_privy and ensure agents are owned by that Privy user.`
+        );
+      }
+
       const agentReference = typeof args.agent === "string" ? args.agent.trim() : "";
       const includePositions = args.include_positions !== false;
-      const scope = agentReference
-        ? [await resolveAgentReference(agentReference)]
-        : await getAgents();
-      return buildExposureReport(scope, includePositions);
+      const selectedAgents = agentReference
+        ? [await resolveAgentReference(agentReference, scopedAgents)]
+        : scopedAgents;
+      return buildExposureReport(selectedAgents, includePositions);
     }
 
     case "hyperclaw_pause_agent": {
+      const allAgents = await getAgents();
+      const scope = await resolveToolScope(args);
+      const scopedAgents = scopeAgentsByIdentity(allAgents, scope);
+      if (scopedAgents.length === 0) {
+        throw new Error(
+          `${scopeHints(scope)} Link your Telegram user to Privy with hyperclaw_link_telegram_privy and ensure agents are owned by that Privy user.`
+        );
+      }
+
       const reference = typeof args.agent === "string" ? args.agent : "";
       if (!reference.trim()) throw new Error("agent is required");
 
       const dryRun = args.dry_run === true;
-      const target = await resolveAgentReference(reference);
+      const target = await resolveAgentReference(reference, scopedAgents);
       const beforeRunner = getRunnerState(target.id);
       const beforeLifecycle = getLifecycleState(target.id);
 
@@ -995,11 +1185,82 @@ async function callTool(
     }
 
     case "hyperclaw_daily_trade_summary": {
+      const allAgents = await getAgents();
+      const scope = await resolveToolScope(args);
+      const scopedAgents = scopeAgentsByIdentity(allAgents, scope);
+      if (scopedAgents.length === 0) {
+        throw new Error(
+          `${scopeHints(scope)} Link your Telegram user to Privy with hyperclaw_link_telegram_privy and ensure agents are owned by that Privy user.`
+        );
+      }
+
       const windowHours = clampNumber(args.window_hours, 24, 1, 168);
       const maxTradesRead = clampNumber(args.max_trades, 2000, 50, 5000);
       const agentReference = typeof args.agent === "string" ? args.agent.trim() : "";
-      const scopedAgent = agentReference ? await resolveAgentReference(agentReference) : null;
-      return buildDailyTradeSummary(scopedAgent, windowHours, maxTradesRead);
+      const scopedAgent = agentReference
+        ? await resolveAgentReference(agentReference, scopedAgents)
+        : null;
+      return buildDailyTradeSummary(scopedAgent, windowHours, maxTradesRead, scopedAgents);
+    }
+
+    case "hyperclaw_link_telegram_privy": {
+      const telegramUserId = normalizeOptionalString(args.telegram_user_id);
+      const telegramChatId = normalizeOptionalString(args.telegram_chat_id);
+      const privyUserId = normalizeOptionalString(args.privy_user_id);
+      const claimExistingAgents = args.claim_existing_agents !== false;
+
+      if (!telegramUserId) throw new Error("telegram_user_id is required");
+      if (!privyUserId) throw new Error("privy_user_id is required");
+
+      const link = await linkTelegramPrivy({
+        telegramUserId,
+        privyUserId,
+        telegramChatId: telegramChatId ?? undefined,
+      });
+
+      const claimedAgents: Array<{ agentId: string; agentName: string }> = [];
+      if (claimExistingAgents) {
+        const agents = await getAgents();
+        const ownedCount = agents.filter((a) => !!getAgentOwnerPrivyId(a)).length;
+        let candidates = telegramChatId
+          ? agents.filter((a) => getAgentTelegramChatId(a) === telegramChatId)
+          : [];
+
+        // Bootstrap convenience for single-user/dev mode:
+        // If nothing is owned yet and chat-based match is empty, claim currently unowned agents.
+        if (candidates.length === 0 && ownedCount === 0) {
+          candidates = agents.filter((a) => !getAgentOwnerPrivyId(a));
+        }
+
+        for (const agent of candidates) {
+          const nextTelegram = {
+            enabled: agent.telegram?.enabled ?? true,
+            chatId: agent.telegram?.chatId ?? telegramChatId ?? "",
+            notifyOnTrade: agent.telegram?.notifyOnTrade ?? true,
+            notifyOnPnl: agent.telegram?.notifyOnPnl ?? true,
+            notifyOnTierUnlock: agent.telegram?.notifyOnTierUnlock ?? true,
+            ownerPrivyId: privyUserId,
+            ownerWalletAddress: agent.telegram?.ownerWalletAddress,
+          };
+
+          await updateAgent(agent.id, { telegram: nextTelegram });
+          claimedAgents.push({ agentId: agent.id, agentName: agent.name });
+        }
+      }
+
+      return {
+        success: true,
+        message: `Linked Telegram user ${telegramUserId} to ${privyUserId}.`,
+        link: {
+          telegramUserId: link.telegramUserId,
+          telegramChatId: link.telegramChatId ?? null,
+          privyUserId: link.privyUserId,
+          linkedAt: new Date(link.linkedAt).toISOString(),
+          updatedAt: new Date(link.updatedAt).toISOString(),
+        },
+        claimedAgentsCount: claimedAgents.length,
+        claimedAgents,
+      };
     }
 
     case "hyperclaw_market_summary": {

@@ -1805,7 +1805,25 @@ export default function AgentDetailPage() {
                 <div className="space-y-5">
                   {/* Markets */}
                   <div>
-                    <label className="block text-xs font-medium text-dim uppercase tracking-wider mb-2">Markets</label>
+                    <div className="flex items-center justify-between mb-2">
+                      <label className="block text-xs font-medium text-dim uppercase tracking-wider">Markets</label>
+                      <div className="flex gap-2">
+                        <button
+                          type="button"
+                          onClick={() => setEditMarkets([])}
+                          className="text-[10px] text-dim hover:text-muted font-medium"
+                        >
+                          Deselect All
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setEditMarkets(["BTC", "ETH", "SOL", "ARB", "OP", "AVAX", "MATIC", "DOGE", "PEPE", "WIF", "BONK", "LINK", "UNI", "AAVE"])}
+                          className="text-[10px] text-accent hover:text-accent/80 font-medium"
+                        >
+                          Select All
+                        </button>
+                      </div>
+                    </div>
                     <div className="flex flex-wrap gap-2 mb-3">
                       {editMarkets.map((market) => (
                         <span
