@@ -33,7 +33,7 @@ HyperClaw trading agents are now fully integrated with the Unibase AIP platform.
 
 ### 5. Documentation
 - **README.md** - Updated with AIP integration overview
-- **UNIBASE_AIP.md** - Complete integration guide
+- **docs/root-guides/UNIBASE_AIP.md** - Complete integration guide
   - Setup instructions
   - Deployment walkthrough
   - Troubleshooting
@@ -53,7 +53,7 @@ HyperClaw trading agents are now fully integrated with the Unibase AIP platform.
 **1. Create a HyperClaw agent:**
 ```bash
 # Via UI: http://localhost:3000/agents/new
-# Or via API - see UNIBASE_AIP.md
+# Or via API - see docs/root-guides/UNIBASE_AIP.md
 ```
 
 **2. Fund the agent:**
@@ -147,7 +147,7 @@ app/api/unibase/poll/route.ts               # Polling endpoint
 app/api/unibase/health/route.ts             # Health check
 scripts/deploy-public-agents.mjs            # Public deployment
 scripts/deploy-private-agents.mjs           # Private deployment
-UNIBASE_AIP.md                              # Integration guide
+docs/root-guides/UNIBASE_AIP.md            # Integration guide
 INTEGRATION_SUMMARY.md                      # This file
 ```
 
@@ -192,9 +192,9 @@ README.md                                   # Added AIP integration section
 
 ## 📚 Documentation
 
-- **[UNIBASE_AIP.md](./UNIBASE_AIP.md)** - Complete integration guide
-- **[README.md](./README.md#unibase-aip-integration)** - Overview
-- **[lib/unibase-agent-configs.ts](./lib/unibase-agent-configs.ts)** - Examples
+- **[UNIBASE_AIP.md](./root-guides/UNIBASE_AIP.md)** - Complete integration guide
+- **[README.md](../README.md#unibase-aip-integration)** - Overview
+- **[lib/unibase-agent-configs.ts](../lib/unibase-agent-configs.ts)** - Examples
 
 ---
 
@@ -283,8 +283,8 @@ Your HyperClaw agents are now **production-ready** for the Unibase AIP platform!
 6. 🚀 Scale globally via Gateway
 
 **Questions or issues?**
-- Read [UNIBASE_AIP.md](./UNIBASE_AIP.md) for detailed guide
-- Check [lib/unibase-agent-configs.ts](./lib/unibase-agent-configs.ts) for examples
+- Read [UNIBASE_AIP.md](./root-guides/UNIBASE_AIP.md) for detailed guide
+- Check [lib/unibase-agent-configs.ts](../lib/unibase-agent-configs.ts) for examples
 - Review API logs for debugging
 
 ---

@@ -8,6 +8,9 @@ import {
 } from "@/lib/builder";
 import { type Address } from "viem";
 
+export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
+
 /**
  * GET /api/builder/info
  * 

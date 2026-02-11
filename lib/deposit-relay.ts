@@ -17,7 +17,17 @@
  * - No actual cross-chain bridge (that's a production concern)
  */
 
-import { createPublicClient, http, parseAbiItem, type Address, formatEther } from "viem";
+import {
+  createPublicClient,
+  http,
+  parseAbiItem,
+  type Address,
+  type Hex,
+  formatEther,
+  formatUnits,
+  toEventSelector,
+  zeroAddress,
+} from "viem";
 import { VAULT_ABI } from "./vault";
 import { getAgent, updateAgent } from "./store";
 import { provisionAgentWallet } from "./hyperliquid";
@@ -28,8 +38,12 @@ import {
   sbGetDepositByTxHash,
   sbGetDepositsForAgent,
   sbGetDepositsForUser,
+  sbGetCursor,
   sbInsertDeposit,
+  sbSetCursor,
 } from "./supabase-store";
+import { getUserCapContext } from "./hclaw-policy";
+import type { HclawPointsActivityInput } from "./hclaw-points";
 
 // ============================================
 // MON -> USDC price conversion
@@ -41,6 +55,27 @@ const RELAY_FEE_BPS = parseInt(process.env.RELAY_FEE_BPS || "100", 10); // 100 b
 
 // Testnet: fixed rate (0.1 MON = $100 USDC)
 const TESTNET_MON_TO_USDC = 1000;
+
+// On mainnet, only these ERC20 tokens are treated as $1 stables for
+// relay funding unless running on testnet.
+const RELAY_STABLE_TOKENS = new Set(
+  (process.env.RELAY_STABLE_TOKENS || "")
+    .split(",")
+    .map((t) => t.trim().toLowerCase())
+    .filter(Boolean)
+);
+
+const ERC20_DECIMALS_ABI = [
+  {
+    inputs: [],
+    name: "decimals",
+    outputs: [{ name: "", type: "uint8" }],
+    stateMutability: "view",
+    type: "function",
+  },
+] as const;
+
+const tokenDecimalsCache = new Map<string, number>();
 
 // Mainnet price cache
 let monPriceCache: { price: number; timestamp: number } | null = null;
@@ -127,6 +162,60 @@ async function monToUsdc(amountWei: bigint): Promise<{ usdValue: number; rate: n
   return { usdValue: Math.max(0, usdValue), rate: monPrice, fee };
 }
 
+async function getTokenDecimals(token: Address, client = getMonadClient()): Promise<number> {
+  const key = token.toLowerCase();
+  const cached = tokenDecimalsCache.get(key);
+  if (cached !== undefined) return cached;
+
+  const decimals = (await client.readContract({
+    address: token,
+    abi: ERC20_DECIMALS_ABI,
+    functionName: "decimals",
+  })) as number;
+
+  tokenDecimalsCache.set(key, decimals);
+  return decimals;
+}
+
+function normalizeUsd(usd: number): number {
+  // Keep up to 6 decimals so funding + persisted ledger stay deterministic.
+  return parseFloat(usd.toFixed(6));
+}
+
+async function erc20ToUsdc(
+  token: Address,
+  amount: bigint,
+  client = getMonadClient()
+): Promise<{ usdValue: number; rate: number; fee: number }> {
+  const lower = token.toLowerCase();
+  if (!isMonadTestnet()) {
+    if (RELAY_STABLE_TOKENS.size === 0) {
+      throw new Error(
+        "RELAY_STABLE_TOKENS is required on mainnet for ERC20 relay pricing"
+      );
+    }
+    if (!RELAY_STABLE_TOKENS.has(lower)) {
+      throw new Error(`ERC20 token ${token} is not in RELAY_STABLE_TOKENS`);
+    }
+  }
+
+  const decimals = await getTokenDecimals(token, client);
+  const usdValue = parseFloat(formatUnits(amount, decimals));
+  return { usdValue: normalizeUsd(Math.max(0, usdValue)), rate: 1, fee: 0 };
+}
+
+async function tokenAmountToUsdc(
+  token: Address,
+  amount: bigint,
+  client = getMonadClient()
+): Promise<{ usdValue: number; rate: number; fee: number }> {
+  if (token.toLowerCase() === zeroAddress) {
+    const mon = await monToUsdc(amount);
+    return { ...mon, usdValue: normalizeUsd(mon.usdValue) };
+  }
+  return erc20ToUsdc(token, amount, client);
+}
+
 // ============================================
 // Monad chain config
 // ============================================
@@ -181,10 +270,32 @@ interface DepositRecord {
   hlWalletAddress?: string;
   hlFunded?: boolean;
   hlFundedAmount?: number;
+  lockTier?: number;
+  boostBps?: number;
+  rebateBps?: number;
+  userCapUsd?: number;
+  userCapRemainingUsd?: number;
+  pointsActivity?: HclawPointsActivityInput;
 }
+
+interface WithdrawalRecord {
+  txHash: string;
+  blockNumber: string;
+  agentId: string;
+  user: Address;
+  shares: string;
+  monAmount: string;
+  timestamp: number;
+  relayed: boolean;
+}
+
+type VaultTxRecord =
+  | { eventType: "deposit"; deposit: DepositRecord }
+  | { eventType: "withdrawal"; withdrawal: WithdrawalRecord };
 
 // In-memory deposit ledger (persisted via store on important events)
 const depositLedger: DepositRecord[] = [];
+const processedVaultTxs = new Set<string>();
 let lastProcessedBlock: bigint = BigInt(0);
 
 function toDepositRow(record: DepositRecord): DepositRow {
@@ -227,12 +338,68 @@ function fromDepositRow(row: DepositRow): DepositRecord {
   };
 }
 
-async function hasProcessedDeposit(txHash: string): Promise<boolean> {
-  if (isSupabaseStoreEnabled()) {
-    const existing = await sbGetDepositByTxHash(txHash);
-    return !!existing;
+function upsertLocalDeposit(record: DepositRecord): void {
+  const idx = depositLedger.findIndex((d) => d.txHash === record.txHash);
+  if (idx >= 0) {
+    depositLedger[idx] = record;
+  } else {
+    depositLedger.push(record);
   }
-  return depositLedger.some((d) => d.txHash === txHash);
+}
+
+export function toPointsActivityFromDeposit(record: DepositRecord): HclawPointsActivityInput {
+  return {
+    userAddress: record.user.toLowerCase(),
+    lockPower: record.boostBps ? record.usdValue * (record.boostBps / 10_000) : 0,
+    lpVolumeUsd: record.usdValue,
+    referralVolumeUsd: 0,
+    questCount: 0,
+    heldMs: 24 * 60 * 60 * 1000,
+    selfTradeVolumeUsd: 0,
+    sybilScore: 0,
+  };
+}
+
+function vaultTxCursorKey(txHash: string): string {
+  return `vault_tx:${txHash.toLowerCase()}`;
+}
+
+async function hasProcessedVaultTx(txHash: string): Promise<boolean> {
+  const normalized = txHash.toLowerCase();
+  if (processedVaultTxs.has(normalized)) return true;
+
+  if (isSupabaseStoreEnabled()) {
+    const cursor = await sbGetCursor(vaultTxCursorKey(normalized));
+    if (cursor) {
+      processedVaultTxs.add(normalized);
+      return true;
+    }
+
+    const existing = await sbGetDepositByTxHash(txHash);
+    // If funding failed, allow retrigger from the frontend with the same tx.
+    if (existing && existing.hl_funded !== false) {
+      processedVaultTxs.add(normalized);
+      return true;
+    }
+    return false;
+  }
+  return depositLedger.some((d) => d.txHash.toLowerCase() === normalized);
+}
+
+async function markVaultTxProcessed(txHash: string): Promise<void> {
+  const normalized = txHash.toLowerCase();
+  processedVaultTxs.add(normalized);
+  if (isSupabaseStoreEnabled()) {
+    await sbSetCursor(vaultTxCursorKey(normalized), "1");
+  }
+}
+
+function bytes32ToAgentId(agentIdBytes: Hex): string {
+  const hex = agentIdBytes.replace(/^0x/, "").toLowerCase();
+  const trimmed = hex.replace(/^0+/, "");
+  if (!trimmed) return "0000000000000000";
+  if (trimmed.length <= 16) return trimmed.padStart(16, "0");
+  return trimmed;
 }
 
 // ============================================
@@ -242,27 +409,34 @@ async function hasProcessedDeposit(txHash: string): Promise<boolean> {
 const DEPOSITED_EVENT = parseAbiItem(
   "event Deposited(bytes32 indexed agentId, address indexed user, address token, uint256 amount, uint256 shares)"
 );
+const DEPOSITED_TOPIC = toEventSelector(DEPOSITED_EVENT);
 
 /** Reserved for future Withdrawn event parsing. */
 export const WITHDRAWN_EVENT = parseAbiItem(
   "event Withdrawn(bytes32 indexed agentId, address indexed user, uint256 shares, uint256 monAmount)"
 );
+const WITHDRAWN_TOPIC = toEventSelector(WITHDRAWN_EVENT);
 
 // ============================================
 // Process a confirmed deposit transaction
 // ============================================
 
 /**
- * Called after a user's deposit tx is confirmed on Monad.
- * Parses the Deposited event, records shares, updates agent TVL.
+ * Called after a user's Monad vault tx is confirmed.
+ * Parses Deposited/Withdrawn events, updates relay ledger, and reconciles agent TVL.
  */
-export async function processDepositTx(txHash: string): Promise<DepositRecord | null> {
-  if (await hasProcessedDeposit(txHash)) {
+export async function processVaultTx(txHash: string): Promise<VaultTxRecord | null> {
+  const alreadyProcessed = await hasProcessedVaultTx(txHash);
+  if (alreadyProcessed) {
     if (isSupabaseStoreEnabled()) {
       const row = await sbGetDepositByTxHash(txHash);
-      return row ? fromDepositRow(row) : null;
+      if (row) return { eventType: "deposit", deposit: fromDepositRow(row) };
+    } else {
+      const existing = depositLedger.find((d) => d.txHash === txHash);
+      if (existing) return { eventType: "deposit", deposit: existing };
     }
-    return depositLedger.find((d) => d.txHash === txHash) ?? null;
+    // No persisted deposit record found; continue and parse receipt so
+    // callers can still get withdrawal confirmation details.
   }
 
   const vaultAddress = process.env.NEXT_PUBLIC_VAULT_ADDRESS as Address | undefined;
@@ -276,39 +450,53 @@ export async function processDepositTx(txHash: string): Promise<DepositRecord | 
       return null;
     }
 
-    // Find Deposited event in logs
     for (const log of receipt.logs) {
       if (log.address.toLowerCase() !== vaultAddress.toLowerCase()) continue;
 
       try {
-        // Manually parse the Deposited event
-        // Topic 0: event signature hash
-        // Topic 1: agentId (indexed bytes32)
-        // Topic 2: user (indexed address)
-        // Data: token (address), amount (uint256), shares (uint256)
-        if (log.topics.length >= 3 && log.data) {
-          const agentIdBytes = log.topics[1];
+        const topic0 = log.topics[0];
+        if (!topic0 || !log.data || log.topics.length < 3) continue;
+
+        if (topic0 === DEPOSITED_TOPIC) {
+          const agentIdBytes = log.topics[1] as Hex;
           const userAddress = ("0x" + (log.topics[2] || "").slice(26)) as Address;
+          const data = log.data.slice(2);
+          if (data.length < 192) continue;
 
-          // Decode data (token, amount, shares)
-          const data = log.data.slice(2); // remove 0x
           const tokenAddress = ("0x" + data.slice(24, 64)) as Address;
-          const amountHex = "0x" + data.slice(64, 128);
-          const sharesHex = "0x" + data.slice(128, 192);
+          const amount = BigInt("0x" + data.slice(64, 128));
+          const shares = BigInt("0x" + data.slice(128, 192));
+          const agentIdHex = bytes32ToAgentId(agentIdBytes);
 
-          const amount = BigInt(amountHex);
-          const shares = BigInt(sharesHex);
-
-          // Convert agentId from bytes32 to our hex string
-          const agentIdHex = agentIdBytes ? agentIdBytes.replace(/^0x0+/, "") : "";
-
-          // Convert MON to USDC: testnet uses fixed rate, mainnet uses live price minus fees
-          const conversion = await monToUsdc(amount);
+          const conversion = await tokenAmountToUsdc(tokenAddress, amount, client);
           const usdValue = conversion.usdValue;
+          const amountLabel =
+            tokenAddress.toLowerCase() === zeroAddress
+              ? `${parseFloat(formatEther(amount))} MON`
+              : `${parseFloat(formatUnits(amount, await getTokenDecimals(tokenAddress, client)))} ${tokenAddress.slice(0, 6)}...`;
+
           console.log(
-            `[DepositRelay] ${parseFloat(formatEther(amount))} MON -> $${usdValue.toFixed(2)} USDC` +
-            ` (rate=${conversion.rate}, fee=$${conversion.fee.toFixed(2)})`
+            `[DepositRelay] ${amountLabel} -> $${usdValue.toFixed(2)} USDC` +
+              ` (rate=${conversion.rate}, fee=$${conversion.fee.toFixed(2)})`
           );
+
+          const agent = await getAgent(agentIdHex);
+          const priorUserDeposits = await getDepositsForUser(userAddress);
+          const isNewDepositor = !priorUserDeposits.some((d) => d.agentId === agentIdHex);
+          let capContext:
+            | {
+                tier: number;
+                boostBps: number;
+                rebateBps: number;
+                boostedCapUsd: number;
+                capRemainingUsd: number;
+              }
+            | undefined;
+          try {
+            capContext = await getUserCapContext(userAddress, agentIdHex);
+          } catch {
+            capContext = undefined;
+          }
 
           const record: DepositRecord = {
             txHash,
@@ -322,59 +510,138 @@ export async function processDepositTx(txHash: string): Promise<DepositRecord | 
             monRate: conversion.rate,
             relayFee: conversion.fee,
             timestamp: Date.now(),
-            relayed: true,
+            relayed: false,
+            lockTier: capContext?.tier,
+            boostBps: capContext?.boostBps,
+            rebateBps: capContext?.rebateBps,
+            userCapUsd: capContext?.boostedCapUsd,
+            userCapRemainingUsd: capContext?.capRemainingUsd,
           };
+          record.pointsActivity = toPointsActivityFromDeposit(record);
 
-          // ========== Provision + Fund HL wallet 1:1 ==========
-          // Create (or reuse) an HL testnet wallet for this agent,
-          // then send equivalent USDC from the operator account.
-          if (usdValue > 0) {
+          if (alreadyProcessed) {
+            return { eventType: "deposit", deposit: record };
+          }
+
+          let shouldRetryFunding = false;
+
+          if (!agent) {
+            console.error(
+              `[DepositRelay] Unknown agent ${agentIdHex} in deposit tx ${txHash} — skipping HL funding`
+            );
+            record.hlFunded = false;
+          } else if (usdValue > 0) {
             try {
-              console.log(`[DepositRelay] Provisioning HL wallet for agent ${agentIdHex} with $${usdValue}`);
+              console.log(
+                `[DepositRelay] Provisioning HL wallet for agent ${agentIdHex} with $${usdValue}`
+              );
               const hlResult = await provisionAgentWallet(agentIdHex, usdValue);
               record.hlWalletAddress = hlResult.address;
               record.hlFunded = hlResult.funded;
               record.hlFundedAmount = hlResult.fundedAmount;
+              record.relayed = !!hlResult.funded;
               console.log(
-                `[DepositRelay] HL wallet ${hlResult.address} ` +
-                `funded=${hlResult.funded} amount=$${hlResult.fundedAmount}`
+                `[DepositRelay] HL wallet ${hlResult.address} funded=${hlResult.funded} amount=$${hlResult.fundedAmount}`
               );
 
-              // Keep agent.hlAddress in sync with the actual provisioned wallet
-              const currentAgent = await getAgent(agentIdHex);
-              if (currentAgent && currentAgent.hlAddress !== hlResult.address) {
+              if (agent.hlAddress !== hlResult.address) {
                 await updateAgent(agentIdHex, { hlAddress: hlResult.address });
                 console.log(`[DepositRelay] Updated agent hlAddress to ${hlResult.address}`);
               }
             } catch (hlErr) {
               const hlMsg = hlErr instanceof Error ? hlErr.message : String(hlErr);
+              shouldRetryFunding = true;
               if (hlMsg.toLowerCase().includes("timeout")) {
-                console.warn(`[DepositRelay] HL wallet provision timed out for ${agentIdHex} — will retry on next deposit`);
+                console.warn(
+                  `[DepositRelay] HL funding timeout for ${agentIdHex} — same tx can be retried`
+                );
               } else {
-                console.error(`[DepositRelay] HL wallet provision/fund failed: ${hlMsg.slice(0, 150)}`);
+                console.error(
+                  `[DepositRelay] HL wallet provision/fund failed: ${hlMsg.slice(0, 150)}`
+                );
               }
               record.hlFunded = false;
+              record.relayed = false;
             }
           }
 
-          depositLedger.push(record);
+          upsertLocalDeposit(record);
           if (isSupabaseStoreEnabled()) {
             await sbInsertDeposit(toDepositRow(record));
           }
 
-          // Update agent TVL
-          const agent = await getAgent(agentIdHex);
           if (agent) {
+            const tvlUsd = await getVaultTvlOnChain(agentIdHex);
             await updateAgent(agentIdHex, {
-              vaultTvlUsd: agent.vaultTvlUsd + usdValue,
-              depositorCount: agent.depositorCount + 1,
+              vaultTvlUsd: tvlUsd,
+              depositorCount: agent.depositorCount + (isNewDepositor ? 1 : 0),
             });
           }
 
-          return record;
+          if (!shouldRetryFunding) {
+            await markVaultTxProcessed(txHash);
+          }
+
+          return { eventType: "deposit", deposit: record };
         }
-      } catch {
-        // Continue to next log
+
+        if (topic0 === WITHDRAWN_TOPIC) {
+          const agentIdBytes = log.topics[1] as Hex;
+          const userAddress = ("0x" + (log.topics[2] || "").slice(26)) as Address;
+          const data = log.data.slice(2);
+          if (data.length < 128) continue;
+
+          const shares = BigInt("0x" + data.slice(0, 64));
+          const monAmount = BigInt("0x" + data.slice(64, 128));
+          const agentIdHex = bytes32ToAgentId(agentIdBytes);
+
+          const withdrawal: WithdrawalRecord = {
+            txHash,
+            blockNumber: receipt.blockNumber.toString(),
+            agentId: agentIdHex,
+            user: userAddress,
+            shares: shares.toString(),
+            monAmount: monAmount.toString(),
+            timestamp: Date.now(),
+            relayed: true,
+          };
+
+          if (alreadyProcessed) {
+            return { eventType: "withdrawal", withdrawal };
+          }
+
+          const agent = await getAgent(agentIdHex);
+          if (agent) {
+            const tvlUsd = await getVaultTvlOnChain(agentIdHex);
+            let depositorCount = agent.depositorCount;
+
+            try {
+              const agentIdBytesForRead = ("0x" +
+                agentIdHex.padStart(64, "0")) as `0x${string}`;
+              const remainingShares = (await client.readContract({
+                address: vaultAddress,
+                abi: VAULT_ABI,
+                functionName: "userShares",
+                args: [agentIdBytesForRead, userAddress],
+              })) as bigint;
+              if (remainingShares === BigInt(0) && depositorCount > 0) {
+                depositorCount -= 1;
+              }
+            } catch {
+              // Keep current count if user share read fails.
+            }
+
+            await updateAgent(agentIdHex, {
+              vaultTvlUsd: tvlUsd,
+              depositorCount,
+            });
+          }
+
+          await markVaultTxProcessed(txHash);
+          return { eventType: "withdrawal", withdrawal };
+        }
+      } catch (eventError) {
+        console.error("[DepositRelay] Event parse failed:", eventError);
       }
     }
 
@@ -383,6 +650,14 @@ export async function processDepositTx(txHash: string): Promise<DepositRecord | 
     console.error("[DepositRelay] Failed to process tx:", error);
     return null;
   }
+}
+
+/**
+ * Backward-compatible wrapper used by older callsites that only expect deposits.
+ */
+export async function processDepositTx(txHash: string): Promise<DepositRecord | null> {
+  const result = await processVaultTx(txHash);
+  return result?.eventType === "deposit" ? result.deposit : null;
 }
 
 // ============================================
@@ -418,21 +693,30 @@ export async function startDepositPoller(intervalMs: number = 10_000): Promise<v
       const currentBlock = await client.getBlockNumber();
       if (currentBlock <= lastProcessedBlock) return;
 
-      const logs = await client.getLogs({
-        address: vaultAddress,
-        event: DEPOSITED_EVENT,
-        fromBlock: lastProcessedBlock + BigInt(1),
-        toBlock: currentBlock,
-      });
+      const [depositLogs, withdrawalLogs] = await Promise.all([
+        client.getLogs({
+          address: vaultAddress,
+          event: DEPOSITED_EVENT,
+          fromBlock: lastProcessedBlock + BigInt(1),
+          toBlock: currentBlock,
+        }),
+        client.getLogs({
+          address: vaultAddress,
+          event: WITHDRAWN_EVENT,
+          fromBlock: lastProcessedBlock + BigInt(1),
+          toBlock: currentBlock,
+        }),
+      ]);
 
-      for (const log of logs) {
-        if (!log.transactionHash) continue;
+      const txHashes = new Set<string>();
+      for (const log of [...depositLogs, ...withdrawalLogs]) {
+        if (log.transactionHash) txHashes.add(log.transactionHash);
+      }
 
-        // Check if we already processed this
-        if (await hasProcessedDeposit(log.transactionHash)) continue;
-
-        await processDepositTx(log.transactionHash);
-        console.log(`[DepositRelay] Processed deposit tx: ${log.transactionHash}`);
+      for (const txHash of Array.from(txHashes)) {
+        if (await hasProcessedVaultTx(txHash)) continue;
+        await processVaultTx(txHash);
+        console.log(`[DepositRelay] Processed vault tx: ${txHash}`);
       }
 
       lastProcessedBlock = currentBlock;
@@ -528,7 +812,7 @@ export async function getVaultTvlOnChain(agentId: string): Promise<number> {
     const tvl = (await client.readContract({
       address: vaultAddress,
       abi: VAULT_ABI,
-      functionName: "totalDepositsUSD",
+      functionName: "getVaultTVL",
       args: [agentIdBytes],
     })) as bigint;
 

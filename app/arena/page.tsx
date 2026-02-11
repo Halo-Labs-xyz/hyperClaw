@@ -1,8 +1,11 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { NetworkToggle } from "@/app/components/NetworkToggle";
+import { HyperclawLogo } from "@/app/components/HyperclawLogo";
+import { HyperclawIcon } from "@/app/components/HyperclawIcon";
+import { AgentAvatar } from "@/app/components/AgentAvatar";
 import type { Agent } from "@/lib/types";
 
 type PnlPoint = {
@@ -121,11 +124,11 @@ export default function ArenaPage() {
     };
   }, [agents, updatedAt]);
 
-  const getPnl = (a: Agent) => pnlMap[a.id] ?? a.totalPnl;
+  const getPnl = useCallback((a: Agent) => pnlMap[a.id] ?? a.totalPnl, [pnlMap]);
 
   const ranked = useMemo(
     () => [...agents].sort((a, b) => getPnl(b) - getPnl(a)),
-    [agents, pnlMap]
+    [agents, getPnl]
   );
 
   const chartAgents = useMemo(() => ranked.slice(0, 6), [ranked]);
@@ -213,25 +216,24 @@ export default function ArenaPage() {
       minValue,
       maxValue,
     };
-  }, [chartAgents, chartMode, historyMap, pnlMap, selectedAgent, timeframe]);
+  }, [chartAgents, chartMode, getPnl, historyMap, selectedAgent, timeframe]);
 
   const aggregatePnl = ranked.reduce((sum, a) => sum + getPnl(a), 0);
 
   return (
-    <div className="min-h-screen bg-background relative overflow-hidden">
+    <div className="min-h-screen page-bg relative overflow-hidden">
       <div className="orb orb-green w-[460px] h-[460px] -top-[180px] right-[8%] fixed" />
       <div className="orb orb-purple w-[420px] h-[420px] bottom-[6%] -left-[130px] fixed" />
+      <div className="orb orb-purple w-[320px] h-[320px] top-[20%] left-[5%] fixed" />
 
       <header className="glass sticky top-0 z-50">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 py-4 flex items-center justify-between">
           <div className="flex items-center gap-4">
             <Link href="/" className="flex items-center gap-3 group">
               <div className="w-9 h-9 rounded-lg bg-accent/10 border border-accent/20 flex items-center justify-center group-hover:bg-accent/15 transition-colors">
-                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-accent">
-                  <path d="M6 3v12" /><path d="M18 9a3 3 0 1 0 0-6 3 3 0 0 0 0 6z" /><path d="M6 21a3 3 0 1 0 0-6 3 3 0 0 0 0 6z" /><path d="M15 6a9 9 0 0 0-9 9" /><path d="M18 15v6" /><path d="M21 18h-6" />
-                </svg>
+                <HyperclawIcon className="text-accent" size={18} />
               </div>
-              <span className="text-lg font-bold tracking-tight gradient-text">Hyperclaw</span>
+              <HyperclawLogo className="text-lg font-bold tracking-tight" />
             </Link>
             <div className="hidden sm:flex items-center gap-1 text-sm text-muted">
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="text-dim"><path d="M9 18l6-6-6-6" /></svg>
@@ -251,7 +253,7 @@ export default function ArenaPage() {
         <section className="mb-7">
           <div className="flex flex-wrap items-end justify-between gap-4 mb-5">
             <div>
-              <h1 className="text-2xl md:text-3xl font-bold mb-2">Arena: Live Time-Series</h1>
+              <h1 className="text-2xl md:text-3xl font-bold mb-2 gradient-title">Arena: Live Time-Series</h1>
               <p className="text-sm text-muted">
                 TradingView-inspired multi-line PnL chart. Time flows left to right. Zero baseline separates positive and negative regions.
               </p>
@@ -464,10 +466,17 @@ export default function ArenaPage() {
               <h2 className="text-sm font-semibold mb-2">Selected Agent</h2>
               {selectedAgent ? (
                 <div>
-                  <p className="text-sm font-semibold">{selectedAgent.name}</p>
-                  <p className="text-xs text-muted mb-3">
-                    {selectedAgent.status} • {(selectedAgent.winRate * 100).toFixed(1)}% win rate
-                  </p>
+                  <div className="flex items-center gap-3 mb-2">
+                    <div className="w-12 h-12 rounded-xl overflow-hidden border border-accent/20 shrink-0">
+                      <AgentAvatar name={selectedAgent.name} description={selectedAgent.description} size={48} />
+                    </div>
+                    <div>
+                      <p className="text-sm font-semibold">{selectedAgent.name}</p>
+                      <p className="text-xs text-muted">
+                        {selectedAgent.status} • {(selectedAgent.winRate * 100).toFixed(1)}% win rate
+                      </p>
+                    </div>
+                  </div>
                   <div className="space-y-1.5 text-xs mb-3">
                     <div className="flex justify-between">
                       <span className="text-dim">PnL</span>

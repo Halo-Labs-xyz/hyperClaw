@@ -337,7 +337,7 @@ Auto-Approve      │           │
 5. **Documentation** - Updated guides
    - `README.md`
    - `BUILDER_CODES.md`
-   - `VINCENT_STYLE_AUTO_APPROVAL.md` (new)
+   - `docs/root-guides/VINCENT_STYLE_AUTO_APPROVAL.md` (new)
    - `scripts/test-builder-codes.mjs`
 
 ## 🎉 Benefits
@@ -380,9 +380,9 @@ That's it! No manual approval flow needed.
 
 ## 📚 Documentation
 
-- **Full Guide**: `VINCENT_STYLE_AUTO_APPROVAL.md`
-- **Integration Docs**: `BUILDER_CODES.md`
-- **Quick Start**: `QUICK_START_BUILDER_CODES.md`
+- **Full Guide**: `docs/root-guides/VINCENT_STYLE_AUTO_APPROVAL.md`
+- **Integration Docs**: `docs/BUILDER_CODES.md`
+- **Quick Start**: `docs/root-guides/QUICK_START_BUILDER_CODES.md`
 - **Main README**: `README.md` (updated)
 
 ## 🎯 Summary

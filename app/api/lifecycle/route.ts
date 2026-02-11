@@ -94,7 +94,7 @@ export async function POST(req: NextRequest) {
 
       case "health": {
         const healthMap = await checkAllHealth();
-        const results: Record<string, any> = {};
+        const results: Record<string, unknown> = {};
         healthMap.forEach((state, id) => {
           results[id] = state;
         });

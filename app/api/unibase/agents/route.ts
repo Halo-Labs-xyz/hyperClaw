@@ -4,13 +4,13 @@
  * List all registered AIP agents.
  */
 
-import { NextRequest, NextResponse } from "next/server";
+import { NextResponse } from "next/server";
 import { getRegisteredAIPAgents } from "@/lib/unibase-aip";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-export async function GET(req: NextRequest) {
+export async function GET() {
   try {
     const agents = getRegisteredAIPAgents();
 

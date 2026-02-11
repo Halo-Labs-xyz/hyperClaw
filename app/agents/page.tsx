@@ -3,6 +3,9 @@
 import { useState, useEffect } from "react";
 import Link from "next/link";
 import { NetworkToggle } from "@/app/components/NetworkToggle";
+import { HyperclawLogo } from "@/app/components/HyperclawLogo";
+import { HyperclawIcon } from "@/app/components/HyperclawIcon";
+import { AgentAvatar } from "@/app/components/AgentAvatar";
 import type { Agent } from "@/lib/types";
 
 export default function AgentsPage() {
@@ -51,10 +54,11 @@ export default function AgentsPage() {
   const filtered = filter === "all" ? agents : agents.filter((a) => a.status === filter);
 
   return (
-    <div className="min-h-screen bg-background relative overflow-hidden">
+    <div className="min-h-screen page-bg relative overflow-hidden">
       {/* Ambient */}
       <div className="orb orb-green w-[400px] h-[400px] -top-[150px] right-[20%] fixed" />
       <div className="orb orb-purple w-[350px] h-[350px] bottom-[20%] -left-[100px] fixed" />
+      <div className="orb orb-purple w-[280px] h-[280px] top-[25%] left-[10%] fixed" />
 
       {/* Header */}
       <header className="glass sticky top-0 z-50">
@@ -62,11 +66,9 @@ export default function AgentsPage() {
           <div className="flex items-center gap-4">
             <Link href="/" className="flex items-center gap-3 group">
               <div className="w-9 h-9 rounded-lg bg-accent/10 border border-accent/20 flex items-center justify-center group-hover:bg-accent/15 transition-colors">
-                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-accent">
-                  <path d="M6 3v12" /><path d="M18 9a3 3 0 1 0 0-6 3 3 0 0 0 0 6z" /><path d="M6 21a3 3 0 1 0 0-6 3 3 0 0 0 0 6z" /><path d="M15 6a9 9 0 0 0-9 9" /><path d="M18 15v6" /><path d="M21 18h-6" />
-                </svg>
+                <HyperclawIcon className="text-accent" size={18} />
               </div>
-              <span className="text-lg font-bold tracking-tight gradient-text">Hyperclaw</span>
+              <HyperclawLogo className="text-lg font-bold tracking-tight" />
             </Link>
             <div className="hidden sm:flex items-center gap-1 text-sm text-muted">
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="text-dim"><path d="M9 18l6-6-6-6" /></svg>
@@ -88,7 +90,7 @@ export default function AgentsPage() {
       <main className="max-w-7xl mx-auto px-4 sm:px-6 py-8 md:py-12 relative z-10">
         {/* Page title */}
         <div className="mb-8">
-          <h2 className="text-2xl md:text-3xl font-bold mb-2">Trading Agents</h2>
+          <h2 className="text-2xl md:text-3xl font-bold mb-2 gradient-title">Trading Agents</h2>
           <p className="text-muted text-sm">
             Browse AI agents and deposit into their vaults to start earning
           </p>
@@ -152,8 +154,8 @@ export default function AgentsPage() {
                   {/* Header */}
                   <div className="flex items-start justify-between mb-3">
                     <div className="flex items-center gap-3">
-                      <div className="w-10 h-10 rounded-xl bg-accent/10 border border-accent/20 flex items-center justify-center text-sm font-bold text-accent">
-                        {agent.name.charAt(0)}
+                      <div className="w-10 h-10 rounded-xl overflow-hidden border border-accent/20 shrink-0">
+                        <AgentAvatar name={agent.name} description={agent.description} size={40} />
                       </div>
                       <div>
                         <h3 className="font-semibold text-sm">{agent.name}</h3>

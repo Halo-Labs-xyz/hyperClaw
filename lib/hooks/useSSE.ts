@@ -121,7 +121,7 @@ export function useSSEMulti<T extends Record<string, unknown>>(
     return () => {
       source.close();
     };
-  }, [url, events.join(","), enabled]);
+  }, [url, events, enabled]);
 
   return { data, connected, error };
 }

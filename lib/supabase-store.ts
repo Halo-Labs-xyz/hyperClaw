@@ -7,6 +7,12 @@ const TABLES = {
   vaultMessages: "hc_vault_messages",
   deposits: "hc_deposits",
   cursors: "hc_cursors",
+  hclawLocks: "hc_hclaw_locks",
+  hclawEpochs: "hc_hclaw_points_epochs",
+  hclawBalances: "hc_hclaw_points_balances",
+  hclawReferrals: "hc_hclaw_referrals",
+  hclawRewards: "hc_hclaw_rewards",
+  hclawTreasuryFlows: "hc_hclaw_treasury_flows",
 } as const;
 
 interface AgentRow {
@@ -78,6 +84,60 @@ interface CursorRow {
   key: string;
   value: string;
   updated_at?: string;
+}
+
+export interface HclawLockRow {
+  lock_id: string;
+  user_address: string;
+  amount: string;
+  start_ts: number;
+  end_ts: number;
+  multiplier_bps: number;
+  status: "active" | "unlocked" | "expired";
+}
+
+export interface HclawEpochRow {
+  epoch_id: string;
+  start_ts: number;
+  end_ts: number;
+  status: "open" | "closing" | "closed";
+  root_hash: string | null;
+  settled_ts: number | null;
+}
+
+export interface HclawBalanceRow {
+  epoch_id: string;
+  user_address: string;
+  lock_points: number;
+  lp_points: number;
+  ref_points: number;
+  quest_points: number;
+  total_points: number;
+}
+
+export interface HclawReferralRow {
+  referrer: string;
+  referee: string;
+  qualified_volume_usd: number;
+  epoch_id: string;
+}
+
+export interface HclawRewardRow {
+  user_address: string;
+  epoch_id: string;
+  rebate_usd: number;
+  incentive_hclaw: number;
+  claimed: boolean;
+}
+
+export interface HclawTreasuryFlowRow {
+  ts: number;
+  source: string;
+  amount_usd: number;
+  buyback_usd: number;
+  incentive_usd: number;
+  reserve_usd: number;
+  tx_hash: string | null;
 }
 
 function supabaseBaseUrl(): string {
@@ -479,5 +539,176 @@ export async function sbSetCursor(key: string, value: string): Promise<void> {
     table: TABLES.cursors,
     body: [{ key, value }],
     prefer: "resolution=merge-duplicates,return=minimal",
+  });
+}
+
+export async function sbUpsertHclawLock(row: HclawLockRow): Promise<void> {
+  await supabaseRequest<HclawLockRow[]>({
+    method: "POST",
+    table: TABLES.hclawLocks,
+    body: [row],
+    prefer: "resolution=merge-duplicates,return=minimal",
+  });
+}
+
+export async function sbListHclawLocksForUser(userAddress: string): Promise<HclawLockRow[]> {
+  return supabaseRequest<HclawLockRow[]>({
+    method: "GET",
+    table: TABLES.hclawLocks,
+    query: {
+      select: "*",
+      user_address: `eq.${userAddress.toLowerCase()}`,
+      order: "end_ts.desc",
+    },
+  });
+}
+
+export async function sbCreateHclawEpoch(row: HclawEpochRow): Promise<void> {
+  await supabaseRequest<HclawEpochRow[]>({
+    method: "POST",
+    table: TABLES.hclawEpochs,
+    body: [row],
+    prefer: "resolution=merge-duplicates,return=minimal",
+  });
+}
+
+export async function sbGetHclawEpoch(epochId: string): Promise<HclawEpochRow | null> {
+  const rows = await supabaseRequest<HclawEpochRow[]>({
+    method: "GET",
+    table: TABLES.hclawEpochs,
+    query: {
+      select: "*",
+      epoch_id: `eq.${epochId}`,
+      limit: "1",
+    },
+  });
+  return rows[0] ?? null;
+}
+
+export async function sbGetLatestHclawEpoch(): Promise<HclawEpochRow | null> {
+  const rows = await supabaseRequest<HclawEpochRow[]>({
+    method: "GET",
+    table: TABLES.hclawEpochs,
+    query: {
+      select: "*",
+      order: "start_ts.desc",
+      limit: "1",
+    },
+  });
+  return rows[0] ?? null;
+}
+
+export async function sbListHclawEpochs(limit = 20): Promise<HclawEpochRow[]> {
+  return supabaseRequest<HclawEpochRow[]>({
+    method: "GET",
+    table: TABLES.hclawEpochs,
+    query: {
+      select: "*",
+      order: "start_ts.desc",
+      limit: String(limit),
+    },
+  });
+}
+
+export async function sbUpsertHclawPointsBalance(row: HclawBalanceRow): Promise<void> {
+  await supabaseRequest<HclawBalanceRow[]>({
+    method: "POST",
+    table: TABLES.hclawBalances,
+    body: [row],
+    prefer: "resolution=merge-duplicates,return=minimal",
+  });
+}
+
+export async function sbListHclawEpochBalances(
+  epochId: string,
+  userAddress?: string
+): Promise<HclawBalanceRow[]> {
+  const query: Record<string, string> = {
+    select: "*",
+    epoch_id: `eq.${epochId}`,
+    order: "total_points.desc",
+  };
+  if (userAddress) {
+    query.user_address = `eq.${userAddress.toLowerCase()}`;
+  }
+  return supabaseRequest<HclawBalanceRow[]>({
+    method: "GET",
+    table: TABLES.hclawBalances,
+    query,
+  });
+}
+
+export async function sbUpsertHclawReferral(row: HclawReferralRow): Promise<void> {
+  await supabaseRequest<HclawReferralRow[]>({
+    method: "POST",
+    table: TABLES.hclawReferrals,
+    body: [row],
+    prefer: "resolution=merge-duplicates,return=minimal",
+  });
+}
+
+export async function sbUpsertHclawReward(row: HclawRewardRow): Promise<void> {
+  await supabaseRequest<HclawRewardRow[]>({
+    method: "POST",
+    table: TABLES.hclawRewards,
+    body: [row],
+    prefer: "resolution=merge-duplicates,return=minimal",
+  });
+}
+
+export async function sbListHclawRewardsForUser(
+  userAddress: string,
+  epochId?: string
+): Promise<HclawRewardRow[]> {
+  const query: Record<string, string> = {
+    select: "*",
+    user_address: `eq.${userAddress.toLowerCase()}`,
+    order: "epoch_id.desc",
+  };
+  if (epochId) query.epoch_id = `eq.${epochId}`;
+
+  return supabaseRequest<HclawRewardRow[]>({
+    method: "GET",
+    table: TABLES.hclawRewards,
+    query,
+  });
+}
+
+export async function sbMarkHclawRewardClaimed(
+  userAddress: string,
+  epochId: string
+): Promise<HclawRewardRow | null> {
+  const rows = await supabaseRequest<HclawRewardRow[]>({
+    method: "PATCH",
+    table: TABLES.hclawRewards,
+    query: {
+      user_address: `eq.${userAddress.toLowerCase()}`,
+      epoch_id: `eq.${epochId}`,
+      select: "*",
+    },
+    body: { claimed: true },
+    prefer: "return=representation",
+  });
+  return rows[0] ?? null;
+}
+
+export async function sbInsertHclawTreasuryFlow(row: HclawTreasuryFlowRow): Promise<void> {
+  await supabaseRequest<HclawTreasuryFlowRow[]>({
+    method: "POST",
+    table: TABLES.hclawTreasuryFlows,
+    body: [row],
+    prefer: "return=minimal",
+  });
+}
+
+export async function sbListHclawTreasuryFlows(limit = 200): Promise<HclawTreasuryFlowRow[]> {
+  return supabaseRequest<HclawTreasuryFlowRow[]>({
+    method: "GET",
+    table: TABLES.hclawTreasuryFlows,
+    query: {
+      select: "ts,source,amount_usd,buyback_usd,incentive_usd,reserve_usd,tx_hash",
+      order: "ts.desc",
+      limit: String(limit),
+    },
   });
 }

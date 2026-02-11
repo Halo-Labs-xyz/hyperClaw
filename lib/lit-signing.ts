@@ -21,7 +21,6 @@ import {
   getOperatorAuthContext,
   generateTradingLitAction,
   type LitActionResult,
-  type TradingConstraints,
   DEFAULT_TRADING_CONSTRAINTS,
 } from "./lit-protocol";
 import { getPKPForAgent } from "./account-manager";

@@ -22,7 +22,7 @@ import {
   getRegisteredAIPAgents,
   type DeploymentMode 
 } from "./unibase-aip";
-import type { Agent, AgentRunnerState } from "./types";
+import type { Agent } from "./types";
 
 // ============================================
 // Configuration

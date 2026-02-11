@@ -4,6 +4,7 @@ import { useState, useEffect, useMemo } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { NetworkToggle } from "@/app/components/NetworkToggle";
+import { HyperclawIcon } from "@/app/components/HyperclawIcon";
 import type { AutonomyMode } from "@/lib/types";
 import type { PerpMarketInfo, SpotMarketInfo } from "@/lib/hyperliquid";
 
@@ -226,10 +227,11 @@ export default function CreateAgentPage() {
   const aggressivenessPercent = aggressiveness;
 
   return (
-    <div className="min-h-screen bg-background relative overflow-hidden">
+    <div className="min-h-screen page-bg relative overflow-hidden">
       {/* Ambient */}
       <div className="orb orb-purple w-[500px] h-[500px] -top-[200px] left-[20%] fixed" />
       <div className="orb orb-green w-[300px] h-[300px] bottom-[20%] right-[10%] fixed" />
+      <div className="orb orb-purple w-[350px] h-[350px] bottom-[30%] right-[25%] fixed" />
 
       {/* Header */}
       <header className="glass sticky top-0 z-50">
@@ -237,9 +239,7 @@ export default function CreateAgentPage() {
           <div className="flex items-center gap-2">
             <Link href="/" className="flex items-center gap-3 group shrink-0">
               <div className="w-9 h-9 rounded-lg bg-accent/10 border border-accent/20 flex items-center justify-center group-hover:bg-accent/15 transition-colors">
-                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-accent">
-                  <path d="M6 3v12" /><path d="M18 9a3 3 0 1 0 0-6 3 3 0 0 0 0 6z" /><path d="M6 21a3 3 0 1 0 0-6 3 3 0 0 0 0 6z" /><path d="M15 6a9 9 0 0 0-9 9" /><path d="M18 15v6" /><path d="M21 18h-6" />
-                </svg>
+                <HyperclawIcon className="text-accent" size={18} />
               </div>
             </Link>
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="text-dim"><path d="M9 18l6-6-6-6" /></svg>
@@ -263,7 +263,7 @@ export default function CreateAgentPage() {
               </svg>
             </div>
             <div>
-              <h2 className="text-2xl md:text-3xl font-bold">Create Agent</h2>
+              <h2 className="text-2xl md:text-3xl font-bold gradient-title">Create Agent</h2>
               <p className="text-muted text-sm">Configure an AI-powered perpetual futures trader</p>
             </div>
           </div>

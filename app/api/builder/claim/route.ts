@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { getExchangeClient } from "@/lib/hyperliquid";
 import { getBuilderConfig } from "@/lib/builder";
+import { verifyApiKey, unauthorizedResponse } from "@/lib/auth";
 
 /**
  * POST /api/builder/claim
@@ -11,6 +12,7 @@ import { getBuilderConfig } from "@/lib/builder";
  * Requires the builder wallet's private key to be set as HYPERLIQUID_PRIVATE_KEY
  */
 export async function POST(request: Request) {
+  if (!verifyApiKey(request)) return unauthorizedResponse();
   try {
     const config = getBuilderConfig();
     
@@ -66,6 +68,7 @@ export async function POST(request: Request) {
  * Get claimable builder fees without claiming
  */
 export async function GET(request: Request) {
+  if (!verifyApiKey(request)) return unauthorizedResponse();
   try {
     const config = getBuilderConfig();
     

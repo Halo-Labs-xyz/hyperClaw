@@ -7,6 +7,7 @@
 
 import { type Address } from "viem";
 import { getInfoClient } from "./hyperliquid";
+import { isHlTestnet } from "./network";
 
 // ============================================
 // Config
@@ -17,19 +18,57 @@ export interface BuilderConfig {
   feePoints: number; // in tenths of basis points (10 = 1bp = 0.1%)
 }
 
-export function getBuilderConfig(): BuilderConfig | null {
+let missingConfigWarned = false;
+let invalidFeeWarned = false;
+
+export function getBuilderConfig(opts: { logIfMissing?: boolean } = {}): BuilderConfig | null {
+  const { logIfMissing = true } = opts;
   const address = process.env.NEXT_PUBLIC_BUILDER_ADDRESS;
   const feePoints = process.env.NEXT_PUBLIC_BUILDER_FEE;
 
   if (!address || !feePoints) {
-    console.warn("[Builder] Builder codes not configured");
+    if (logIfMissing && !missingConfigWarned) {
+      if (isHlTestnet()) {
+        console.warn("[Builder] Builder codes not configured (testnet mode)");
+      } else {
+        console.error(
+          "[Builder] Builder codes are required on mainnet. Set NEXT_PUBLIC_BUILDER_ADDRESS and NEXT_PUBLIC_BUILDER_FEE."
+        );
+      }
+      missingConfigWarned = true;
+    }
+    return null;
+  }
+
+  const parsedFeePoints = parseInt(feePoints, 10);
+  if (!Number.isFinite(parsedFeePoints) || parsedFeePoints <= 0) {
+    if (!invalidFeeWarned) {
+      console.error(
+        "[Builder] NEXT_PUBLIC_BUILDER_FEE must be a positive integer (tenths of basis points)."
+      );
+      invalidFeeWarned = true;
+    }
     return null;
   }
 
   return {
     address: address as Address,
-    feePoints: parseInt(feePoints, 10),
+    feePoints: parsedFeePoints,
   };
+}
+
+/**
+ * Builder configuration is mandatory for mainnet trading to avoid silent
+ * revenue loss from orders executing without builder params.
+ */
+export function assertBuilderConfiguredForTrading(): void {
+  if (isHlTestnet()) return;
+  const config = getBuilderConfig();
+  if (!config) {
+    throw new Error(
+      "Builder codes are required for Hyperliquid mainnet. Configure NEXT_PUBLIC_BUILDER_ADDRESS and NEXT_PUBLIC_BUILDER_FEE."
+    );
+  }
 }
 
 /**
@@ -289,23 +328,10 @@ async function autoApproveBuilderCodeTraditional(
     const { getExchangeClientForAgent } = await import("./hyperliquid");
     const exchange = getExchangeClientForAgent(agentPrivateKey);
 
-    const nonce = Date.now();
     const maxFeeRate = builderPointsToPercent(config.feePoints);
-    const hyperliquidChain = process.env.NEXT_PUBLIC_HYPERLIQUID_TESTNET === "true" 
-      ? "Testnet" 
-      : "Mainnet";
-
-    // Construct approval action
-    const action = {
-      type: "approveBuilderFee" as const,
-      hyperliquidChain,
-      maxFeeRate,
-      builder: config.address,
-      nonce,
-    };
 
     // Submit approval via exchange client
-    const result = await exchange.approveBuilderFee({
+    await exchange.approveBuilderFee({
       builder: config.address,
       maxFeeRate,
     });
@@ -349,7 +375,7 @@ async function autoApproveBuilderCodeWithPKP(
     };
     
     // Submit via custom endpoint
-    const submitResult = await infoWithCustom.custom({
+    await infoWithCustom.custom({
       action: result.action,
       nonce: result.action.nonce,
       signature: result.signature,

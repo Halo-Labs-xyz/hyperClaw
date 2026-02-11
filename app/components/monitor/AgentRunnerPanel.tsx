@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback } from "react";
 import type { Agent, AgentRunnerState } from "@/lib/types";
+import { AgentAvatar } from "@/app/components/AgentAvatar";
 
 interface Props {
   agent: Agent;
@@ -89,6 +90,9 @@ export function AgentRunnerPanel({ agent }: Props) {
           <h3 className="font-bold text-sm uppercase tracking-wider">
             Agent Runner
           </h3>
+          <div className="w-6 h-6 rounded-md overflow-hidden border border-accent/20 shrink-0">
+            <AgentAvatar name={agent.name} description={agent.description} size={24} />
+          </div>
           <span className="text-xs font-medium">{agent.name}</span>
         </div>
         <div className="flex items-center gap-1.5">

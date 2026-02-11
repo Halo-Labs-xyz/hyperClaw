@@ -540,7 +540,8 @@ export async function placeOrder(params: {
   const exchangeClient = exchange ?? getExchangeClient();
   
   // Add builder code if available
-  const { getBuilderParam } = await import("./builder");
+  const { assertBuilderConfiguredForTrading, getBuilderParam } = await import("./builder");
+  assertBuilderConfiguredForTrading();
   const builderParam = params.builder ?? getBuilderParam();
   
   return await exchangeClient.order({
@@ -674,7 +675,8 @@ export async function placeStopLossOrder(params: {
   const formattedTrigger = formatHlPrice(parseFloat(params.triggerPrice));
   
   // Add builder code if available
-  const { getBuilderParam } = await import("./builder");
+  const { assertBuilderConfiguredForTrading, getBuilderParam } = await import("./builder");
+  assertBuilderConfiguredForTrading();
   const builderParam = params.builder ?? getBuilderParam();
   
   return await exchangeClient.order({
@@ -719,7 +721,8 @@ export async function placeTakeProfitOrder(params: {
   const formattedTrigger = formatHlPrice(parseFloat(params.triggerPrice));
   
   // Add builder code if available
-  const { getBuilderParam } = await import("./builder");
+  const { assertBuilderConfiguredForTrading, getBuilderParam } = await import("./builder");
+  assertBuilderConfiguredForTrading();
   const builderParam = params.builder ?? getBuilderParam();
   
   return await exchangeClient.order({
@@ -758,7 +761,8 @@ export async function executeOrder(
     params.side === "buy" || params.side === "long";
 
   // Get builder param if available
-  const { getBuilderParam } = await import("./builder");
+  const { assertBuilderConfiguredForTrading, getBuilderParam } = await import("./builder");
+  assertBuilderConfiguredForTrading();
   const builderParam = getBuilderParam();
 
   switch (params.orderType) {

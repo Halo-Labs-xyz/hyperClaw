@@ -12,10 +12,12 @@ Users deposit into Monad smart contract vaults. Capital is relayed to Hyperliqui
 - [Core Concepts](#core-concepts)
 - [Unibase AIP Integration](#unibase-aip-integration)
 - [Tech Stack](#tech-stack)
+- [HCLAW Launch Stack](#hclaw-launch-stack)
 - [Pages and UI](#pages-and-ui)
 - [API Surface](#api-surface)
 - [Smart Contract](#smart-contract)
 - [Project Structure](#project-structure)
+- [Documentation Index](#documentation-index)
 - [Environment Variables](#environment-variables)
 - [Setup](#setup)
 - [Running](#running)
@@ -114,6 +116,31 @@ Each agent is an independent trading entity with:
 | Apex      | $100,000            | $100,000            |
 
 - Open Vault mode: public chat room for depositors, AI responds to investor questions
+
+### HCLAW Launch Stack
+
+The HCLAW Monad/nad.fun integration includes:
+
+- `HclawLock.sol`: lock lifecycle + linearly decaying `HCLAW Power`
+- `HclawPolicy.sol`: user cap boost + rebate tier resolution
+- `HyperclawVaultV3.sol`: per-user cap checks with relay-compatible events
+- `HclawRewardsDistributor.sol`: points/rebate claim state
+- `HclawTreasuryRouter.sol`: buyback/incentive/reserve split router
+- `AgenticLPVault.sol`: role-gated strategy shell with kill-switch and risk limits
+
+Backend/API surface:
+
+- `lib/hclaw-lock.ts`, `lib/hclaw-policy.ts`, `lib/hclaw-points.ts`, `lib/hclaw-rewards.ts`, `lib/agentic-vault.ts`
+- `/api/hclaw/state`, `/api/hclaw/lock`, `/api/hclaw/points`, `/api/hclaw/rewards`, `/api/hclaw/treasury`, `/api/hclaw/epochs/close`
+
+Ops scripts:
+
+```bash
+npm run deploy:hclaw-stack
+npm run hclaw:backfill
+npm run hclaw:epoch:close
+npm run hclaw:report
+```
 
 ### AI Trading Brain
 
@@ -235,6 +262,12 @@ flowchart LR
     Gateway -->|9. Return result| Platform
     Platform -->|10. Deliver to user| Client
 ```
+
+## Documentation Index
+
+- Main docs index: [`docs/README.md`](docs/README.md)
+- Production runbook: [`docs/PRODUCTION_RUNBOOK.md`](docs/PRODUCTION_RUNBOOK.md)
+- Repository structure map: [`docs/REPO_STRUCTURE.md`](docs/REPO_STRUCTURE.md)
 
 ### Deployment Modes
 
@@ -585,9 +618,25 @@ Design system: dark terminal aesthetic. Neon green (`#30e8a0`, Hyperliquid), pur
 
 | Method | Route            | Description                                                                 |
 |--------|------------------|-----------------------------------------------------------------------------|
-| POST   | `/api/mcp`       | MCP JSON-RPC: `initialize`, `tools/list`, `tools/call`. Auth: `HYPERCLAW_API_KEY` or `MCP_API_KEY`. |
+| POST   | `/api/mcp`       | MCP JSON-RPC: `initialize`, `tools/list`, `tools/call`. Auth via `x-api-key` or `Authorization: Bearer` against `HYPERCLAW_API_KEY` / `MCP_API_KEY` (required in production). |
 
 Used by IronClaw as the fund-manager MCP server (agents, lifecycle, positions, market). See [`docs/IRONCLAW_INTEGRATION.md`](docs/IRONCLAW_INTEGRATION.md).
+
+### MCP Auth Setup (IronClaw -> hyperClaw)
+
+```bash
+# Static API key in x-api-key header
+ironclaw mcp add hyperclaw http://localhost:3014/api/mcp \
+  --api-key "$HYPERCLAW_API_KEY" \
+  --api-key-header x-api-key
+
+# Authorization header variant
+ironclaw mcp add hyperclaw http://localhost:3014/api/mcp \
+  --api-key "Bearer $MCP_API_KEY" \
+  --api-key-header Authorization
+```
+
+Static MCP API keys are stored in IronClaw secrets storage. `~/.ironclaw/mcp-servers.json` stores only header metadata and a secret reference.
 
 ### Other
 
@@ -683,7 +732,10 @@ hyperClaw/
 │   └── hooks/useSSE.ts             # Client-side SSE hook
 ├── scripts/
 │   ├── deploy-public-agents.mjs    # Deploy agents to AIP (DIRECT mode)
-│   └── deploy-private-agents.mjs   # Deploy agents to AIP (POLLING mode)
+│   ├── deploy-private-agents.mjs   # Deploy agents to AIP (POLLING mode)
+│   ├── dev-stack.sh                # One-command local/staging boot (pgvector + IronClaw + hyperClaw)
+│   ├── rotate-dev-secrets.sh       # Rotate local dev/test secrets in .env
+│   └── test-ironclaw-contracts.mjs # MCP + IronClaw route integration contract tests
 ├── contracts/
 │   └── HyperclawVault.sol          # On-chain vault contract
 ├── .data/                          # Local JSON storage (gitignored in prod)
@@ -720,6 +772,7 @@ cp .env.example .env.local
 | `HYPERLIQUID_PRIVATE_KEY`            | Yes      | Operator wallet private key (funds agent wallets)     |
 | `NEXT_PUBLIC_HYPERLIQUID_TESTNET`    | No       | `"true"` for HL testnet (default: mirrors Monad)      |
 | `RELAY_FEE_BPS`                      | No       | Deposit relay fee in basis points (default: 100 = 1%) |
+| `RELAY_STABLE_TOKENS`                | No       | Comma-separated mainnet ERC20 addresses allowed for $1 relay pricing |
 | `OPENAI_API_KEY`                     | Yes      | API key for the AI trading brain                      |
 | `AGENT_TICK_INTERVAL`                | No       | Agent runner interval in ms (default: 60000)          |
 | `TELEGRAM_BOT_TOKEN`                 | No       | Telegram bot token from @BotFather                    |
@@ -751,6 +804,12 @@ cp .env.example .env.local
 | `AWS_ACCESS_KEY_ID`       | AWS access key                                 |
 | `AWS_SECRET_ACCESS_KEY`   | AWS secret key                                 |
 | `ORCHESTRATOR_SECRET`     | Shared secret for EC2 orchestrator auth        |
+| `HYPERCLAW_API_KEY`       | Protects sensitive hyperClaw endpoints and MCP |
+| `MCP_API_KEY`             | Optional dedicated key for `/api/mcp`          |
+| `IRONCLAW_WEBHOOK_URL`    | hyperClaw -> IronClaw webhook endpoint         |
+| `IRONCLAW_WEBHOOK_SECRET` | Shared webhook secret for `/api/ironclaw`      |
+| `ALLOW_RUNTIME_NETWORK_SWITCH` | Keep `false` in production defaults       |
+| `SECRETS_MASTER_KEY`      | Required by IronClaw for encrypted secrets storage |
 
 ---
 
@@ -787,7 +846,16 @@ Copy output to `WEB_PUSH_PRIVATE_KEY` and `NEXT_PUBLIC_WEB_PUSH_PUBLIC_KEY` in `
 
 ### Deploy Vault Contract
 
-Deploy `contracts/HyperclawVault.sol` to Monad (testnet or mainnet). Set the deployed address in `NEXT_PUBLIC_VAULT_ADDRESS`.
+For mainnet, deploy `contracts/HyperclawVaultV2.sol` (hardened vault with per-agent asset segregation and pro-rata multi-asset withdrawals).
+
+For legacy/test-only setups, `contracts/HyperclawVault.sol` remains available but is not recommended for mainnet.
+
+Set the deployed address in `NEXT_PUBLIC_VAULT_ADDRESS`.
+
+Mainnet ops requirements:
+- Set token prices in the vault (`setTokenPrice`) for MON (`address(0)`) and each accepted ERC20.
+- Keep prices fresh (`maxPriceAge` guard will block stale pricing).
+- Review and execute the migration runbook in `docs/MAINNET_VAULT_MIGRATION.md`.
 
 ---
 
@@ -801,6 +869,18 @@ npm run dev
 
 Runs at `http://localhost:3000`. PWA install prompts require production build.
 
+For a reproducible local/staging stack (Postgres+pgvector + IronClaw `:8080` + hyperClaw `:3014`):
+
+```bash
+npm run dev:stack
+```
+
+To rotate local exposed dev/test secrets:
+
+```bash
+npm run rotate:dev-secrets
+```
+
 ### Production
 
 ```bash
@@ -812,6 +892,26 @@ npm run build && npm run start
 ```bash
 npm run lint
 ```
+
+### Solidity Tests (Foundry)
+
+```bash
+npm run test:solidity
+```
+
+Uses Foundry in `--offline` mode to avoid external signature lookups.
+
+### Mainnet Preflight
+
+```bash
+npm run preflight:mainnet
+```
+
+Checks launch-blocker config for production cutover:
+- `ALLOW_RUNTIME_NETWORK_SWITCH=false`
+- Builder config set on HL mainnet
+- `RELAY_STABLE_TOKENS` set for Monad mainnet ERC20 relay deposits
+- Required API keys and vault address format
 
 ---
 
@@ -837,7 +937,7 @@ For autonomous agent execution at scale, run an EC2 instance that polls `/api/ag
 
 ## Testnet Trading
 
-See [TESTNET_TRADING.md](./TESTNET_TRADING.md) for the full testnet trading checklist.
+See [TESTNET_TRADING.md](./docs/root-guides/TESTNET_TRADING.md) for the full testnet trading checklist.
 
 Short version:
 

@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { getNetworkState, setNetworkState } from "@/lib/network";
+import { verifyApiKey, unauthorizedResponse } from "@/lib/auth";
 
 /**
  * GET /api/network
@@ -21,6 +22,22 @@ export async function GET() {
  * All cached SDK clients are invalidated on change.
  */
 export async function POST(request: Request) {
+  const runtimeSwitchEnabled =
+    process.env.ALLOW_RUNTIME_NETWORK_SWITCH === "true" ||
+    process.env.NODE_ENV !== "production";
+
+  if (!runtimeSwitchEnabled) {
+    return NextResponse.json(
+      {
+        error:
+          "Runtime network switching is disabled. Set ALLOW_RUNTIME_NETWORK_SWITCH=true to enable.",
+      },
+      { status: 403 }
+    );
+  }
+
+  if (!verifyApiKey(request)) return unauthorizedResponse();
+
   try {
     const body = await request.json();
     const update: Record<string, boolean> = {};
@@ -36,6 +53,23 @@ export async function POST(request: Request) {
     if (typeof body.testnet === "boolean") {
       update.monadTestnet = body.testnet;
       update.hlTestnet = body.testnet;
+    }
+
+    const current = getNetworkState();
+    const targetHlTestnet = update.hlTestnet ?? current.hlTestnet;
+
+    if (!targetHlTestnet) {
+      const { getBuilderConfig } = await import("@/lib/builder");
+      const builderConfig = getBuilderConfig({ logIfMissing: false });
+      if (!builderConfig) {
+        return NextResponse.json(
+          {
+            error:
+              "Cannot switch Hyperliquid to mainnet without builder config. Set NEXT_PUBLIC_BUILDER_ADDRESS and NEXT_PUBLIC_BUILDER_FEE first.",
+          },
+          { status: 400 }
+        );
+      }
     }
 
     const newState = setNetworkState(update);

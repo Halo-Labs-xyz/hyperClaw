@@ -1,18 +1,19 @@
 import { NextResponse } from "next/server";
 import {
-  processDepositTx,
+  processVaultTx,
   getDepositsForAgent,
   getDepositsForUser,
   getUserSharePercent,
   getVaultTvlOnChain,
 } from "@/lib/deposit-relay";
 import { type Address } from "viem";
+import { getUserCapContext } from "@/lib/hclaw-policy";
 
 /**
  * POST /api/deposit
  *
- * Confirm a Monad vault deposit transaction.
- * Called by the frontend after the user's deposit tx is confirmed on-chain.
+ * Confirm a Monad vault transaction (deposit or withdrawal).
+ * Called by the frontend after tx confirmation to sync relay/accounting.
  *
  * Body: { txHash: string }
  */
@@ -20,24 +21,58 @@ export async function POST(request: Request) {
   try {
     const body = await request.json();
 
-    if (!body.txHash) {
+    if (!body.txHash || typeof body.txHash !== "string") {
       return NextResponse.json(
         { error: "txHash required" },
         { status: 400 }
       );
     }
 
-    const record = await processDepositTx(body.txHash);
-
-    if (!record) {
+    if (!/^0x[a-fA-F0-9]{64}$/.test(body.txHash)) {
       return NextResponse.json(
-        { error: "No deposit event found in transaction" },
+        { error: "txHash must be a 0x-prefixed 32-byte hash" },
+        { status: 400 }
+      );
+    }
+
+    const result = await processVaultTx(body.txHash);
+
+    if (!result) {
+      return NextResponse.json(
+        { error: "No vault event found in transaction" },
         { status: 404 }
       );
     }
 
+    if (result.eventType === "withdrawal") {
+      return NextResponse.json({
+        success: true,
+        eventType: "withdrawal",
+        withdrawal: {
+          agentId: result.withdrawal.agentId,
+          user: result.withdrawal.user,
+          shares: result.withdrawal.shares,
+          monAmount: result.withdrawal.monAmount,
+          txHash: result.withdrawal.txHash,
+        },
+      });
+    }
+
+    const record = result.deposit;
+    const capContext =
+      record.userCapUsd !== undefined
+        ? {
+            tier: record.lockTier ?? 0,
+            boostBps: record.boostBps ?? 10_000,
+            rebateBps: record.rebateBps ?? 0,
+            boostedCapUsd: record.userCapUsd ?? 0,
+            capRemainingUsd: record.userCapRemainingUsd ?? 0,
+          }
+        : await getUserCapContext(record.user, record.agentId);
+
     return NextResponse.json({
       success: true,
+      eventType: "deposit",
       deposit: {
         agentId: record.agentId,
         user: record.user,
@@ -51,6 +86,12 @@ export async function POST(request: Request) {
         hlWalletAddress: record.hlWalletAddress || null,
         hlFunded: record.hlFunded || false,
         hlFundedAmount: record.hlFundedAmount || 0,
+        lockTier: capContext.tier,
+        boostBps: capContext.boostBps,
+        rebateBps: capContext.rebateBps,
+        userCapUsd: capContext.boostedCapUsd,
+        userCapRemainingUsd: capContext.capRemainingUsd,
+        pointsActivity: record.pointsActivity ?? null,
       },
     });
   } catch (error) {

@@ -3,9 +3,11 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { useAccount, useBalance, useWriteContract, useReadContract, useWaitForTransactionReceipt, useSwitchChain } from "wagmi";
-import { parseEther, formatEther, type Address } from "viem";
+import { parseEther, parseUnits, formatEther, type Address } from "viem";
 import Link from "next/link";
 import { NetworkToggle } from "@/app/components/NetworkToggle";
+import { HyperclawIcon } from "@/app/components/HyperclawIcon";
+import { AgentAvatar } from "@/app/components/AgentAvatar";
 import type { Agent, TradeLog, MonadToken, VaultChatMessage, IndicatorConfig } from "@/lib/types";
 import { MONAD_TOKENS, INDICATOR_TEMPLATES } from "@/lib/types";
 import { VAULT_ABI, ERC20_ABI, agentIdToBytes32 } from "@/lib/vault";
@@ -57,6 +59,15 @@ export default function AgentDetailPage() {
   const [depositing, setDepositing] = useState(false);
   const [depositTxHash, setDepositTxHash] = useState<`0x${string}` | undefined>();
   const [depositStatus, setDepositStatus] = useState<string>("");
+  const [capPreview, setCapPreview] = useState<{
+    baseCapUsd: number;
+    boostedCapUsd: number;
+    capRemainingUsd: number;
+    boostBps: number;
+    rebateBps: number;
+    tier: number;
+  } | null>(null);
+  const [capPreviewLoading, setCapPreviewLoading] = useState(false);
 
   // Withdraw state (adheres to HL vault rule: leader must keep ≥5%)
   const [withdrawShares, setWithdrawShares] = useState("");
@@ -249,6 +260,36 @@ export default function AgentDetailPage() {
     }
   }, [agentId]);
 
+  const fetchCapPreview = useCallback(async () => {
+    if (!address) {
+      setCapPreview(null);
+      return;
+    }
+
+    setCapPreviewLoading(true);
+    try {
+      const res = await fetch(`/api/hclaw/state?user=${address}&agentId=${agentId}`);
+      const data = await res.json();
+      const cap = data?.userContext?.cap;
+      if (cap) {
+        setCapPreview({
+          baseCapUsd: Number(cap.baseCapUsd || 0),
+          boostedCapUsd: Number(cap.boostedCapUsd || 0),
+          capRemainingUsd: Number(cap.capRemainingUsd || 0),
+          boostBps: Number(cap.boostBps || 10_000),
+          rebateBps: Number(cap.rebateBps || 0),
+          tier: Number(cap.tier || 0),
+        });
+      } else {
+        setCapPreview(null);
+      }
+    } catch {
+      setCapPreview(null);
+    } finally {
+      setCapPreviewLoading(false);
+    }
+  }, [address, agentId]);
+
   useEffect(() => {
     fetchAgent();
     // Adaptive polling: slow down when HL API is having issues
@@ -310,14 +351,29 @@ export default function AgentDetailPage() {
       })
         .then((res) => res.json())
         .then((data) => {
-          if (data.success) {
+          if (data.success && data.eventType === "deposit" && data.deposit) {
             const d = data.deposit;
             const hlInfo = d.hlFunded
               ? ` HL wallet ${d.hlWalletAddress?.slice(0, 6)}...${d.hlWalletAddress?.slice(-4)} funded $${d.hlFundedAmount}.`
               : "";
-            setDepositStatus(`Deposit confirmed! ${d.shares} shares minted.${hlInfo}`);
+            const hclawInfo = d.rebateBps
+              ? ` Tier ${d.lockTier} active. Rebate ${(Number(d.rebateBps) / 100).toFixed(2)}%. Remaining cap $${Number(d.userCapRemainingUsd || 0).toFixed(2)}.`
+              : "";
+            setDepositStatus(`Deposit confirmed! ${d.shares} shares minted.${hlInfo}${hclawInfo}`);
+            setCapPreview({
+              baseCapUsd: Number(d.userCapUsd || 0) / ((Number(d.boostBps || 10_000) || 10_000) / 10_000),
+              boostedCapUsd: Number(d.userCapUsd || 0),
+              capRemainingUsd: Number(d.userCapRemainingUsd || 0),
+              boostBps: Number(d.boostBps || 10_000),
+              rebateBps: Number(d.rebateBps || 0),
+              tier: Number(d.lockTier || 0),
+            });
             setDepositAmount("");
             fetchAgent();
+            fetchCapPreview();
+          } else if (data.success) {
+            setDepositStatus("Deposit confirmed on-chain. Relay sync pending.");
+            fetchCapPreview();
           } else {
             setDepositStatus(`Relay note: ${data.error || "Deposit recorded on-chain"}`);
           }
@@ -330,16 +386,38 @@ export default function AgentDetailPage() {
           setDepositTxHash(undefined);
         });
     }
-  }, [depositConfirmed, depositTxHash, fetchAgent]);
+  }, [depositConfirmed, depositTxHash, fetchAgent, fetchCapPreview]);
 
   useEffect(() => {
     if (withdrawConfirmed && withdrawTxHash) {
-      setWithdrawStatus("Withdrawal confirmed.");
-      setWithdrawShares("");
-      setWithdrawTxHash(undefined);
-      fetchAgent();
+      setWithdrawStatus("Confirming withdrawal with relay...");
+      fetch("/api/deposit", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ txHash: withdrawTxHash }),
+      })
+        .then((res) => res.json())
+        .then((data) => {
+          if (data.success && data.eventType === "withdrawal") {
+            setWithdrawStatus("Withdrawal confirmed and synced.");
+          } else if (data.success) {
+            setWithdrawStatus("Withdrawal confirmed.");
+          } else {
+            setWithdrawStatus(`Withdrawal confirmed on-chain. Relay note: ${data.error || "sync pending"}`);
+          }
+          setWithdrawShares("");
+          fetchAgent();
+          fetchCapPreview();
+        })
+        .catch(() => {
+          setWithdrawStatus("Withdrawal confirmed on-chain. Relay sync pending.");
+          fetchAgent();
+        })
+        .finally(() => {
+          setWithdrawTxHash(undefined);
+        });
     }
-  }, [withdrawConfirmed, withdrawTxHash, fetchAgent]);
+  }, [withdrawConfirmed, withdrawTxHash, fetchAgent, fetchCapPreview]);
 
   useEffect(() => {
     if (tab === "chat") {
@@ -348,6 +426,11 @@ export default function AgentDetailPage() {
       return () => clearInterval(interval);
     }
   }, [tab, fetchChat]);
+
+  useEffect(() => {
+    if (tab !== "deposit") return;
+    fetchCapPreview();
+  }, [tab, fetchCapPreview]);
 
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -362,74 +445,51 @@ export default function AgentDetailPage() {
     const hasVault = vaultAddress && vaultAddress.startsWith("0x") && vaultAddress.length === 42;
 
     try {
-      if (hasVault) {
-        // ========== On-chain deposit via Monad vault ==========
-        try {
-          await switchChainAsync({ chainId: vaultChainId });
-        } catch {
-          // May already be on the right chain
-        }
-
-        if (depositToken.symbol === "MON") {
-          setDepositStatus("Sending MON deposit transaction...");
-          const hash = await writeContractAsync({
-            address: vaultAddress!,
-            abi: VAULT_ABI,
-            functionName: "depositMON",
-            args: [agentIdBytes],
-            value: parseEther(depositAmount),
-          });
-          setDepositTxHash(hash);
-          setDepositStatus("Transaction submitted. Waiting for confirmation...");
-        } else {
-          // ERC20: approve then deposit
-          const amountWei = BigInt(
-            Math.floor(parseFloat(depositAmount) * 10 ** depositToken.decimals)
-          );
-
-          setDepositStatus(`Approving ${depositToken.symbol}...`);
-          await writeContractAsync({
-            address: depositToken.address,
-            abi: ERC20_ABI,
-            functionName: "approve",
-            args: [vaultAddress!, amountWei],
-          });
-
-          setDepositStatus(`Depositing ${depositToken.symbol}...`);
-          const hash = await writeContractAsync({
-            address: vaultAddress!,
-            abi: VAULT_ABI,
-            functionName: "depositERC20",
-            args: [agentIdBytes, depositToken.address, amountWei],
-          });
-          setDepositTxHash(hash);
-          setDepositStatus("Transaction submitted. Waiting for confirmation...");
-        }
-      } else {
-        // ========== No vault deployed — record deposit off-chain ==========
-        setDepositStatus("Recording deposit (vault contract not yet deployed)...");
-        // For hackathon demo: record the intent to deposit
-        // This gets tracked in the backend and attributed when vault is live
-        const res = await fetch("/api/deposit", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            txHash: `offchain-${Date.now()}`,
-            agentId,
-            user: address,
-            token: depositToken.address,
-            amount: depositAmount,
-            offchain: true,
-          }),
-        });
-        const data = await res.json();
-        setDepositStatus(
-          data.success
-            ? "Deposit recorded. Deploy vault contract for on-chain tracking."
-            : "Deposit intent recorded locally."
-        );
-        setDepositAmount("");
+      if (!hasVault) {
+        setDepositStatus("Vault contract is not configured. Deposits are disabled.");
         setDepositing(false);
+        return;
+      }
+
+      // ========== On-chain deposit via Monad vault ==========
+      try {
+        await switchChainAsync({ chainId: vaultChainId });
+      } catch {
+        // May already be on the right chain
+      }
+
+      if (depositToken.symbol === "MON") {
+        setDepositStatus("Sending MON deposit transaction...");
+        const hash = await writeContractAsync({
+          address: vaultAddress!,
+          abi: VAULT_ABI,
+          functionName: "depositMON",
+          args: [agentIdBytes],
+          value: parseEther(depositAmount),
+        });
+        setDepositTxHash(hash);
+        setDepositStatus("Transaction submitted. Waiting for confirmation...");
+      } else {
+        // ERC20: approve then deposit
+        const amountWei = parseUnits(depositAmount, depositToken.decimals);
+
+        setDepositStatus(`Approving ${depositToken.symbol}...`);
+        await writeContractAsync({
+          address: depositToken.address,
+          abi: ERC20_ABI,
+          functionName: "approve",
+          args: [vaultAddress!, amountWei],
+        });
+
+        setDepositStatus(`Depositing ${depositToken.symbol}...`);
+        const hash = await writeContractAsync({
+          address: vaultAddress!,
+          abi: VAULT_ABI,
+          functionName: "depositERC20",
+          args: [agentIdBytes, depositToken.address, amountWei],
+        });
+        setDepositTxHash(hash);
+        setDepositStatus("Transaction submitted. Waiting for confirmation...");
       }
     } catch (e) {
       console.error("Deposit error:", e);
@@ -443,7 +503,13 @@ export default function AgentDetailPage() {
   const handleWithdraw = async () => {
     const hasVault = vaultAddress && vaultAddress.startsWith("0x") && vaultAddress.length === 42;
     if (!hasVault || !address || !userShares || !totalShares || totalShares === BigInt(0)) return;
-    const sharesWei = parseEther(withdrawShares || "0");
+    let sharesWei: bigint;
+    try {
+      sharesWei = parseUnits(withdrawShares || "0", 18);
+    } catch {
+      setWithdrawStatus("Invalid shares amount.");
+      return;
+    }
     if (sharesWei <= BigInt(0)) return;
     if (sharesWei > userShares) {
       setWithdrawStatus("Insufficient shares.");
@@ -677,9 +743,10 @@ export default function AgentDetailPage() {
   ];
 
   return (
-    <div className="min-h-screen bg-background relative overflow-hidden">
+    <div className="min-h-screen page-bg relative overflow-hidden">
       <div className="orb orb-green w-[500px] h-[500px] -top-[200px] right-[10%] fixed" />
       <div className="orb orb-purple w-[400px] h-[400px] bottom-[10%] -left-[150px] fixed" />
+      <div className="orb orb-purple w-[300px] h-[300px] top-[18%] left-[8%] fixed" />
 
       {/* Header */}
       <header className="glass sticky top-0 z-50">
@@ -687,9 +754,7 @@ export default function AgentDetailPage() {
           <div className="flex items-center gap-2 text-sm min-w-0">
             <Link href="/" className="flex items-center gap-3 group shrink-0">
               <div className="w-9 h-9 rounded-lg bg-accent/10 border border-accent/20 flex items-center justify-center group-hover:bg-accent/15 transition-colors">
-                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-accent">
-                  <path d="M6 3v12" /><path d="M18 9a3 3 0 1 0 0-6 3 3 0 0 0 0 6z" /><path d="M6 21a3 3 0 1 0 0-6 3 3 0 0 0 0 6z" /><path d="M15 6a9 9 0 0 0-9 9" /><path d="M18 15v6" /><path d="M21 18h-6" />
-                </svg>
+                <HyperclawIcon className="text-accent" size={18} />
               </div>
             </Link>
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="text-dim shrink-0"><path d="M9 18l6-6-6-6" /></svg>
@@ -718,8 +783,8 @@ export default function AgentDetailPage() {
       <main className="max-w-7xl mx-auto px-4 sm:px-6 py-8 md:py-12 relative z-10">
         {/* Agent identity */}
         <div className="flex flex-col md:flex-row items-start gap-6 mb-6">
-          <div className="w-16 h-16 rounded-2xl bg-accent/10 border border-accent/20 flex items-center justify-center text-2xl font-bold text-accent shrink-0">
-            {agent.name.charAt(0)}
+          <div className="w-16 h-16 rounded-2xl overflow-hidden border border-accent/20 shrink-0">
+            <AgentAvatar name={agent.name} description={agent.description} size={64} />
           </div>
           <div className="flex-1 min-w-0">
             <div className="flex items-center gap-3 mb-2 flex-wrap">
@@ -1356,6 +1421,48 @@ export default function AgentDetailPage() {
                         Max
                       </button>
                     </div>
+                  )}
+                </div>
+
+                {/* Cap + rebate context */}
+                <div className="mb-4 p-3 rounded-xl border border-card-border bg-surface/60">
+                  <div className="flex items-center justify-between mb-2">
+                    <span className="text-xs font-medium text-muted uppercase tracking-wider">HCLAW Deposit Context</span>
+                    {capPreviewLoading ? (
+                      <span className="text-[10px] text-dim">Loading...</span>
+                    ) : capPreview ? (
+                      <span className="text-[10px] text-accent font-medium">Tier {capPreview.tier}</span>
+                    ) : (
+                      <span className="text-[10px] text-dim">No lock boost</span>
+                    )}
+                  </div>
+                  {capPreview ? (
+                    <div className="grid grid-cols-2 gap-x-3 gap-y-1.5 text-xs">
+                      <div className="flex justify-between">
+                        <span className="text-dim">Base Cap</span>
+                        <span className="mono-nums text-muted">${capPreview.baseCapUsd.toFixed(2)}</span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span className="text-dim">Boost</span>
+                        <span className="mono-nums text-accent">{(capPreview.boostBps / 10_000).toFixed(2)}x</span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span className="text-dim">User Cap</span>
+                        <span className="mono-nums text-muted">${capPreview.boostedCapUsd.toFixed(2)}</span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span className="text-dim">Remaining</span>
+                        <span className="mono-nums text-foreground">${capPreview.capRemainingUsd.toFixed(2)}</span>
+                      </div>
+                      <div className="col-span-2 flex justify-between">
+                        <span className="text-dim">Rebate Tier</span>
+                        <span className="mono-nums text-success">{(capPreview.rebateBps / 100).toFixed(2)}%</span>
+                      </div>
+                    </div>
+                  ) : (
+                    <p className="text-xs text-dim">
+                      Lock HCLAW to unlock boosted deposit caps and fee rebates.
+                    </p>
                   )}
                 </div>
 

@@ -15,6 +15,21 @@ import { type Address } from "viem";
 import { activateAgent, getLifecycleState } from "@/lib/agent-lifecycle";
 import { getAgent, updateAgent } from "@/lib/store";
 
+function parseUsdAmount(value: unknown): number | undefined {
+  if (typeof value === "number") {
+    if (!Number.isFinite(value) || value <= 0) return undefined;
+    return parseFloat(value.toFixed(6));
+  }
+  if (typeof value === "string") {
+    const trimmed = value.trim();
+    if (!/^\d+(\.\d{1,6})?$/.test(trimmed)) return undefined;
+    const parsed = Number(trimmed);
+    if (!Number.isFinite(parsed) || parsed <= 0) return undefined;
+    return parseFloat(parsed.toFixed(6));
+  }
+  return undefined;
+}
+
 /**
  * POST /api/fund
  *
@@ -58,12 +73,7 @@ export async function POST(request: Request) {
     const vaultAddress =
       typeof body.vaultAddress === "string" ? (body.vaultAddress as Address) : undefined;
     const user = typeof body.user === "string" ? (body.user as Address) : undefined;
-    const amount =
-      typeof body.amount === "number"
-        ? body.amount
-        : typeof body.amount === "string"
-          ? Number(body.amount)
-          : undefined;
+    const amount = parseUsdAmount(body.amount);
 
     switch (action) {
       // ========== New: Provision agent wallet + fund + activate ==========
@@ -76,6 +86,9 @@ export async function POST(request: Request) {
         }
         const fundingAmount = typeof amount === "number" && Number.isFinite(amount) ? amount : 0;
         const result = await provisionAgentWallet(agentId, fundingAmount);
+
+        // Sync agent.hlAddress to the provisioned wallet (source of truth)
+        await updateAgent(agentId, { hlAddress: result.address });
         
         // Auto-activate the agent if funded and autoActivate is not false
         let lifecycleState = null;

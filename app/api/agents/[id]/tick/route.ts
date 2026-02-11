@@ -5,6 +5,7 @@ import {
   stopAgent,
   getRunnerState,
 } from "@/lib/agent-runner";
+import { verifyApiKey, unauthorizedResponse } from "@/lib/auth";
 
 /**
  * POST /api/agents/[id]/tick
@@ -21,11 +22,13 @@ import {
  *   { action: "stop" }      - Stop autonomous runner
  *   { action: "status" }    - Get runner status
  */
-function requireOrchestratorAuth(request: Request): boolean {
+function isTickAuthorized(request: Request): boolean {
   const secret = process.env.ORCHESTRATOR_SECRET;
-  if (!secret) return true; // No secret = no auth required (dev)
-  const key = request.headers.get("x-orchestrator-key");
-  return key === secret;
+  if (secret) {
+    const key = request.headers.get("x-orchestrator-key");
+    if (key === secret) return true;
+  }
+  return verifyApiKey(request);
 }
 
 export async function POST(
@@ -34,9 +37,7 @@ export async function POST(
 ) {
   const agentId = params.id;
 
-  if (!requireOrchestratorAuth(request)) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
+  if (!isTickAuthorized(request)) return unauthorizedResponse();
 
   try {
     let body: { action?: string; intervalMs?: number } = {};

@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { getAgent, updateAgent, deleteAgent, getTradeLogsForAgent } from "@/lib/store";
+import { getAccountForAgent } from "@/lib/account-manager";
 import { stopAgent } from "@/lib/agent-runner";
 import { handleStatusChange, getLifecycleState } from "@/lib/agent-lifecycle";
 
@@ -13,10 +14,14 @@ export async function GET(
       return NextResponse.json({ error: "Agent not found" }, { status: 404 });
     }
 
+    // Resolve hlAddress from account-manager (source of truth for HL wallet)
+    const account = await getAccountForAgent(params.id);
+    const resolvedAgent = { ...agent, hlAddress: account?.address ?? agent.hlAddress };
+
     const trades = await getTradeLogsForAgent(params.id);
     const lifecycle = getLifecycleState(params.id);
 
-    return NextResponse.json({ agent, trades, lifecycle });
+    return NextResponse.json({ agent: resolvedAgent, trades, lifecycle });
   } catch (error) {
     console.error("Get agent error:", error);
     return NextResponse.json(

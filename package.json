@@ -4,13 +4,25 @@
   "private": true,
   "scripts": {
     "dev": "next dev",
+    "dev:stack": "bash scripts/dev-stack.sh",
     "build": "next build",
     "start": "next start",
     "lint": "next lint",
+    "typecheck": "tsc --noEmit",
+    "check": "npm run lint && npm run typecheck && npm run build",
+    "clean:cache": "rm -rf .next tsconfig.tsbuildinfo",
     "deploy:aip:public": "node scripts/deploy-public-agents.mjs",
     "deploy:aip:private": "node scripts/deploy-private-agents.mjs",
+    "test:ironclaw-contracts": "node scripts/test-ironclaw-contracts.mjs",
+    "rotate:dev-secrets": "bash scripts/rotate-dev-secrets.sh",
     "test:lit": "node scripts/test-lit-protocol.mjs",
-    "deploy:lit-actions": "node scripts/deploy-lit-actions.mjs"
+    "deploy:lit-actions": "node scripts/deploy-lit-actions.mjs",
+    "test:solidity": "forge test --offline",
+    "preflight:mainnet": "node scripts/preflight-mainnet.mjs",
+    "deploy:hclaw-stack": "node scripts/deploy-hclaw-stack.mjs",
+    "hclaw:epoch:close": "node scripts/close-hclaw-epoch.mjs",
+    "hclaw:report": "node scripts/hclaw-weekly-report.mjs",
+    "hclaw:backfill": "node scripts/backfill-hclaw-day0.mjs"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.985.0",

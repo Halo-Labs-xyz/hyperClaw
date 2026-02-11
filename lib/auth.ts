@@ -59,3 +59,19 @@ export function requireAuth(request: Request): NextResponse | null {
   }
   return null;
 }
+
+/**
+ * Verify admin key for HCLAW epoch close operations.
+ * Falls back to general API key if dedicated key is not configured.
+ */
+export function verifyHclawEpochCloseAuth(request: Request): boolean {
+  const closeKey = process.env.HCLAW_POINTS_CLOSE_KEY;
+  if (!closeKey) return verifyApiKey(request);
+
+  const headerKey =
+    request.headers.get("x-hclaw-close-key") ||
+    request.headers.get("x-points-close-key") ||
+    request.headers.get("authorization")?.replace("Bearer ", "");
+
+  return headerKey === closeKey;
+}

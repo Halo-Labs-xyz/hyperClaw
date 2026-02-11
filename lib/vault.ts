@@ -1,11 +1,10 @@
 import { type Address } from "viem";
 
 // ============================================
-// HyperclawVault ABI (for frontend wagmi hooks)
+// HyperclawVault ABI
 // ============================================
 
 export const VAULT_ABI = [
-  // Read functions
   {
     inputs: [{ name: "agentId", type: "bytes32" }],
     name: "totalShares",
@@ -24,8 +23,25 @@ export const VAULT_ABI = [
     type: "function",
   },
   {
+    inputs: [
+      { name: "agentId", type: "bytes32" },
+      { name: "user", type: "address" },
+    ],
+    name: "userDepositsUSD",
+    outputs: [{ name: "", type: "uint256" }],
+    stateMutability: "view",
+    type: "function",
+  },
+  {
     inputs: [{ name: "agentId", type: "bytes32" }],
     name: "totalDepositsUSD",
+    outputs: [{ name: "", type: "uint256" }],
+    stateMutability: "view",
+    type: "function",
+  },
+  {
+    inputs: [{ name: "agentId", type: "bytes32" }],
+    name: "getVaultTVL",
     outputs: [{ name: "", type: "uint256" }],
     stateMutability: "view",
     type: "function",
@@ -38,13 +54,19 @@ export const VAULT_ABI = [
     type: "function",
   },
   {
+    inputs: [{ name: "user", type: "address" }],
+    name: "getMaxDepositUSDForUser",
+    outputs: [{ name: "", type: "uint256" }],
+    stateMutability: "view",
+    type: "function",
+  },
+  {
     inputs: [{ name: "token", type: "address" }],
     name: "whitelistedTokens",
     outputs: [{ name: "", type: "bool" }],
     stateMutability: "view",
     type: "function",
   },
-  // Write functions
   {
     inputs: [{ name: "agentId", type: "bytes32" }],
     name: "depositMON",
@@ -73,7 +95,6 @@ export const VAULT_ABI = [
     stateMutability: "nonpayable",
     type: "function",
   },
-  // Events
   {
     anonymous: false,
     inputs: [
@@ -109,7 +130,222 @@ export const VAULT_ABI = [
 ] as const;
 
 // ============================================
-// ERC20 minimal ABI (for approve + balanceOf)
+// HCLAW lock/policy/rewards ABIs
+// ============================================
+
+export const HCLAW_LOCK_ABI = [
+  {
+    inputs: [
+      { name: "amount", type: "uint256" },
+      { name: "durationDays", type: "uint16" },
+    ],
+    name: "lock",
+    outputs: [{ name: "lockId", type: "uint256" }],
+    stateMutability: "nonpayable",
+    type: "function",
+  },
+  {
+    inputs: [
+      { name: "lockId", type: "uint256" },
+      { name: "newDurationDays", type: "uint16" },
+    ],
+    name: "extendLock",
+    outputs: [],
+    stateMutability: "nonpayable",
+    type: "function",
+  },
+  {
+    inputs: [
+      { name: "lockId", type: "uint256" },
+      { name: "amount", type: "uint256" },
+    ],
+    name: "increaseLock",
+    outputs: [],
+    stateMutability: "nonpayable",
+    type: "function",
+  },
+  {
+    inputs: [{ name: "lockId", type: "uint256" }],
+    name: "unlock",
+    outputs: [],
+    stateMutability: "nonpayable",
+    type: "function",
+  },
+  {
+    inputs: [{ name: "user", type: "address" }],
+    name: "getUserPower",
+    outputs: [{ name: "", type: "uint256" }],
+    stateMutability: "view",
+    type: "function",
+  },
+  {
+    inputs: [{ name: "user", type: "address" }],
+    name: "getUserTier",
+    outputs: [{ name: "", type: "uint8" }],
+    stateMutability: "view",
+    type: "function",
+  },
+  {
+    inputs: [{ name: "user", type: "address" }],
+    name: "getUserLockIds",
+    outputs: [{ name: "", type: "uint256[]" }],
+    stateMutability: "view",
+    type: "function",
+  },
+  {
+    inputs: [{ name: "lockId", type: "uint256" }],
+    name: "locks",
+    outputs: [
+      { name: "lockId", type: "uint256" },
+      { name: "owner", type: "address" },
+      { name: "amount", type: "uint256" },
+      { name: "startTs", type: "uint64" },
+      { name: "endTs", type: "uint64" },
+      { name: "durationDays", type: "uint16" },
+      { name: "multiplierBps", type: "uint16" },
+      { name: "unlocked", type: "bool" },
+    ],
+    stateMutability: "view",
+    type: "function",
+  },
+] as const;
+
+export const HCLAW_POLICY_ABI = [
+  {
+    inputs: [],
+    name: "getBaseCapUsd",
+    outputs: [{ name: "", type: "uint256" }],
+    stateMutability: "view",
+    type: "function",
+  },
+  {
+    inputs: [{ name: "user", type: "address" }],
+    name: "getUserCapUsd",
+    outputs: [{ name: "", type: "uint256" }],
+    stateMutability: "view",
+    type: "function",
+  },
+  {
+    inputs: [{ name: "user", type: "address" }],
+    name: "getUserRebateBps",
+    outputs: [{ name: "", type: "uint16" }],
+    stateMutability: "view",
+    type: "function",
+  },
+  {
+    inputs: [{ name: "user", type: "address" }],
+    name: "getUserBoostBps",
+    outputs: [{ name: "", type: "uint16" }],
+    stateMutability: "view",
+    type: "function",
+  },
+  {
+    inputs: [{ name: "user", type: "address" }],
+    name: "getUserTier",
+    outputs: [{ name: "", type: "uint8" }],
+    stateMutability: "view",
+    type: "function",
+  },
+  {
+    inputs: [{ name: "user", type: "address" }],
+    name: "getUserPower",
+    outputs: [{ name: "", type: "uint256" }],
+    stateMutability: "view",
+    type: "function",
+  },
+] as const;
+
+export const HCLAW_REWARDS_ABI = [
+  {
+    inputs: [
+      { name: "epochId", type: "uint256" },
+      { name: "user", type: "address" },
+    ],
+    name: "getClaimable",
+    outputs: [
+      { name: "rebateClaimable", type: "uint256" },
+      { name: "incentiveClaimable", type: "uint256" },
+    ],
+    stateMutability: "view",
+    type: "function",
+  },
+  {
+    inputs: [{ name: "epochId", type: "uint256" }],
+    name: "claim",
+    outputs: [
+      { name: "rebatePaid", type: "uint256" },
+      { name: "incentivePaid", type: "uint256" },
+    ],
+    stateMutability: "nonpayable",
+    type: "function",
+  },
+] as const;
+
+export const AGENTIC_LP_VAULT_ABI = [
+  {
+    inputs: [],
+    name: "getStatus",
+    outputs: [
+      { name: "isPaused", type: "bool" },
+      { name: "isKilled", type: "bool" },
+      { name: "inventorySkewBps", type: "uint16" },
+      { name: "dailyTurnoverBps", type: "uint16" },
+      { name: "drawdownBps", type: "uint16" },
+      { name: "totalRealizedPnlUsd", type: "int256" },
+      { name: "lastExecTs", type: "uint256" },
+    ],
+    stateMutability: "view",
+    type: "function",
+  },
+  {
+    inputs: [],
+    name: "maxInventorySkewBps",
+    outputs: [{ name: "", type: "uint16" }],
+    stateMutability: "view",
+    type: "function",
+  },
+  {
+    inputs: [],
+    name: "maxDailyTurnoverBps",
+    outputs: [{ name: "", type: "uint16" }],
+    stateMutability: "view",
+    type: "function",
+  },
+  {
+    inputs: [],
+    name: "maxDrawdownBps",
+    outputs: [{ name: "", type: "uint16" }],
+    stateMutability: "view",
+    type: "function",
+  },
+] as const;
+
+export const HCLAW_TREASURY_ROUTER_ABI = [
+  {
+    inputs: [],
+    name: "buybackSplitBps",
+    outputs: [{ name: "", type: "uint16" }],
+    stateMutability: "view",
+    type: "function",
+  },
+  {
+    inputs: [],
+    name: "incentiveSplitBps",
+    outputs: [{ name: "", type: "uint16" }],
+    stateMutability: "view",
+    type: "function",
+  },
+  {
+    inputs: [],
+    name: "reserveSplitBps",
+    outputs: [{ name: "", type: "uint16" }],
+    stateMutability: "view",
+    type: "function",
+  },
+] as const;
+
+// ============================================
+// ERC20 minimal ABI
 // ============================================
 
 export const ERC20_ABI = [
@@ -160,7 +396,6 @@ export function getVaultAddress(): Address {
 }
 
 export function agentIdToBytes32(agentId: string): `0x${string}` {
-  // Pad the agentId hex string to 32 bytes
   const hex = agentId.replace(/^0x/, "");
   return `0x${hex.padStart(64, "0")}` as `0x${string}`;
 }

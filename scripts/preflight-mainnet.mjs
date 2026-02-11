@@ -1,0 +1,146 @@
+#!/usr/bin/env node
+
+import fs from "node:fs";
+import path from "node:path";
+import process from "node:process";
+import dotenv from "dotenv";
+
+const root = process.cwd();
+for (const filename of [".env.local", ".env"]) {
+  const file = path.join(root, filename);
+  if (fs.existsSync(file)) {
+    dotenv.config({ path: file, override: false });
+  }
+}
+
+function parseBoolEnv(name, fallback) {
+  const raw = process.env[name];
+  if (raw === undefined || raw === "") return fallback;
+  return raw === "true";
+}
+
+function requireEnv(name, errors) {
+  const value = process.env[name];
+  if (!value || value.trim() === "") {
+    errors.push(`${name} is required`);
+    return "";
+  }
+  return value.trim();
+}
+
+function isAddress(value) {
+  return /^0x[a-fA-F0-9]{40}$/.test(value);
+}
+
+const errors = [];
+const warnings = [];
+
+const monadTestnet = parseBoolEnv("NEXT_PUBLIC_MONAD_TESTNET", true);
+const hlTestnet = parseBoolEnv("NEXT_PUBLIC_HYPERLIQUID_TESTNET", monadTestnet);
+
+const allowRuntimeSwitch = parseBoolEnv("ALLOW_RUNTIME_NETWORK_SWITCH", false);
+if (allowRuntimeSwitch) {
+  errors.push("ALLOW_RUNTIME_NETWORK_SWITCH must be false for production");
+}
+
+const vaultAddress = requireEnv("NEXT_PUBLIC_VAULT_ADDRESS", errors);
+if (vaultAddress && !isAddress(vaultAddress)) {
+  errors.push("NEXT_PUBLIC_VAULT_ADDRESS must be a valid 0x address");
+}
+
+const onMainnet = !monadTestnet || !hlTestnet;
+if (onMainnet) {
+  requireEnv("HYPERCLAW_API_KEY", errors);
+  const hclawLock = requireEnv("NEXT_PUBLIC_HCLAW_LOCK_ADDRESS", errors);
+  const hclawPolicy = requireEnv("NEXT_PUBLIC_HCLAW_POLICY_ADDRESS", errors);
+  const hclawRewards = requireEnv("NEXT_PUBLIC_HCLAW_REWARDS_ADDRESS", errors);
+  const agenticVault = requireEnv("NEXT_PUBLIC_AGENTIC_LP_VAULT_ADDRESS", errors);
+  requireEnv("HCLAW_POINTS_CLOSE_KEY", errors);
+
+  for (const [key, value] of [
+    ["NEXT_PUBLIC_HCLAW_LOCK_ADDRESS", hclawLock],
+    ["NEXT_PUBLIC_HCLAW_POLICY_ADDRESS", hclawPolicy],
+    ["NEXT_PUBLIC_HCLAW_REWARDS_ADDRESS", hclawRewards],
+    ["NEXT_PUBLIC_AGENTIC_LP_VAULT_ADDRESS", agenticVault],
+  ]) {
+    if (value && !isAddress(value)) {
+      errors.push(`${key} must be a valid 0x address`);
+    }
+  }
+
+  const buyback = Number.parseInt(process.env.HCLAW_BUYBACK_SPLIT_BPS || "4000", 10);
+  const incentive = Number.parseInt(process.env.HCLAW_INCENTIVE_SPLIT_BPS || "4000", 10);
+  const reserve = Number.parseInt(process.env.HCLAW_RESERVE_SPLIT_BPS || "2000", 10);
+  if (
+    !Number.isFinite(buyback) ||
+    !Number.isFinite(incentive) ||
+    !Number.isFinite(reserve) ||
+    buyback < 0 ||
+    incentive < 0 ||
+    reserve < 0 ||
+    buyback + incentive + reserve !== 10000
+  ) {
+    errors.push(
+      "HCLAW treasury split bps must be non-negative integers and sum to 10000"
+    );
+  }
+}
+
+if (!hlTestnet) {
+  const builderAddress = requireEnv("NEXT_PUBLIC_BUILDER_ADDRESS", errors);
+  const builderFee = requireEnv("NEXT_PUBLIC_BUILDER_FEE", errors);
+
+  if (builderAddress && !isAddress(builderAddress)) {
+    errors.push("NEXT_PUBLIC_BUILDER_ADDRESS must be a valid 0x address");
+  }
+
+  const fee = Number.parseInt(builderFee, 10);
+  if (!Number.isFinite(fee) || fee <= 0) {
+    errors.push("NEXT_PUBLIC_BUILDER_FEE must be a positive integer");
+  }
+}
+
+if (!monadTestnet) {
+  const stables = (process.env.RELAY_STABLE_TOKENS || "")
+    .split(",")
+    .map((v) => v.trim())
+    .filter(Boolean);
+
+  if (stables.length === 0) {
+    errors.push("RELAY_STABLE_TOKENS must be set before mainnet ERC20 relay deposits");
+  } else {
+    const invalid = stables.filter((t) => !isAddress(t));
+    if (invalid.length > 0) {
+      errors.push(`RELAY_STABLE_TOKENS has invalid addresses: ${invalid.join(", ")}`);
+    }
+  }
+}
+
+if (!process.env.MONAD_PRIVATE_KEY) {
+  warnings.push("MONAD_PRIVATE_KEY is not set (required for admin ops and deployments)");
+}
+if (!process.env.HYPERLIQUID_PRIVATE_KEY) {
+  warnings.push("HYPERLIQUID_PRIVATE_KEY is not set (required for operator funding)");
+}
+
+console.log("HyperClaw mainnet preflight");
+console.log(`- Monad network: ${monadTestnet ? "testnet" : "mainnet"}`);
+console.log(`- Hyperliquid network: ${hlTestnet ? "testnet" : "mainnet"}`);
+console.log(`- Runtime network switch: ${allowRuntimeSwitch ? "enabled" : "disabled"}`);
+
+if (warnings.length > 0) {
+  console.log("\nWarnings:");
+  for (const warning of warnings) {
+    console.log(`- ${warning}`);
+  }
+}
+
+if (errors.length > 0) {
+  console.error("\nFAILED:");
+  for (const error of errors) {
+    console.error(`- ${error}`);
+  }
+  process.exit(1);
+}
+
+console.log("\nPASS: no blocking mainnet config issues detected.");

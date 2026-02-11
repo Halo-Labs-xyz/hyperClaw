@@ -69,6 +69,14 @@ body {
   -moz-osx-font-smoothing: grayscale;
 }
 
+/* Page background with Monad purple ambient glow */
+.page-bg {
+  background:
+    radial-gradient(ellipse 80% 50% at 20% 40%, rgba(131, 110, 249, 0.08), transparent 50%),
+    radial-gradient(ellipse 60% 40% at 80% 80%, rgba(131, 110, 249, 0.05), transparent 45%),
+    var(--hc-black);
+}
+
 ::selection {
   background: var(--hc-green-dim);
   color: var(--hc-green);
@@ -98,6 +106,13 @@ body {
 
 .gradient-text {
   background: linear-gradient(135deg, var(--hc-green), var(--hc-cyan));
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+.gradient-title {
+  background: linear-gradient(135deg, var(--hc-green), var(--hc-purple), var(--hc-cyan));
   -webkit-background-clip: text;
   -webkit-text-fill-color: transparent;
   background-clip: text;
@@ -414,7 +429,7 @@ body {
 
 .orb-purple {
   background: var(--hc-purple);
-  opacity: 0.06;
+  opacity: 0.12;
 }
 
 /* ============================================

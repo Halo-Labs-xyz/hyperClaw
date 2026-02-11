@@ -77,30 +77,34 @@ export function NetworkProvider({ children }: { children: ReactNode }) {
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(update),
         });
-        const data = await res.json();
+        const data = await res.json().catch(() => ({} as { error?: string }));
 
-        if (data.success) {
-          setMonadTest(data.monadTestnet);
-          setHlTest(data.hlTestnet);
-
-          // Persist to localStorage
-          localStorage.setItem(
-            "hyperclaw-network",
-            JSON.stringify({
-              monadTestnet: data.monadTestnet,
-              hlTestnet: data.hlTestnet,
-            })
+        if (!res.ok || !data.success) {
+          throw new Error(
+            data.error || `Failed to switch network (HTTP ${res.status})`
           );
+        }
 
-          // Switch wallet chain
-          const targetChainId = data.monadTestnet
-            ? monadTestnet.id
-            : monadMainnet.id;
-          try {
-            await switchChainAsync({ chainId: targetChainId });
-          } catch {
-            // User may reject or already on chain
-          }
+        setMonadTest(data.monadTestnet);
+        setHlTest(data.hlTestnet);
+
+        // Persist to localStorage
+        localStorage.setItem(
+          "hyperclaw-network",
+          JSON.stringify({
+            monadTestnet: data.monadTestnet,
+            hlTestnet: data.hlTestnet,
+          })
+        );
+
+        // Switch wallet chain
+        const targetChainId = data.monadTestnet
+          ? monadTestnet.id
+          : monadMainnet.id;
+        try {
+          await switchChainAsync({ chainId: targetChainId });
+        } catch {
+          // User may reject or already on chain
         }
       } catch (e) {
         console.error("Network switch failed:", e);

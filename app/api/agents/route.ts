@@ -7,7 +7,16 @@ import { type AgentConfig } from "@/lib/types";
 export async function GET() {
   try {
     const agents = await getAgents();
-    return NextResponse.json({ agents });
+    // Enrich each agent's hlAddress from account-manager (source of truth for HL wallet)
+    const { getAccountForAgent } = await import("@/lib/account-manager");
+    const enriched = await Promise.all(
+      agents.map(async (a) => {
+        const account = await getAccountForAgent(a.id);
+        const resolvedAddress = account?.address ?? a.hlAddress;
+        return { ...a, hlAddress: resolvedAddress };
+      })
+    );
+    return NextResponse.json({ agents: enriched });
   } catch (error) {
     console.error("Get agents error:", error);
     return NextResponse.json(

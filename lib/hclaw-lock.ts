@@ -1,0 +1,153 @@
+import { createPublicClient, formatEther, http, type Address } from "viem";
+import { getHclawLockAddressIfSet } from "@/lib/env";
+import { isMonadTestnet } from "@/lib/network";
+import type { HclawLockState, HclawLockTier } from "@/lib/types";
+import { HCLAW_LOCK_ABI } from "@/lib/vault";
+
+export const HCLAW_LOCK_DURATIONS = [30, 90, 180] as const;
+
+function getMonadRpcUrl(): string {
+  return isMonadTestnet() ? "https://testnet-rpc.monad.xyz" : "https://rpc.monad.xyz";
+}
+
+function getMonadChain() {
+  return {
+    id: isMonadTestnet() ? 10143 : 143,
+    name: isMonadTestnet() ? "Monad Testnet" : "Monad",
+    nativeCurrency: { name: "MON", symbol: "MON", decimals: 18 },
+    rpcUrls: { default: { http: [getMonadRpcUrl()] } },
+  } as const;
+}
+
+function getPublicClient() {
+  const chain = getMonadChain();
+  return createPublicClient({ chain, transport: http(chain.rpcUrls.default.http[0]) });
+}
+
+export function tierToBoostBps(tier: HclawLockTier): number {
+  if (tier === 1) return 12_500;
+  if (tier === 2) return 17_500;
+  if (tier === 3) return 25_000;
+  return 10_000;
+}
+
+export function tierToRebateBps(tier: HclawLockTier): number {
+  if (tier === 1) return 1_500;
+  if (tier === 2) return 3_500;
+  if (tier === 3) return 5_500;
+  return 0;
+}
+
+export function durationToTier(durationDays: number): HclawLockTier {
+  if (durationDays >= 180) return 3;
+  if (durationDays >= 90) return 2;
+  if (durationDays >= 30) return 1;
+  return 0;
+}
+
+export function previewPower(amount: number, durationDays: number): number {
+  const tier = durationToTier(durationDays);
+  const multiplier = tierToBoostBps(tier) / 10_000;
+  return amount * multiplier;
+}
+
+export function getEmptyLockState(user: Address): HclawLockState {
+  return {
+    user,
+    tier: 0,
+    power: 0,
+    boostBps: 10_000,
+    rebateBps: 0,
+    lockIds: [],
+  };
+}
+
+export async function getUserLockState(user: Address): Promise<HclawLockState> {
+  const lockAddress = getHclawLockAddressIfSet();
+  if (!lockAddress) return getEmptyLockState(user);
+
+  const client = getPublicClient();
+
+  try {
+    const [tierRaw, powerRaw, lockIdsRaw] = await Promise.all([
+      client.readContract({
+        address: lockAddress,
+        abi: HCLAW_LOCK_ABI,
+        functionName: "getUserTier",
+        args: [user],
+      }) as Promise<number>,
+      client.readContract({
+        address: lockAddress,
+        abi: HCLAW_LOCK_ABI,
+        functionName: "getUserPower",
+        args: [user],
+      }) as Promise<bigint>,
+      client.readContract({
+        address: lockAddress,
+        abi: HCLAW_LOCK_ABI,
+        functionName: "getUserLockIds",
+        args: [user],
+      }) as Promise<bigint[]>,
+    ]);
+
+    const tier = Math.max(0, Math.min(3, Number(tierRaw))) as HclawLockTier;
+
+    return {
+      user,
+      tier,
+      power: Number(formatEther(powerRaw)),
+      boostBps: tierToBoostBps(tier),
+      rebateBps: tierToRebateBps(tier),
+      lockIds: lockIdsRaw.map((id) => id.toString()),
+    };
+  } catch (error) {
+    console.warn("[HCLAW] getUserLockState fallback:", error);
+    return getEmptyLockState(user);
+  }
+}
+
+export function buildLockWriteRequest(params:
+  | { action: "lock"; amountWei: bigint; durationDays: 30 | 90 | 180 }
+  | { action: "extendLock"; lockId: bigint; durationDays: 30 | 90 | 180 }
+  | { action: "increaseLock"; lockId: bigint; amountWei: bigint }
+  | { action: "unlock"; lockId: bigint }
+):
+  | { address: Address; abi: typeof HCLAW_LOCK_ABI; functionName: string; args: readonly unknown[] }
+  | null {
+  const lockAddress = getHclawLockAddressIfSet();
+  if (!lockAddress) return null;
+
+  if (params.action === "lock") {
+    return {
+      address: lockAddress,
+      abi: HCLAW_LOCK_ABI,
+      functionName: "lock",
+      args: [params.amountWei, params.durationDays],
+    };
+  }
+
+  if (params.action === "extendLock") {
+    return {
+      address: lockAddress,
+      abi: HCLAW_LOCK_ABI,
+      functionName: "extendLock",
+      args: [params.lockId, params.durationDays],
+    };
+  }
+
+  if (params.action === "increaseLock") {
+    return {
+      address: lockAddress,
+      abi: HCLAW_LOCK_ABI,
+      functionName: "increaseLock",
+      args: [params.lockId, params.amountWei],
+    };
+  }
+
+  return {
+    address: lockAddress,
+    abi: HCLAW_LOCK_ABI,
+    functionName: "unlock",
+    args: [params.lockId],
+  };
+}

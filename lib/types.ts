@@ -192,6 +192,85 @@ export interface HclawState {
   nextTier: HclawTier | null;
   maxDepositPerVault: number;
   progressToNextTier: number; // 0-100
+  lockTier?: HclawLockTier;
+  hclawPower?: number;
+  baseCapUsd?: number;
+  boostedCapUsd?: number;
+  capRemainingUsd?: number;
+  rebateBps?: number;
+  pointsThisEpoch?: number;
+  claimableRebateUsd?: number;
+  claimableIncentiveHclaw?: number;
+}
+
+export type HclawLockTier = 0 | 1 | 2 | 3;
+
+export interface HclawLockState {
+  user: Address;
+  tier: HclawLockTier;
+  power: number;
+  boostBps: number;
+  rebateBps: number;
+  lockIds: string[];
+}
+
+export interface HclawCapContext {
+  user: Address;
+  baseCapUsd: number;
+  boostedCapUsd: number;
+  capRemainingUsd: number;
+  boostBps: number;
+  rebateBps: number;
+  tier: HclawLockTier;
+  power?: number;
+}
+
+export interface HclawPointBreakdown {
+  lockPoints: number;
+  lpPoints: number;
+  refPoints: number;
+  questPoints: number;
+  totalPoints: number;
+}
+
+export interface HclawEpochInfo {
+  epochId: string;
+  startTs: number;
+  endTs: number;
+  status: "open" | "closing" | "closed";
+  rootHash?: string | null;
+}
+
+export interface HclawRewardState {
+  user: Address;
+  epochId: string;
+  rebateUsd: number;
+  incentiveHclaw: number;
+  claimed: boolean;
+}
+
+export interface HclawTreasuryFlow {
+  ts: number;
+  source: string;
+  amountUsd: number;
+  buybackUsd: number;
+  incentiveUsd: number;
+  reserveUsd: number;
+  txHash?: string | null;
+}
+
+export interface AgenticVaultStatus {
+  configured: boolean;
+  paused: boolean;
+  killSwitch: boolean;
+  inventorySkewBps: number;
+  dailyTurnoverBps: number;
+  drawdownBps: number;
+  maxInventorySkewBps: number;
+  maxDailyTurnoverBps: number;
+  maxDrawdownBps: number;
+  cumulativeRealizedPnlUsd: number;
+  lastExecutionTs: number;
 }
 
 export const HCLAW_TIERS: HclawTier[] = [

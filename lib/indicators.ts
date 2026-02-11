@@ -185,8 +185,6 @@ export function evaluateSMC(
   historicalHighs?: number[],
   historicalLows?: number[]
 ): IndicatorEvaluation {
-  const params = config.parameters || {};
-  
   // Simple structure analysis based on available data
   let signal: IndicatorSignal = "neutral";
   let confidence = 0.5;

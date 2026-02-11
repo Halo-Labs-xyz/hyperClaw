@@ -201,10 +201,10 @@ After successful testing:
 
 ## 📚 Documentation
 
-- `PKP_AGENT_CREATION_GUIDE.md` - Comprehensive PKP integration guide
-- `DEPENDENCY_FIX_SUMMARY.md` - Dependency version fix details
+- `docs/root-guides/PKP_AGENT_CREATION_GUIDE.md` - Comprehensive PKP integration guide
+- `docs/root-guides/DEPENDENCY_FIX_SUMMARY.md` - Dependency version fix details
 - `LIT_PROTOCOL_INTEGRATION.md` - Technical integration docs
-- `DEPLOY_LIT_ACTIONS.md` - IPFS deployment guide (for production)
+- `docs/root-guides/DEPLOY_LIT_ACTIONS.md` - IPFS deployment guide (for production)
 
 ## 🚀 Production Deployment
 

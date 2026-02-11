@@ -12,7 +12,7 @@
  */
 
 import { randomBytes } from "crypto";
-import type { Agent, TradeDecision } from "./types";
+import type { Agent } from "./types";
 import { getAgent, getAllAgents } from "./store";
 import { getTradeDecision } from "./ai";
 import { getEnrichedMarketData, getAccountState, getHistoricalPrices } from "./hyperliquid";
@@ -204,7 +204,7 @@ export function buildAgentConfig(
 
 export function createAgentHandler(hyperClawAgentId: string): AgentHandler {
   return async (context: A2AContext): Promise<A2AResponse> => {
-    const { message, user_id, payment_verified } = context;
+    const { message, payment_verified } = context;
 
     // Verify payment (X402 protocol)
     if (!payment_verified) {
@@ -337,7 +337,7 @@ export function createAgentHandler(hyperClawAgentId: string): AgentHandler {
       const markets = await getEnrichedMarketData();
 
       // Fetch historical prices if indicator is enabled
-      let historicalPrices: Record<string, number[]> = {};
+      const historicalPrices: Record<string, number[]> = {};
       if (agent.indicator?.enabled && agent.markets.length > 0) {
         try {
           const pricePromises = agent.markets.map(async (coin) => {
@@ -567,7 +567,7 @@ export async function pollGatewayTasks(
 
 export async function submitTaskResult(
   taskId: string,
-  response: A2AResponse
+  _response: A2AResponse
 ): Promise<void> {
   // In production, submit result back to Gateway
   console.log(`[AIP] Task ${taskId} completed`);

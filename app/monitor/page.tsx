@@ -2,6 +2,8 @@
 
 import { useState, useEffect } from "react";
 import Link from "next/link";
+import { HyperclawLogo } from "@/app/components/HyperclawLogo";
+import { HyperclawIcon } from "@/app/components/HyperclawIcon";
 import { NetworkToggle } from "@/app/components/NetworkToggle";
 import { PositionPanel } from "../components/monitor/PositionPanel";
 import { OrderPanel } from "../components/monitor/OrderPanel";
@@ -54,11 +56,13 @@ export default function MonitorPage() {
         <div className="max-w-[1600px] mx-auto px-4 py-3 flex items-center justify-between">
           <div className="flex items-center gap-3">
             <Link href="/" className="flex items-center gap-2">
-              <span className="text-xl">🦞</span>
-              <span className="font-bold gradient-text">Hyperclaw</span>
+              <div className="w-8 h-8 rounded-lg bg-accent/10 border border-accent/20 flex items-center justify-center">
+                <HyperclawIcon className="text-accent" size={18} />
+              </div>
+              <HyperclawLogo className="font-bold" />
             </Link>
             <span className="text-muted">/</span>
-            <span className="text-sm font-bold uppercase tracking-wider">
+            <span className="text-sm font-bold uppercase tracking-wider gradient-title">
               Monitoring Room
             </span>
           </div>
@@ -96,7 +100,7 @@ export default function MonitorPage() {
         {!selectedAgent || !user ? (
           <div className="text-center py-20">
             <span className="text-4xl block mb-4">🤖</span>
-            <h2 className="text-xl font-bold mb-2">No agents configured</h2>
+            <h2 className="text-xl font-bold mb-2 gradient-title">No agents configured</h2>
             <p className="text-muted mb-4">
               Create an agent to start monitoring
             </p>

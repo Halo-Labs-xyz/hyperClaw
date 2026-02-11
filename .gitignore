@@ -12,6 +12,8 @@
 # next.js
 /.next/
 /out/
+/cache/
+/broadcast/
 
 # production
 /build
@@ -40,7 +42,7 @@ next-env.d.ts
 public/sw*
 public/swe-worker*
 
-.data/*
+/.data/
 .data/agents.json
 .data/trades.json
 .data/accounts.json

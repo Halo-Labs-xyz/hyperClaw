@@ -1,6 +1,6 @@
 import OpenAI from "openai";
 import { type TradeDecision, type MarketData, type IndicatorConfig } from "./types";
-import { evaluateIndicator, formatIndicatorForAI, type IndicatorEvaluation } from "./indicators";
+import { evaluateIndicator, formatIndicatorForAI } from "./indicators";
 
 let openaiClient: OpenAI | null = null;
 

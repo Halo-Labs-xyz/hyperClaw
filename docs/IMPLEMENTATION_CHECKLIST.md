@@ -60,11 +60,11 @@ Builder param format: `{ b: address.toLowerCase(), f: feePoints }`
 
 ## ✅ Documentation
 
-- [x] **`VINCENT_STYLE_AUTO_APPROVAL.md`** - Auto-approval guide
-- [x] **`VINCENT_AUTO_APPROVAL_SUMMARY.md`** - Implementation summary
+- [x] **`docs/root-guides/VINCENT_STYLE_AUTO_APPROVAL.md`** - Auto-approval guide
+- [x] **`docs/root-guides/VINCENT_AUTO_APPROVAL_SUMMARY.md`** - Implementation summary
 - [x] **`BEFORE_AFTER_COMPARISON.md`** - Visual before/after
 - [x] **`BUILDER_CODES.md`** - Complete integration docs
-- [x] **`QUICK_START_BUILDER_CODES.md`** - 5-minute setup
+- [x] **`docs/root-guides/QUICK_START_BUILDER_CODES.md`** - 5-minute setup
 - [x] **`README.md`** - Updated with auto-approval info
 - [x] **`.env.example`** - Includes builder variables
 
@@ -116,8 +116,8 @@ Comparison with Vincent documentation:
 ## ✅ File Changes Summary
 
 ### New Files Created (4)
-- [x] `VINCENT_STYLE_AUTO_APPROVAL.md`
-- [x] `VINCENT_AUTO_APPROVAL_SUMMARY.md`
+- [x] `docs/root-guides/VINCENT_STYLE_AUTO_APPROVAL.md`
+- [x] `docs/root-guides/VINCENT_AUTO_APPROVAL_SUMMARY.md`
 - [x] `BEFORE_AFTER_COMPARISON.md`
 - [x] `IMPLEMENTATION_CHECKLIST.md` (this file)
 
@@ -219,7 +219,7 @@ For issues:
 1. Check server logs for approval messages
 2. Verify `NEXT_PUBLIC_BUILDER_ADDRESS` is set
 3. Confirm `NEXT_PUBLIC_BUILDER_FEE` is valid number
-4. Review `VINCENT_STYLE_AUTO_APPROVAL.md` for details
+4. Review `docs/root-guides/VINCENT_STYLE_AUTO_APPROVAL.md` for details
 
 ## 🎉 Congratulations!
 

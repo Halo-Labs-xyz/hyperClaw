@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { getExchangeClient } from "@/lib/hyperliquid";
 import { getApproveBuilderFeeTypedData } from "@/lib/builder";
-import { type Address } from "viem";
+import { verifyApiKey, unauthorizedResponse } from "@/lib/auth";
 
 /**
  * POST /api/builder/approve
@@ -14,6 +14,7 @@ import { type Address } from "viem";
  *   - chainId: number - Chain ID used in signing
  */
 export async function POST(request: Request) {
+  if (!verifyApiKey(request)) return unauthorizedResponse();
   try {
     const body = await request.json();
     const { signature, nonce, chainId } = body;
@@ -62,6 +63,7 @@ export async function POST(request: Request) {
  *   - nonce: Optional nonce (defaults to current timestamp)
  */
 export async function GET(request: Request) {
+  if (!verifyApiKey(request)) return unauthorizedResponse();
   try {
     const { searchParams } = new URL(request.url);
     const chainId = parseInt(searchParams.get("chainId") || "421614", 10);

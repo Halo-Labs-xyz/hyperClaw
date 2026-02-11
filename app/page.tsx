@@ -4,6 +4,9 @@ import { usePrivy } from "@privy-io/react-auth";
 import { useAccount, useBalance } from "wagmi";
 import { useState, useEffect } from "react";
 import Link from "next/link";
+import { HyperclawLogo } from "@/app/components/HyperclawLogo";
+import { HyperclawIcon } from "@/app/components/HyperclawIcon";
+import { AgentAvatar } from "@/app/components/AgentAvatar";
 import type { Agent, HclawState } from "@/lib/types";
 
 export default function Dashboard() {
@@ -59,6 +62,29 @@ export default function Dashboard() {
     }
     fetchCritical();
   }, []);
+
+  useEffect(() => {
+    if (!address) return;
+    let cancelled = false;
+
+    async function fetchUserHclawState() {
+      try {
+        const res = await fetch(`/api/hclaw/state?user=${address}`);
+        const data = await res.json();
+        if (cancelled) return;
+        if (data?.state) {
+          setHclawState(data.state);
+        }
+      } catch {
+        // non-critical
+      }
+    }
+
+    fetchUserHclawState();
+    return () => {
+      cancelled = true;
+    };
+  }, [address]);
 
   // Phase 2: Lazy-load HL wallet data after initial render (non-blocking)
   useEffect(() => {
@@ -170,22 +196,21 @@ export default function Dashboard() {
   const canLogin = !authenticated && !isConnected;
 
   return (
-    <div className="min-h-screen bg-background relative overflow-hidden">
-      {/* Ambient background orbs */}
+    <div className="min-h-screen page-bg relative overflow-hidden">
+      {/* Ambient background orbs — green: Hyperliquid, purple: Monad */}
       <div className="orb orb-green w-[600px] h-[600px] -top-[200px] -right-[200px] fixed" />
       <div className="orb orb-purple w-[500px] h-[500px] top-[60%] -left-[200px] fixed" />
       <div className="orb orb-green w-[300px] h-[300px] bottom-[10%] right-[10%] fixed" />
+      <div className="orb orb-purple w-[350px] h-[350px] top-[15%] left-[5%] fixed" />
 
       {/* Header */}
       <header className="glass sticky top-0 z-50">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 py-4 flex items-center justify-between">
           <Link href="/" className="flex items-center gap-3 group">
             <div className="w-9 h-9 rounded-lg bg-accent/10 border border-accent/20 flex items-center justify-center group-hover:bg-accent/15 transition-colors">
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-accent">
-                <path d="M6 3v12" /><path d="M18 9a3 3 0 1 0 0-6 3 3 0 0 0 0 6z" /><path d="M6 21a3 3 0 1 0 0-6 3 3 0 0 0 0 6z" /><path d="M15 6a9 9 0 0 0-9 9" /><path d="M18 15v6" /><path d="M21 18h-6" />
-              </svg>
+              <HyperclawIcon className="text-accent" size={18} />
             </div>
-            <span className="text-lg font-bold tracking-tight gradient-text">Hyperclaw</span>
+            <HyperclawLogo className="text-lg font-bold tracking-tight" />
           </Link>
 
           <nav className="hidden md:flex items-center gap-1">
@@ -234,15 +259,15 @@ export default function Dashboard() {
         <section className="pt-16 pb-12 md:pt-24 md:pb-16 text-center relative">
           <div className="inline-flex items-center gap-2 px-4 py-1.5 rounded-full bg-accent/10 border border-accent/20 text-accent text-xs font-medium mb-8 animate-fade-in-up">
             <div className="w-1.5 h-1.5 rounded-full bg-accent pulse-live" />
-            Powered by Monad + Hyperliquid
+            Powered by Monad, Hyperliquid, and OpenClaw
           </div>
-          <h2 className="text-4xl sm:text-5xl md:text-6xl lg:text-7xl font-bold tracking-tight mb-6 animate-fade-in-up animate-delay-100">
-            <span className="text-foreground">AI Agents</span>
+          <h2 className="text-4xl sm:text-5xl md:text-6xl lg:text-7xl font-bold tracking-tight mb-6 animate-fade-in-up animate-delay-100 gradient-title">
+            Agents
             <br />
-            <span className="gradient-text">Trading Perps</span>
+            Trading Perps
           </h2>
           <p className="text-base sm:text-lg text-muted max-w-xl mx-auto leading-relaxed animate-fade-in-up animate-delay-200">
-            Deposit Monad assets. AI agents trade perpetual futures on Hyperliquid autonomously. Withdraw with profits anytime.
+            Deposit assets on Monad without losing exposure. Create agents to trade perps on Hyperliquid. Watch them compete against each other. Hold $HCLAW to increase deposit limits. Withdraw profits anytime.
           </p>
           <div className="flex items-center justify-center gap-3 mt-10 animate-fade-in-up animate-delay-300">
             <Link href="/arena" className="btn-secondary px-6 py-3 text-sm">
@@ -253,6 +278,9 @@ export default function Dashboard() {
             </Link>
             <Link href="/agents/new" className="btn-secondary px-6 py-3 text-sm">
               Create Agent
+            </Link>
+            <Link href="/hclaw" className="btn-secondary px-6 py-3 text-sm">
+              HCLAW Hub
             </Link>
           </div>
         </section>
@@ -394,11 +422,11 @@ export default function Dashboard() {
               <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 mb-6">
                 <div>
                   <div className="flex items-center gap-2 mb-1">
-                    <h3 className="text-lg font-bold">$HCLAW Flywheel</h3>
+                    <h3 className="text-lg font-bold gradient-title">$HCLAW Flywheel</h3>
                     <span className="chip chip-active text-[10px]">LIVE</span>
                   </div>
                   <p className="text-sm text-muted">
-                    Token market cap scales vault deposit limits
+                    Market cap + Locked HCLAW power drive user-specific caps and rebates
                   </p>
                 </div>
                 {hclawState && (
@@ -412,6 +440,34 @@ export default function Dashboard() {
               </div>
               {hclawState ? (
                 <div>
+                  <div className="grid grid-cols-2 md:grid-cols-3 gap-3 mb-4">
+                    <div className="p-3 rounded-xl bg-surface border border-card-border">
+                      <div className="text-[10px] text-dim uppercase tracking-wider mb-1">Lock Tier</div>
+                      <div className="text-sm font-semibold mono-nums">Tier {hclawState.lockTier ?? 0}</div>
+                    </div>
+                    <div className="p-3 rounded-xl bg-surface border border-card-border">
+                      <div className="text-[10px] text-dim uppercase tracking-wider mb-1">HCLAW Power</div>
+                      <div className="text-sm font-semibold mono-nums">{(hclawState.hclawPower ?? 0).toFixed(2)}</div>
+                    </div>
+                    <div className="p-3 rounded-xl bg-surface border border-card-border">
+                      <div className="text-[10px] text-dim uppercase tracking-wider mb-1">Rebate Tier</div>
+                      <div className="text-sm font-semibold mono-nums text-success">{((hclawState.rebateBps ?? 0) / 100).toFixed(2)}%</div>
+                    </div>
+                    <div className="p-3 rounded-xl bg-surface border border-card-border">
+                      <div className="text-[10px] text-dim uppercase tracking-wider mb-1">Boosted Cap</div>
+                      <div className="text-sm font-semibold mono-nums">${(hclawState.boostedCapUsd ?? hclawState.maxDepositPerVault).toLocaleString()}</div>
+                    </div>
+                    <div className="p-3 rounded-xl bg-surface border border-card-border">
+                      <div className="text-[10px] text-dim uppercase tracking-wider mb-1">Weekly Points</div>
+                      <div className="text-sm font-semibold mono-nums">{(hclawState.pointsThisEpoch ?? 0).toFixed(2)}</div>
+                    </div>
+                    <div className="p-3 rounded-xl bg-surface border border-card-border">
+                      <div className="text-[10px] text-dim uppercase tracking-wider mb-1">Claimable</div>
+                      <div className="text-sm font-semibold mono-nums">
+                        ${Number(hclawState.claimableRebateUsd ?? 0).toFixed(2)} + {(hclawState.claimableIncentiveHclaw ?? 0).toFixed(2)} HCLAW
+                      </div>
+                    </div>
+                  </div>
                   <div className="flex justify-between text-sm mb-3">
                     <span className="text-accent font-medium">
                       {hclawState.currentTier.name} Tier
@@ -489,7 +545,7 @@ export default function Dashboard() {
 
         {/* How It Works */}
         <section className="pb-8">
-          <h3 className="text-xl font-bold mb-2 text-center">How It Works</h3>
+          <h3 className="text-xl font-bold mb-2 text-center gradient-title">How It Works</h3>
           <p className="text-sm text-muted text-center mb-10">Three steps from deposit to profit</p>
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4 md:gap-6">
             <StepCard
@@ -582,7 +638,7 @@ function StatCard({
   );
 }
 
-function AgentCard({ agent, hlWallet }: {
+function _AgentCard({ agent, hlWallet }: {
   agent: Agent;
   hlWallet?: { hasWallet: boolean; address?: string; accountValue?: string; availableBalance?: string; totalPnl?: number };
 }) {
@@ -592,8 +648,8 @@ function AgentCard({ agent, hlWallet }: {
       <div className="glass-card p-5 md:p-6 cursor-pointer h-full flex flex-col">
         <div className="flex items-start justify-between mb-3">
           <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl bg-accent/10 border border-accent/20 flex items-center justify-center text-sm font-bold text-accent">
-              {agent.name.charAt(0)}
+            <div className="w-10 h-10 rounded-xl overflow-hidden border border-accent/20 shrink-0">
+              <AgentAvatar name={agent.name} description={agent.description} size={40} />
             </div>
             <div>
               <h4 className="font-semibold text-sm">{agent.name}</h4>

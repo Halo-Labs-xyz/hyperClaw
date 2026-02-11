@@ -157,5 +157,5 @@ console.log('3. Place a trade (builder code auto-approved on first trade if need
 console.log('4. Check fees accumulate: GET /api/builder/claim');
 console.log('\nDocumentation:');
 console.log('- BUILDER_CODES.md - Full integration docs');
-console.log('- VINCENT_STYLE_AUTO_APPROVAL.md - Auto-approval guide');
-console.log('- QUICK_START_BUILDER_CODES.md - 5-minute setup\n');
+console.log('- docs/root-guides/VINCENT_STYLE_AUTO_APPROVAL.md - Auto-approval guide');
+console.log('- docs/root-guides/QUICK_START_BUILDER_CODES.md - 5-minute setup\n');

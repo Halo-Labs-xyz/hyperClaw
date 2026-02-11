@@ -141,7 +141,6 @@ export async function executeTick(agentId: string): Promise<TradeLog> {
   const hlAddress = agentAccount?.address ?? agent.hlAddress;
   
   const isPKP = agentAccount ? await isPKPAccount(agentId) : false;
-  const signingMethod = isPKP ? "pkp" : "traditional";
 
   // For traditional accounts, get exchange client
   let agentExchange: ReturnType<typeof getExchangeClientForAgent> | null = null;
@@ -234,7 +233,7 @@ export async function executeTick(agentId: string): Promise<TradeLog> {
     const availableBalance = parseFloat(accountState.withdrawable || "0");
 
     // 3. Fetch historical prices if indicator is enabled
-    let historicalPrices: Record<string, number[]> = {};
+    const historicalPrices: Record<string, number[]> = {};
     if (agent.indicator?.enabled && agent.markets.length > 0) {
       console.log(`[Agent ${agentId}] Fetching historical prices for indicator analysis...`);
       try {

@@ -2,6 +2,8 @@
 
 import { useState } from "react";
 import Link from "next/link";
+import { HyperclawLogo } from "@/app/components/HyperclawLogo";
+import { HyperclawIcon } from "@/app/components/HyperclawIcon";
 import { NetworkToggle } from "@/app/components/NetworkToggle";
 import { TestnetToggle } from "../components/strategy/TestnetToggle";
 import { StrategyBuilder } from "../components/strategy/StrategyBuilder";
@@ -85,8 +87,10 @@ export default function StrategyPage() {
         <div className="max-w-5xl mx-auto px-4 py-3 flex items-center justify-between">
           <div className="flex items-center gap-3">
             <Link href="/" className="flex items-center gap-2">
-              <span className="text-xl">🦞</span>
-              <span className="font-bold gradient-text">Hyperclaw</span>
+              <div className="w-8 h-8 rounded-lg bg-accent/10 border border-accent/20 flex items-center justify-center">
+                <HyperclawIcon className="text-accent" size={18} />
+              </div>
+              <HyperclawLogo className="font-bold" />
             </Link>
             <span className="text-muted">/</span>
             <span className="text-sm font-bold uppercase tracking-wider">
@@ -110,7 +114,7 @@ export default function StrategyPage() {
       <main className="max-w-5xl mx-auto px-4 py-6 space-y-6">
         {/* Intro */}
         <div className="text-center py-4">
-          <h2 className="text-2xl font-bold mb-2">Strategy Tester</h2>
+          <h2 className="text-2xl font-bold mb-2 gradient-title">Strategy Tester</h2>
           <p className="text-muted text-sm max-w-lg mx-auto">
             Configure trading parameters, run simulated AI ticks against live
             market data, and review the decisions your agent would make.

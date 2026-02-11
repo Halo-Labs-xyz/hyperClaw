@@ -1,6 +1,9 @@
 import { NextResponse } from "next/server";
 import { getAgents } from "@/lib/store";
 
+export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
+
 /**
  * GET /api/agents/orchestrator
  *

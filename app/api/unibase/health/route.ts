@@ -4,13 +4,13 @@
  * Health check for AIP integration.
  */
 
-import { NextRequest, NextResponse } from "next/server";
+import { NextResponse } from "next/server";
 import { checkAIPHealth } from "@/lib/unibase-aip";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-export async function GET(req: NextRequest) {
+export async function GET() {
   try {
     const health = await checkAIPHealth();
 

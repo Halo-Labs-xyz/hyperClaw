@@ -125,9 +125,9 @@ export default function BuilderApproval({
       if (onApprovalComplete) {
         onApprovalComplete();
       }
-    } catch (err: any) {
+    } catch (err: unknown) {
       console.error("Approval error:", err);
-      setError(err.message || "Failed to approve builder fee");
+      setError(err instanceof Error ? err.message : "Failed to approve builder fee");
     } finally {
       setApproving(false);
     }
@@ -207,7 +207,7 @@ export default function BuilderApproval({
           <div className="space-y-3">
             <div className="bg-[#30e8a0]/5 border border-[#30e8a0]/20 rounded p-3 text-xs text-gray-300">
               <p className="font-medium text-[#30e8a0] mb-1">Auto-Approval Info</p>
-              <p>Agent wallets automatically approve builder fees on first trade. You can pre-approve here if you prefer, but it's not required.</p>
+              <p>Agent wallets automatically approve builder fees on first trade. You can pre-approve here if you prefer, but it&apos;s not required.</p>
             </div>
 
             {error && (
