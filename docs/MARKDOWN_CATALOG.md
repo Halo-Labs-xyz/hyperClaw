@@ -19,6 +19,7 @@ Comprehensive Markdown inventory for repository-authored docs (excluding depende
 - `docs/IMPLEMENTATION_CHECKLIST.md`
 - `docs/INTEGRATION_SUMMARY.md`
 - `docs/IRONCLAW_INTEGRATION.md`
+- `docs/IRONCLAW_AWS_DEPLOY.md`
 - `docs/HCLAW_MONAD_NADFUN_INTEGRATION_PRD.md`
 - `docs/HCLAW_IMPLEMENTATION_CHECKLIST.md`
 - `docs/KEY_MANAGEMENT_COMPLETE.md`

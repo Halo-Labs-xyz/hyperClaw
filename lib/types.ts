@@ -33,6 +33,9 @@ export interface AutonomyConfig {
 
   // Auto-approve timeout for semi mode (ms) - if not approved in time, skip
   approvalTimeoutMs: number;
+
+  // Network partition used to scope agent lists at runtime.
+  deploymentNetwork?: "testnet" | "mainnet";
 }
 
 // ============================================

@@ -1,0 +1,28 @@
+{
+  email {$ACME_EMAIL}
+}
+
+{$IRONCLAW_DOMAIN} {
+  encode gzip zstd
+
+  header {
+    -Server
+    X-Content-Type-Options "nosniff"
+    Referrer-Policy "no-referrer"
+  }
+
+  @webhook path /webhook
+  @health path /health
+
+  handle @webhook {
+    reverse_proxy ironclaw:8080
+  }
+
+  handle @health {
+    reverse_proxy ironclaw:8080
+  }
+
+  handle {
+    respond "not found" 404
+  }
+}

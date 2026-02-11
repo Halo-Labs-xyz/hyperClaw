@@ -26,7 +26,11 @@
     "docker:up": "bash scripts/docker-stack.sh up",
     "docker:down": "bash scripts/docker-stack.sh down",
     "docker:logs": "bash scripts/docker-stack.sh logs",
-    "docker:ps": "bash scripts/docker-stack.sh ps"
+    "docker:ps": "bash scripts/docker-stack.sh ps",
+    "docker:ironclaw:aws:up": "bash scripts/ironclaw-aws-stack.sh up",
+    "docker:ironclaw:aws:down": "bash scripts/ironclaw-aws-stack.sh down",
+    "docker:ironclaw:aws:logs": "bash scripts/ironclaw-aws-stack.sh logs",
+    "docker:ironclaw:aws:ps": "bash scripts/ironclaw-aws-stack.sh ps"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.985.0",

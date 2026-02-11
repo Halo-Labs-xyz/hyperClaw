@@ -17,6 +17,7 @@ This is the canonical documentation map for the repository.
 - `docs/PKP_BUILDER_CODE_INTEGRATION.md`
 - `docs/PKP_TRADING_INTEGRATION.md`
 - `docs/IRONCLAW_INTEGRATION.md`
+- `docs/IRONCLAW_AWS_DEPLOY.md`
 - `docs/BUILDER_CODES.md`
 - `docs/KEY_MGMT_ARCHITECTURE.md`
 

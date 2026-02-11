@@ -21,6 +21,7 @@ import {
   getRecentTradesFromArchive,
   getTradesForAgentFromArchive,
 } from "./trade-archive";
+import { isMonadTestnet } from "./network";
 
 // ============================================
 // Agent CRUD
@@ -49,6 +50,10 @@ export async function createAgent(
   config: AgentConfig,
   hlAddress: `0x${string}`
 ): Promise<Agent> {
+  const deploymentNetwork =
+    config.autonomy?.deploymentNetwork ??
+    (isMonadTestnet() ? "testnet" : "mainnet");
+
   if (isSupabaseStoreEnabled()) {
     const id = randomBytes(8).toString("hex");
 
@@ -71,6 +76,7 @@ export async function createAgent(
         minConfidence,
         maxTradesPerDay: config.autonomy?.maxTradesPerDay ?? 10,
         approvalTimeoutMs: config.autonomy?.approvalTimeoutMs ?? 300000,
+        deploymentNetwork,
       },
       telegram: config.telegramChatId || config.ownerPrivyId || config.ownerWalletAddress
         ? {
@@ -127,6 +133,7 @@ export async function createAgent(
       minConfidence,
       maxTradesPerDay: config.autonomy?.maxTradesPerDay ?? 10,
       approvalTimeoutMs: config.autonomy?.approvalTimeoutMs ?? 300000, // 5 min default
+      deploymentNetwork,
     },
     telegram: config.telegramChatId || config.ownerPrivyId || config.ownerWalletAddress
       ? {

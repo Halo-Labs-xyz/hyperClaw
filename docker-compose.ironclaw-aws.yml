@@ -1,0 +1,87 @@
+name: ironclaw-aws
+
+services:
+  postgres:
+    image: pgvector/pgvector:pg16
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${PG_USER:-ironclaw}
+      POSTGRES_PASSWORD: ${PG_PASSWORD}
+      POSTGRES_DB: ${PG_DB:-ironclaw}
+    volumes:
+      - ironclaw_pg_data:/var/lib/postgresql/data
+      - ./docker/postgres/init.sql:/docker-entrypoint-initdb.d/01-init.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${PG_USER:-ironclaw} -d ${PG_DB:-ironclaw}"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+      start_period: 10s
+    networks:
+      - ironclaw_private
+
+  ironclaw:
+    build:
+      context: .
+      dockerfile: ironclaw/Dockerfile
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgres://${PG_USER:-ironclaw}:${PG_PASSWORD}@postgres:5432/${PG_DB:-ironclaw}
+      SECRETS_MASTER_KEY: ${SECRETS_MASTER_KEY}
+      HTTP_HOST: 0.0.0.0
+      HTTP_PORT: 8080
+      HTTP_WEBHOOK_SECRET: ${HTTP_WEBHOOK_SECRET}
+      CLI_ENABLED: "false"
+      RUST_LOG: ${RUST_LOG:-ironclaw=info}
+      GATEWAY_ENABLED: ${IRONCLAW_GATEWAY_ENABLED:-false}
+      GATEWAY_HOST: 0.0.0.0
+      GATEWAY_PORT: 8081
+      GATEWAY_AUTH_TOKEN: ${GATEWAY_AUTH_TOKEN:-}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      NEARAI_SESSION_PATH: /home/ironclaw/.ironclaw/session.json
+      NEARAI_SESSION_TOKEN: ${NEARAI_SESSION_TOKEN:-}
+      IRONCLAW_SKIP_SESSION_CHECK: ${IRONCLAW_SKIP_SESSION_CHECK:-false}
+    volumes:
+      - ironclaw_home:/home/ironclaw/.ironclaw
+    expose:
+      - "8080"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:8080/health >/dev/null || exit 1"]
+      interval: 10s
+      timeout: 3s
+      retries: 20
+      start_period: 20s
+    networks:
+      - ironclaw_private
+
+  caddy:
+    image: caddy:2.8-alpine
+    restart: unless-stopped
+    depends_on:
+      ironclaw:
+        condition: service_healthy
+    environment:
+      ACME_EMAIL: ${ACME_EMAIL}
+      IRONCLAW_DOMAIN: ${IRONCLAW_DOMAIN}
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./docker/caddy/ironclaw.Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    networks:
+      - ironclaw_private
+
+networks:
+  ironclaw_private:
+    driver: bridge
+
+volumes:
+  ironclaw_pg_data:
+  ironclaw_home:
+  caddy_data:
+  caddy_config:

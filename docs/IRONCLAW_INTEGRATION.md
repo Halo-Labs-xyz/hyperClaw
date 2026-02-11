@@ -181,6 +181,8 @@ If the Python server runs over HTTP, use its URL (e.g. `http://localhost:8000/mc
 
 ## Running IronClaw as the Sidecar
 
+For a separate internet-facing AWS deployment of IronClaw (independent from hyperClaw host), use `docs/IRONCLAW_AWS_DEPLOY.md`.
+
 1. **Build and run IronClaw** (see `ironclaw/README.md`):
    - Rust 1.85+, PostgreSQL 15+ with pgvector.
    - `cargo build --release`, migrations, `ironclaw setup` (NEAR AI, etc.).

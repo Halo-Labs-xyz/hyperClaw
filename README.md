@@ -980,6 +980,23 @@ This runs:
 - `ironclaw` on `8080`
 - `postgres` on `5432` with persistent volume-backed storage
 
+### AWS EC2 (IronClaw Separate Service)
+
+Deploy IronClaw to its own EC2 host (with TLS) and keep hyperClaw on its existing host/platform.
+
+Use the dedicated stack and runbook:
+- Compose stack: `docker-compose.ironclaw-aws.yml`
+- Env template: `.env.ironclaw-aws.example`
+- Control script: `scripts/ironclaw-aws-stack.sh`
+- Full guide: [docs/IRONCLAW_AWS_DEPLOY.md](./docs/IRONCLAW_AWS_DEPLOY.md)
+
+After deployment, point hyperClaw to the public IronClaw endpoint:
+
+```bash
+IRONCLAW_WEBHOOK_URL=https://ironclaw.your-domain.com/webhook
+IRONCLAW_WEBHOOK_SECRET=<same-as-HTTP_WEBHOOK_SECRET-on-ironclaw-host>
+```
+
 ### EC2 Orchestrator
 
 For autonomous agent execution at scale, run an EC2 instance that polls `/api/agents/orchestrator` for active agents and calls `/api/agents/[id]/tick` on intervals. Authenticate with the `ORCHESTRATOR_SECRET` header.

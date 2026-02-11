@@ -1,7 +1,7 @@
 "use client";
 
 import { usePrivy } from "@privy-io/react-auth";
-import { useAccount, useBalance, useSignMessage } from "wagmi";
+import { useAccount, useBalance, useSignMessage, useDisconnect } from "wagmi";
 import { useState, useEffect, useCallback, useRef } from "react";
 import Link from "next/link";
 import { HyperclawLogo } from "@/app/components/HyperclawLogo";
@@ -14,6 +14,7 @@ export default function Dashboard() {
   const { address, isConnected } = useAccount();
   const { data: balance } = useBalance({ address });
   const { signMessageAsync } = useSignMessage();
+  const { disconnectAsync } = useDisconnect();
   const [agents, setAgents] = useState<Agent[]>([]);
   const [hclawState, setHclawState] = useState<HclawState | null>(null);
   const [loading, setLoading] = useState(true);
@@ -21,12 +22,6 @@ export default function Dashboard() {
   const [walletAuthState, setWalletAuthState] = useState<"idle" | "pending" | "verified" | "failed">("idle");
   const walletAuthInFlight = useRef(false);
 
-  // HL wallet state
-  const [hlStatus, setHlStatus] = useState<{
-    network: string;
-    configured: boolean;
-    vaultAddress: string | null;
-  } | null>(null);
   const [agentWallets, setAgentWallets] = useState<Array<{
     agentId: string;
     agentName: string;
@@ -96,24 +91,6 @@ export default function Dashboard() {
 
     let cancelled = false;
     async function fetchWallets() {
-      // Fetch HL status (non-critical)
-      try {
-        const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 5000);
-        const statusRes = await fetch("/api/fund", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ action: "status" }),
-          signal: controller.signal,
-        }).finally(() => clearTimeout(timeoutId));
-        if (!cancelled) {
-          const statusData = await statusRes.json();
-          setHlStatus(statusData);
-        }
-      } catch {
-        // non-critical
-      }
-
       // Fetch balances in bounded parallel batches to avoid long sequential timeouts.
       const queue = [...agents];
       const concurrency = Math.min(4, queue.length);
@@ -167,14 +144,6 @@ export default function Dashboard() {
     fetchWallets();
     return () => { cancelled = true; };
   }, [loading, agents]);
-
-  // Track whether wallet fetching is done
-  const [walletsLoaded, setWalletsLoaded] = useState(false);
-  useEffect(() => {
-    if (!loading && agents.length > 0 && agentWallets.length >= agents.length) {
-      setWalletsLoaded(true);
-    }
-  }, [loading, agents.length, agentWallets.length]);
 
   useEffect(() => {
     if (!ready || !authenticated || !user?.id || !isConnected || !address) {
@@ -303,12 +272,18 @@ export default function Dashboard() {
   }, [copyText, privyId]);
 
   const handleDisconnect = useCallback(async () => {
-    try {
-      await logout();
-    } catch (error) {
-      console.error("Failed to disconnect wallet:", error);
+    const [walletDisconnect, privyLogout] = await Promise.allSettled([
+      disconnectAsync(),
+      logout(),
+    ]);
+    if (walletDisconnect.status === "rejected") {
+      console.error("Failed to disconnect wagmi wallet:", walletDisconnect.reason);
     }
-  }, [logout]);
+    if (privyLogout.status === "rejected") {
+      console.error("Failed to disconnect wallet session:", privyLogout.reason);
+    }
+    setWalletAuthState("idle");
+  }, [disconnectAsync, logout]);
 
   const handleConnectNewWallet = useCallback(() => {
     if (authenticated) {
@@ -431,14 +406,8 @@ export default function Dashboard() {
                     )}
                     <div className="flex items-center gap-2">
                       <button
-                        onClick={handleConnectNewWallet}
-                        className="btn-secondary px-3 py-1.5 text-xs flex-1"
-                      >
-                        Connect New Wallet
-                      </button>
-                      <button
                         onClick={() => { void handleDisconnect(); }}
-                        className="px-3 py-1.5 text-xs rounded-lg border border-danger/30 text-danger hover:bg-danger/10 transition-colors flex-1"
+                        className="w-full px-3 py-1.5 text-xs rounded-lg border border-danger/30 text-danger hover:bg-danger/10 transition-colors"
                       >
                         Disconnect
                       </button>
@@ -513,114 +482,6 @@ export default function Dashboard() {
             value={balance ? `${parseFloat(balance.formatted).toFixed(2)} MON` : "---"}
           />
         </section>
-
-        {/* Hyperliquid Wallets */}
-        {(hlStatus || agentWallets.length > 0) && (
-          <section className="mb-12 animate-fade-in-up animate-delay-400">
-            <div className="card rounded-2xl overflow-hidden">
-              <div className="p-5 md:p-6 border-b border-card-border">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-3">
-                    <div className="w-9 h-9 rounded-lg bg-cyan/10 border border-cyan/20 flex items-center justify-center">
-                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-cyan">
-                        <path d="M21 12V7H5a2 2 0 0 1 0-4h14v4" /><path d="M3 5v14a2 2 0 0 0 2 2h16v-5" /><path d="M18 12a2 2 0 0 0 0 4h4v-4z" />
-                      </svg>
-                    </div>
-                    <div>
-                      <h3 className="font-semibold text-sm">Agent Wallets</h3>
-                      <p className="text-xs text-muted">Agent trading accounts on HL {hlStatus?.network || "testnet"}</p>
-                    </div>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <div className={`w-2 h-2 rounded-full ${hlStatus?.configured ? "bg-success pulse-live" : "bg-warning"}`} />
-                    <span className="text-xs text-muted font-medium">
-                      {hlStatus?.configured ? "Connected" : "Not configured"}
-                    </span>
-                  </div>
-                </div>
-              </div>
-
-              {agentWallets.length > 0 ? (
-                <div className="divide-y divide-card-border">
-                  {agentWallets.map((w) => (
-                    <div key={w.agentId} className="p-4 md:px-6 flex items-center justify-between hover:bg-surface/50 transition-colors">
-                      <div className="flex items-center gap-3">
-                        <div className={`w-8 h-8 rounded-lg flex items-center justify-center text-xs font-bold ${
-                          w.hasWallet
-                            ? "bg-accent/10 border border-accent/20 text-accent"
-                            : "bg-surface border border-card-border text-dim"
-                        }`}>
-                          {w.agentName.charAt(0)}
-                        </div>
-                        <div>
-                          <div className="text-sm font-medium">{w.agentName}</div>
-                          {w.hasWallet && w.address ? (
-                            <span className="text-[10px] font-mono text-dim">
-                              {w.address.slice(0, 6)}...{w.address.slice(-4)}
-                            </span>
-                          ) : (
-                            <span className="text-[10px] text-dim">No HL wallet</span>
-                          )}
-                        </div>
-                      </div>
-                      <div className="text-right">
-                        {w.hasWallet ? (
-                          <>
-                            <div className="text-sm font-semibold mono-nums text-accent">
-                              ${parseFloat(w.accountValue || "0").toFixed(2)}
-                            </div>
-                            <div className="text-[10px] text-dim mono-nums">
-                              ${parseFloat(w.availableBalance || "0").toFixed(2)} avail
-                            </div>
-                          </>
-                        ) : (
-                          <span className="text-xs text-dim">---</span>
-                        )}
-                      </div>
-                    </div>
-                  ))}
-                  {/* Streaming indicator while remaining wallets load */}
-                  {!walletsLoaded && agents.length > agentWallets.length && (
-                    <div className="p-3 flex items-center justify-center gap-2">
-                      <div className="w-3 h-3 border border-accent/30 border-t-accent rounded-full animate-spin" />
-                      <span className="text-[10px] text-dim">Loading {agents.length - agentWallets.length} more...</span>
-                    </div>
-                  )}
-                </div>
-              ) : (
-                <div className="p-6 text-center text-sm text-dim">
-                  {loading ? (
-                    <div className="flex items-center justify-center gap-2">
-                      <div className="w-4 h-4 border-2 border-accent/30 border-t-accent rounded-full animate-spin" />
-                      <span>Loading wallets...</span>
-                    </div>
-                  ) : !walletsLoaded && agents.length > 0 ? (
-                    <div className="flex items-center justify-center gap-2">
-                      <div className="w-4 h-4 border-2 border-accent/30 border-t-accent rounded-full animate-spin" />
-                      <span>Fetching wallet balances...</span>
-                    </div>
-                  ) : (
-                    "No agent wallets yet. Deposit MON to auto-provision."
-                  )}
-                </div>
-              )}
-
-              {/* Summary footer */}
-              {agentWallets.some((w) => w.hasWallet) && (
-                <div className="p-4 md:px-6 border-t border-card-border bg-surface/30 flex items-center justify-between">
-                  <span className="text-xs text-muted">
-                    {agentWallets.filter((w) => w.hasWallet).length} of {agentWallets.length} agents funded
-                  </span>
-                  <span className="text-sm font-semibold mono-nums text-foreground">
-                    Total: ${agentWallets
-                      .reduce((sum, w) => sum + parseFloat(w.accountValue || "0"), 0)
-                      .toFixed(2)}
-                  </span>
-                </div>
-              )}
-            </div>
-          </section>
-        )}
 
         {/* $HCLAW Flywheel */}
         <section className="mb-12">

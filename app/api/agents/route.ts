@@ -3,6 +3,7 @@ import { getAgents, createAgent } from "@/lib/store";
 import { generateAgentWallet, provisionPKPWallet } from "@/lib/hyperliquid";
 import { addAccount, getAccountForAgent, addPKPAccount } from "@/lib/account-manager";
 import { type AgentConfig } from "@/lib/types";
+import { getNetworkState } from "@/lib/network";
 
 function normalizeString(value: unknown): string | undefined {
   if (typeof value !== "string") return undefined;
@@ -17,13 +18,83 @@ function normalizeAddress(value: unknown): `0x${string}` | undefined {
   return trimmed.toLowerCase() as `0x${string}`;
 }
 
-export async function GET() {
+function parseNetwork(value: unknown): "testnet" | "mainnet" | undefined {
+  if (value === "testnet" || value === "mainnet") return value;
+  return undefined;
+}
+
+function getAgentDeploymentNetwork(agent: { autonomy?: { deploymentNetwork?: string } }): "testnet" | "mainnet" {
+  const tagged = parseNetwork(agent.autonomy?.deploymentNetwork);
+  // Legacy agents without a tag are treated as testnet to avoid leaking old test data into mainnet views.
+  return tagged ?? "testnet";
+}
+
+function isOwnedByViewer(
+  ownerPrivyId: string | undefined,
+  ownerWalletAddress: string | undefined,
+  viewerPrivyId: string | undefined,
+  viewerWalletAddress: string | undefined
+): boolean {
+  if (viewerPrivyId && ownerPrivyId && ownerPrivyId === viewerPrivyId) return true;
+  if (
+    viewerWalletAddress &&
+    ownerWalletAddress &&
+    ownerWalletAddress.toLowerCase() === viewerWalletAddress.toLowerCase()
+  ) return true;
+  return false;
+}
+
+export async function GET(request: Request) {
   try {
     const agents = await getAgents();
+    const { searchParams } = new URL(request.url);
+    const view = normalizeString(searchParams.get("view")) ?? "full";
+    const scope = normalizeString(searchParams.get("scope")) ?? "all";
+    const requestedNetwork = parseNetwork(searchParams.get("network"));
+    const currentNetwork = getNetworkState().monadTestnet ? "testnet" : "mainnet";
+    const network = requestedNetwork ?? currentNetwork;
+    const networkScopedAgents = agents.filter((a) => getAgentDeploymentNetwork(a) === network);
+
+    if (view === "explore") {
+      const viewerPrivyId =
+        normalizeString(
+          request.headers.get("x-owner-privy-id") ??
+          request.headers.get("x-privy-user-id")
+        );
+      const viewerWalletAddress =
+        normalizeAddress(
+          request.headers.get("x-owner-wallet-address") ??
+          request.headers.get("x-wallet-address")
+        );
+
+      const active = networkScopedAgents.filter((a) => a.status === "active");
+      const scoped = scope === "owned"
+        ? active.filter((a) =>
+            isOwnedByViewer(
+              a.telegram?.ownerPrivyId,
+              a.telegram?.ownerWalletAddress,
+              viewerPrivyId,
+              viewerWalletAddress
+            )
+          )
+        : active;
+
+      return NextResponse.json({
+        agents: scoped.map((a) => ({
+          id: a.id,
+          name: a.name,
+          description: a.description,
+          status: a.status,
+          markets: a.markets,
+          riskLevel: a.riskLevel,
+        })),
+      });
+    }
+
     // Enrich each agent's hlAddress from account-manager (source of truth for HL wallet)
     const { getAccountForAgent } = await import("@/lib/account-manager");
     const enriched = await Promise.all(
-      agents.map(async (a) => {
+      networkScopedAgents.map(async (a) => {
         const account = await getAccountForAgent(a.id);
         const resolvedAddress = account?.address ?? a.hlAddress;
         return { ...a, hlAddress: resolvedAddress };
@@ -89,6 +160,7 @@ export async function POST(request: Request) {
         approvalTimeoutMs: 300000,
       };
     }
+    body.autonomy.deploymentNetwork = getNetworkState().monadTestnet ? "testnet" : "mainnet";
 
     // Determine wallet mode: PKP or traditional
     const usePKP = process.env.USE_LIT_PKP === "true";
