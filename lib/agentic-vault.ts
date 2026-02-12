@@ -8,74 +8,103 @@ import {
   sbInsertHclawTreasuryFlow,
   sbListHclawTreasuryFlows,
 } from "@/lib/supabase-store";
+import type { MonadNetwork } from "@/lib/hclaw-lock";
 
 const memoryTreasuryFlows: HclawTreasuryFlow[] = [];
 
-function getMonadRpcUrl(): string {
-  return isMonadTestnet() ? "https://testnet-rpc.monad.xyz" : "https://rpc.monad.xyz";
+function getMonadRpcUrl(network?: MonadNetwork): string {
+  const mainnetRpc =
+    process.env.MONAD_MAINNET_RPC_URL ||
+    process.env.NEXT_PUBLIC_MONAD_MAINNET_RPC_URL ||
+    "https://rpc.monad.xyz";
+  const testnetRpc =
+    process.env.MONAD_TESTNET_RPC_URL ||
+    process.env.NEXT_PUBLIC_MONAD_TESTNET_RPC_URL ||
+    "https://testnet-rpc.monad.xyz";
+
+  if (network) {
+    return network === "testnet" ? testnetRpc : mainnetRpc;
+  }
+  return isMonadTestnet() ? testnetRpc : mainnetRpc;
 }
 
-function getMonadChain() {
+function getMonadChain(network?: MonadNetwork) {
+  const testnet = network ? network === "testnet" : isMonadTestnet();
   return {
-    id: isMonadTestnet() ? 10143 : 143,
-    name: isMonadTestnet() ? "Monad Testnet" : "Monad",
+    id: testnet ? 10143 : 143,
+    name: testnet ? "Monad Testnet" : "Monad",
     nativeCurrency: { name: "MON", symbol: "MON", decimals: 18 },
-    rpcUrls: { default: { http: [getMonadRpcUrl()] } },
+    rpcUrls: { default: { http: [getMonadRpcUrl(network)] } },
   } as const;
 }
 
-function getPublicClient() {
-  const chain = getMonadChain();
+function getPublicClient(network?: MonadNetwork) {
+  const chain = getMonadChain(network);
   return createPublicClient({ chain, transport: http(chain.rpcUrls.default.http[0]) });
 }
 
-export async function getAgenticVaultStatus(): Promise<AgenticVaultStatus> {
-  const vaultAddress = getAgenticLpVaultAddressIfSet();
+const EMPTY_VAULT_STATUS: AgenticVaultStatus = {
+  configured: false,
+  paused: false,
+  killSwitch: false,
+  inventorySkewBps: 0,
+  dailyTurnoverBps: 0,
+  drawdownBps: 0,
+  maxInventorySkewBps: 0,
+  maxDailyTurnoverBps: 0,
+  maxDrawdownBps: 0,
+  cumulativeRealizedPnlUsd: 0,
+  lastExecutionTs: 0,
+};
+
+function formatOneLineError(error: unknown): string {
+  if (error instanceof Error) return error.message.split("\n")[0];
+  return String(error);
+}
+
+export async function getAgenticVaultStatus(network?: MonadNetwork): Promise<AgenticVaultStatus> {
+  const vaultAddress = getAgenticLpVaultAddressIfSet(network);
 
   if (!vaultAddress) {
-    return {
-      configured: false,
-      paused: false,
-      killSwitch: false,
-      inventorySkewBps: 0,
-      dailyTurnoverBps: 0,
-      drawdownBps: 0,
-      maxInventorySkewBps: 0,
-      maxDailyTurnoverBps: 0,
-      maxDrawdownBps: 0,
-      cumulativeRealizedPnlUsd: 0,
-      lastExecutionTs: 0,
-    };
+    return EMPTY_VAULT_STATUS;
   }
 
-  const client = getPublicClient();
+  const client = getPublicClient(network);
 
   try {
-    const [statusRaw, maxInventory, maxTurnover, maxDrawdown] = await Promise.all([
-      client.readContract({
-        address: vaultAddress,
-        abi: AGENTIC_LP_VAULT_ABI,
-        functionName: "getStatus",
-      }) as Promise<[boolean, boolean, number, number, number, bigint, bigint]>,
-      client.readContract({
-        address: vaultAddress,
-        abi: AGENTIC_LP_VAULT_ABI,
-        functionName: "maxInventorySkewBps",
-      }) as Promise<number>,
-      client.readContract({
-        address: vaultAddress,
-        abi: AGENTIC_LP_VAULT_ABI,
-        functionName: "maxDailyTurnoverBps",
-      }) as Promise<number>,
-      client.readContract({
-        address: vaultAddress,
-        abi: AGENTIC_LP_VAULT_ABI,
-        functionName: "maxDrawdownBps",
-      }) as Promise<number>,
-    ]);
+    const code = await client.getCode({ address: vaultAddress });
+    if (!code || code === "0x" || code.length <= 2) return EMPTY_VAULT_STATUS;
+
+    const statusRaw = (await client.readContract({
+      address: vaultAddress,
+      abi: AGENTIC_LP_VAULT_ABI,
+      functionName: "getStatus",
+    })) as [boolean, boolean, number, number, number, bigint, bigint];
 
     const [paused, killSwitch, inventorySkewBps, dailyTurnoverBps, drawdownBps, cumulativePnl, lastExecTs] =
       statusRaw;
+
+    const safeReadLimit = async (
+      functionName: "maxInventorySkewBps" | "maxDailyTurnoverBps" | "maxDrawdownBps",
+      fallbackValue: number
+    ): Promise<number> => {
+      try {
+        const result = (await client.readContract({
+          address: vaultAddress,
+          abi: AGENTIC_LP_VAULT_ABI,
+          functionName,
+        })) as number;
+        return Number(result);
+      } catch {
+        return fallbackValue;
+      }
+    };
+
+    const [maxInventory, maxTurnover, maxDrawdown] = await Promise.all([
+      safeReadLimit("maxInventorySkewBps", Number(inventorySkewBps)),
+      safeReadLimit("maxDailyTurnoverBps", Number(dailyTurnoverBps)),
+      safeReadLimit("maxDrawdownBps", Number(drawdownBps)),
+    ]);
 
     return {
       configured: true,
@@ -91,19 +120,12 @@ export async function getAgenticVaultStatus(): Promise<AgenticVaultStatus> {
       lastExecutionTs: Number(lastExecTs),
     };
   } catch (error) {
-    console.warn("[HCLAW] agentic vault status fallback:", error);
+    console.warn("[HCLAW] agentic vault status fallback:", formatOneLineError(error));
     return {
+      ...EMPTY_VAULT_STATUS,
       configured: true,
       paused: true,
       killSwitch: true,
-      inventorySkewBps: 0,
-      dailyTurnoverBps: 0,
-      drawdownBps: 0,
-      maxInventorySkewBps: 0,
-      maxDailyTurnoverBps: 0,
-      maxDrawdownBps: 0,
-      cumulativeRealizedPnlUsd: 0,
-      lastExecutionTs: 0,
     };
   }
 }

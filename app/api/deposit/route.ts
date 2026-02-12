@@ -62,6 +62,8 @@ export async function POST(request: Request) {
     if (!result) {
       return NextResponse.json(
         {
+          success: false,
+          code: "NO_VAULT_EVENT",
           error: "No vault event found in transaction",
           detail: {
             txHash: body.txHash,
@@ -69,7 +71,7 @@ export async function POST(request: Request) {
             vaultConfig: summarizeVaultConfig(),
           },
         },
-        { status: 404 }
+        { status: 200 }
       );
     }
 

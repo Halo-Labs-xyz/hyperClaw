@@ -19,6 +19,8 @@ interface PolicyRead {
 
 const POLICY_CACHE_TTL_MS = 15_000;
 const policyCache = new Map<string, { expiresAt: number; value: PolicyRead }>();
+const POLICY_COMPAT_CACHE_TTL_MS = 60_000;
+const policyCompatCache = new Map<string, { expiresAt: number; value: boolean }>();
 
 function getMonadRpcUrl(network?: MonadNetwork): string {
   const mainnetRpc =
@@ -48,6 +50,35 @@ function getMonadChain(network?: MonadNetwork) {
 function getPublicClient(network?: MonadNetwork) {
   const chain = getMonadChain(network);
   return createPublicClient({ chain, transport: http(chain.rpcUrls.default.http[0]) });
+}
+
+function oneLineError(error: unknown): string {
+  if (error instanceof Error) return error.message.split("\n")[0];
+  return String(error);
+}
+
+async function isPolicyCompatible(
+  client: ReturnType<typeof getPublicClient>,
+  policyAddress: Address,
+  network?: MonadNetwork
+): Promise<boolean> {
+  const networkKey = network ?? (isMonadTestnet() ? "testnet" : "mainnet");
+  const cacheKey = `${networkKey}:${policyAddress.toLowerCase()}`;
+  const cached = policyCompatCache.get(cacheKey);
+  if (cached && cached.expiresAt > Date.now()) return cached.value;
+
+  try {
+    await client.readContract({
+      address: policyAddress,
+      abi: HCLAW_POLICY_ABI,
+      functionName: "getBaseCapUsd",
+    });
+    policyCompatCache.set(cacheKey, { value: true, expiresAt: Date.now() + POLICY_COMPAT_CACHE_TTL_MS });
+    return true;
+  } catch {
+    policyCompatCache.set(cacheKey, { value: false, expiresAt: Date.now() + POLICY_COMPAT_CACHE_TTL_MS });
+    return false;
+  }
 }
 
 async function readBaseCapFallback(network?: MonadNetwork): Promise<number> {
@@ -115,6 +146,22 @@ async function readPolicyFromChain(user: Address, network?: MonadNetwork): Promi
     // getCode failed – continue to try the actual call anyway
   }
 
+  if (!(await isPolicyCompatible(client, policyAddress, network))) {
+    const baseCapUsd = await readBaseCapFallback(network);
+    const tier = lockState.tier;
+    const boostBps = tierToBoostBps(tier);
+    const value: PolicyRead = {
+      baseCapUsd,
+      boostedCapUsd: (baseCapUsd * boostBps) / 10_000,
+      boostBps,
+      rebateBps: tierToRebateBps(tier),
+      tier,
+      power: lockState.power,
+    };
+    policyCache.set(cacheKey, { value, expiresAt: Date.now() + POLICY_CACHE_TTL_MS });
+    return value;
+  }
+
   try {
     const [baseCapRaw, userCapRaw, rebateBpsRaw, boostBpsRaw, tierRaw, powerRaw] = await Promise.all([
       client.readContract({
@@ -166,7 +213,7 @@ async function readPolicyFromChain(user: Address, network?: MonadNetwork): Promi
     policyCache.set(cacheKey, { value, expiresAt: Date.now() + POLICY_CACHE_TTL_MS });
     return value;
   } catch (error) {
-    const msg = error instanceof Error ? error.message.split("\n")[0] : String(error);
+    const msg = oneLineError(error);
     console.warn(`[HCLAW] policy read fallback: ${msg}`);
     const baseCapUsd = await readBaseCapFallback(network);
     const tier = lockState.tier;
@@ -232,6 +279,10 @@ export async function getBaseCapUsd(network?: MonadNetwork): Promise<number> {
     // Pre-check contract existence
     const code = await client.getCode({ address: policyAddress });
     if (!code || code === "0x" || code.length <= 2) return readBaseCapFallback(network);
+
+    if (!(await isPolicyCompatible(client, policyAddress, network))) {
+      return readBaseCapFallback(network);
+    }
 
     const baseCapRaw = (await client.readContract({
       address: policyAddress,

@@ -1,4 +1,4 @@
-import { createPublicClient, formatEther, http, type Address } from "viem";
+import { createPublicClient, formatEther, http, type Address, zeroAddress } from "viem";
 import { getHclawLockAddressIfSet } from "@/lib/env";
 import { isMonadTestnet } from "@/lib/network";
 import type { HclawLockPosition, HclawLockState, HclawLockTier } from "@/lib/types";
@@ -6,6 +6,14 @@ import { HCLAW_LOCK_ABI } from "@/lib/vault";
 
 export const HCLAW_LOCK_DURATIONS = [30, 90, 180] as const;
 export type MonadNetwork = "mainnet" | "testnet";
+const LOCK_COMPAT_CACHE_TTL_MS = 60_000;
+const lockCompatCache = new Map<
+  string,
+  {
+    expiresAt: number;
+    value: { deployed: boolean; compatible: boolean; reason?: string };
+  }
+>();
 
 function getMonadRpcUrl(network?: MonadNetwork): string {
   const mainnetRpc =
@@ -76,38 +84,76 @@ export function getEmptyLockState(user: Address): HclawLockState {
   };
 }
 
-export async function getLockContractStatus(network?: MonadNetwork): Promise<{
-  address: Address | null;
-  deployed: boolean;
-}> {
-  const address = getHclawLockAddressIfSet(network);
-  if (!address) return { address: null, deployed: false };
-
-  try {
-    const client = getPublicClient(network);
-    const code = await client.getCode({ address });
-    return { address, deployed: Boolean(code && code !== "0x" && code.length > 2) };
-  } catch {
-    return { address, deployed: false };
-  }
+function formatOneLineError(error: unknown): string {
+  if (error instanceof Error) return error.message.split("\n")[0];
+  return String(error);
 }
 
-export async function getUserLockState(user: Address, network?: MonadNetwork): Promise<HclawLockState> {
-  const lockAddress = getHclawLockAddressIfSet(network);
-  if (!lockAddress) return getEmptyLockState(user);
+async function getLockCompatibility(
+  network: MonadNetwork | undefined,
+  address: Address
+): Promise<{ deployed: boolean; compatible: boolean; reason?: string }> {
+  const networkKey = network ?? (isMonadTestnet() ? "testnet" : "mainnet");
+  const cacheKey = `${networkKey}:${address.toLowerCase()}`;
+  const cached = lockCompatCache.get(cacheKey);
+  if (cached && cached.expiresAt > Date.now()) return cached.value;
 
   const client = getPublicClient(network);
 
-  // Pre-check: does the lock contract have code deployed?
   try {
-    const code = await client.getCode({ address: lockAddress });
+    const code = await client.getCode({ address });
     if (!code || code === "0x" || code.length <= 2) {
-      // No contract deployed at this address – return empty without noisy logs
-      return getEmptyLockState(user);
+      const value = { deployed: false, compatible: false, reason: "No contract code at address" };
+      lockCompatCache.set(cacheKey, { value, expiresAt: Date.now() + LOCK_COMPAT_CACHE_TTL_MS });
+      return value;
     }
-  } catch {
+
+    // Verify this is the expected lock implementation by probing read-only views.
+    await Promise.all([
+      client.readContract({
+        address,
+        abi: HCLAW_LOCK_ABI,
+        functionName: "getUserTier",
+        args: [zeroAddress],
+      }),
+      client.readContract({
+        address,
+        abi: HCLAW_LOCK_ABI,
+        functionName: "getUserLockIds",
+        args: [zeroAddress],
+      }),
+    ]);
+
+    const value = { deployed: true, compatible: true };
+    lockCompatCache.set(cacheKey, { value, expiresAt: Date.now() + LOCK_COMPAT_CACHE_TTL_MS });
+    return value;
+  } catch (error) {
+    const value = { deployed: true, compatible: false, reason: formatOneLineError(error) };
+    lockCompatCache.set(cacheKey, { value, expiresAt: Date.now() + LOCK_COMPAT_CACHE_TTL_MS });
+    return value;
+  }
+}
+
+export async function getLockContractStatus(network?: MonadNetwork): Promise<{
+  address: Address | null;
+  deployed: boolean;
+  compatible: boolean;
+  reason?: string;
+}> {
+  const address = getHclawLockAddressIfSet(network);
+  if (!address) return { address: null, deployed: false, compatible: false, reason: "Address not configured" };
+
+  const compatibility = await getLockCompatibility(network, address);
+  return { address, ...compatibility };
+}
+
+export async function getUserLockState(user: Address, network?: MonadNetwork): Promise<HclawLockState> {
+  const status = await getLockContractStatus(network);
+  if (!status.address || !status.deployed || !status.compatible) {
     return getEmptyLockState(user);
   }
+  const lockAddress = status.address;
+  const client = getPublicClient(network);
 
   try {
     const [tierRaw, powerRaw, lockIdsRaw] = await Promise.all([
@@ -173,7 +219,7 @@ export async function getUserLockState(user: Address, network?: MonadNetwork): P
       positions,
     };
   } catch (error) {
-    const msg = error instanceof Error ? error.message.split("\n")[0] : String(error);
+    const msg = formatOneLineError(error);
     console.warn(`[HCLAW] getUserLockState fallback for ${user.slice(0, 10)}…: ${msg}`);
     return getEmptyLockState(user);
   }

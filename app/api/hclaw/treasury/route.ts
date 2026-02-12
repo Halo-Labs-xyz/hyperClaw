@@ -1,22 +1,32 @@
 import { NextResponse } from "next/server";
 import { getAgenticVaultStatus, getTreasurySummary, recordTreasuryFlow } from "@/lib/agentic-vault";
 import { requireAuth } from "@/lib/auth";
+import { getNetworkState } from "@/lib/network";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
+
+function parseNetwork(value: string | null): "mainnet" | "testnet" | null {
+  if (value === "mainnet" || value === "testnet") return value;
+  return null;
+}
 
 export async function GET(request: Request) {
   try {
     const { searchParams } = new URL(request.url);
     const limit = Number.parseInt(searchParams.get("limit") || "200", 10);
+    const network =
+      parseNetwork(searchParams.get("network")) ??
+      (getNetworkState().monadTestnet ? "testnet" : "mainnet");
 
     const [summary, agenticVault] = await Promise.all([
       getTreasurySummary(Number.isFinite(limit) ? limit : 200),
-      getAgenticVaultStatus(),
+      getAgenticVaultStatus(network),
     ]);
 
     return NextResponse.json({
       ...summary,
+      network,
       agenticVault,
     });
   } catch (error) {

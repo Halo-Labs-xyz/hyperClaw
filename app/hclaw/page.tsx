@@ -47,6 +47,8 @@ interface HclawPageData {
   lockContract?: {
     address: string | null;
     deployed: boolean;
+    compatible?: boolean;
+    reason?: string;
   };
   points?: {
     epoch: { epochId: string; startTs: number; endTs: number; status: "open" | "closing" | "closed" };
@@ -227,7 +229,7 @@ export default function HclawHubPage() {
         fetch(`/api/hclaw/lock${q}`, { cache: "no-store" }),
         fetch(`/api/hclaw/points${q}`, { cache: "no-store" }),
         fetch(`/api/hclaw/rewards${q}`, { cache: "no-store" }),
-        fetch(`/api/hclaw/treasury`, { cache: "no-store" }),
+        fetch(`/api/hclaw/treasury?network=${activeNetwork}`, { cache: "no-store" }),
       ]);
 
       const [stateJson, lockJson, pointsJson, rewardsJson, treasuryJson] = await Promise.all([
@@ -316,6 +318,7 @@ export default function HclawHubPage() {
       const preflight = await fetch(`/api/hclaw/lock?network=${activeNetwork}`, { cache: "no-store" });
       const preflightBody = await preflight.json();
       const deployed = Boolean(preflightBody?.contract?.deployed);
+      const compatible = preflightBody?.contract?.compatible !== false;
       if (preflightBody?.contract) {
         setData((prev) => ({ ...prev, lockContract: preflightBody.contract }));
       }
@@ -324,6 +327,12 @@ export default function HclawHubPage() {
           activeNetwork === "mainnet"
             ? "Lock contract has no code on mainnet. Set NEXT_PUBLIC_HCLAW_LOCK_ADDRESS_MAINNET to the deployed mainnet lock contract."
             : "Lock contract has no code on testnet. Set NEXT_PUBLIC_HCLAW_LOCK_ADDRESS_TESTNET to the deployed testnet lock contract."
+        );
+        return;
+      }
+      if (!compatible) {
+        setLockStatus(
+          `Lock contract is incompatible on ${activeNetwork}. ${String(preflightBody?.contract?.reason || "Set the correct HCLAW lock address for this network.")}`
         );
         return;
       }
@@ -510,10 +519,15 @@ export default function HclawHubPage() {
                     Lock contract:{" "}
                     {data.lockContract?.address ? (
                       data.lockContract?.deployed
-                        ? "deployed"
+                        ? data.lockContract?.compatible === false
+                          ? `incompatible on ${activeNetwork}`
+                          : "deployed"
                         : `missing code on ${activeNetwork}`
                     ) : "not configured"}
                   </div>
+                  {data.lockContract?.compatible === false && data.lockContract?.reason && (
+                    <div>Reason: {data.lockContract.reason}</div>
+                  )}
                 </div>
 
                 <div className="flex flex-wrap gap-2">

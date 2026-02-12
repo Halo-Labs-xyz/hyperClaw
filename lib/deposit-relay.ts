@@ -264,10 +264,54 @@ function getVaultAddress(network?: MonadNetwork): Address | undefined {
 
   const preferred = selectedNetwork === "mainnet" ? mainnetCandidates : testnetCandidates;
   const fallback = process.env.NEXT_PUBLIC_VAULT_ADDRESS;
-  const value = [...preferred, fallback].find(
-    (candidate) => typeof candidate === "string" && /^0x[a-fA-F0-9]{40}$/.test(candidate.trim())
-  );
-  return value?.trim() as Address | undefined;
+  const alternates = selectedNetwork === "mainnet" ? testnetCandidates : mainnetCandidates;
+  const seen = new Set<string>();
+  const candidates = [...preferred, ...alternates, fallback]
+    .filter(
+      (candidate): candidate is string =>
+        typeof candidate === "string" && /^0x[a-fA-F0-9]{40}$/.test(candidate.trim())
+    )
+    .map((candidate) => candidate.trim())
+    .filter((candidate) => {
+      const key = candidate.toLowerCase();
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    }) as Address[];
+
+  return candidates[0];
+}
+
+function getVaultAddressCandidates(network?: MonadNetwork): Address[] {
+  const selectedNetwork = network ?? (isMonadTestnet() ? "testnet" : "mainnet");
+
+  const mainnetCandidates = [
+    process.env.MONAD_MAINNET_VAULT_ADDRESS,
+    process.env.NEXT_PUBLIC_MONAD_MAINNET_VAULT_ADDRESS,
+    process.env.NEXT_PUBLIC_VAULT_ADDRESS_MAINNET,
+  ];
+  const testnetCandidates = [
+    process.env.MONAD_TESTNET_VAULT_ADDRESS,
+    process.env.NEXT_PUBLIC_MONAD_TESTNET_VAULT_ADDRESS,
+    process.env.NEXT_PUBLIC_VAULT_ADDRESS_TESTNET,
+  ];
+  const preferred = selectedNetwork === "mainnet" ? mainnetCandidates : testnetCandidates;
+  const alternates = selectedNetwork === "mainnet" ? testnetCandidates : mainnetCandidates;
+  const fallback = process.env.NEXT_PUBLIC_VAULT_ADDRESS;
+
+  const seen = new Set<string>();
+  return [...preferred, ...alternates, fallback]
+    .filter(
+      (candidate): candidate is string =>
+        typeof candidate === "string" && /^0x[a-fA-F0-9]{40}$/.test(candidate.trim())
+    )
+    .map((candidate) => candidate.trim() as Address)
+    .filter((candidate) => {
+      const key = candidate.toLowerCase();
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
 }
 
 function getMonadChain(network?: MonadNetwork) {
@@ -494,9 +538,6 @@ export async function processVaultTx(
     // callers can still get withdrawal confirmation details.
   }
 
-  const vaultAddress = getVaultAddress(options?.network);
-  if (!vaultAddress) return null;
-
   try {
     const preferred = options?.network;
     const networks: MonadNetwork[] = preferred
@@ -526,13 +567,29 @@ export async function processVaultTx(
       return null;
     }
     const client = getMonadClient(activeNetwork ?? undefined);
+    const configuredVaultAddresses = new Set(
+      getVaultAddressCandidates(activeNetwork ?? options?.network).map((addr) => addr.toLowerCase())
+    );
+    let warnedOnUnconfiguredVault = false;
 
     for (const log of receipt.logs) {
-      if (log.address.toLowerCase() !== vaultAddress.toLowerCase()) continue;
-
       try {
         const topic0 = log.topics[0];
         if (!topic0 || !log.data || log.topics.length < 3) continue;
+        if (topic0 !== DEPOSITED_TOPIC && topic0 !== WITHDRAWN_TOPIC) continue;
+
+        const eventVaultAddress = log.address as Address;
+        const isConfiguredVault =
+          configuredVaultAddresses.size === 0 ||
+          configuredVaultAddresses.has(eventVaultAddress.toLowerCase());
+
+        if (!isConfiguredVault && !warnedOnUnconfiguredVault) {
+          warnedOnUnconfiguredVault = true;
+          console.warn(
+            `[DepositRelay] Vault event in tx ${txHash} came from ${eventVaultAddress},` +
+              " which is not in configured vault addresses. Parsing event anyway."
+          );
+        }
 
         if (topic0 === DEPOSITED_TOPIC) {
           const agentIdBytes = log.topics[1] as Hex;
@@ -750,7 +807,7 @@ export async function processVaultTx(
               const agentIdBytesForRead = ("0x" +
                 agentIdHex.padStart(64, "0")) as `0x${string}`;
               const remainingShares = (await client.readContract({
-                address: vaultAddress,
+                address: eventVaultAddress,
                 abi: VAULT_ABI,
                 functionName: "userShares",
                 args: [agentIdBytesForRead, userAddress],

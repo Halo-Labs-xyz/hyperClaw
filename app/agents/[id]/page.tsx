@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import { useParams } from "next/navigation";
-import { useAccount, useBalance, useWriteContract, useReadContract, useWaitForTransactionReceipt, useSwitchChain } from "wagmi";
+import { useAccount, useBalance, useWriteContract, useReadContract, useWaitForTransactionReceipt, useSwitchChain, usePublicClient } from "wagmi";
 import { parseEther, parseUnits, formatEther, type Address } from "viem";
 import Link from "next/link";
 import { usePrivy } from "@privy-io/react-auth";
@@ -106,6 +106,7 @@ export default function AgentDetailPage() {
   const { address, isConnected } = useAccount();
   const vaultChainId = monadTestnet ? monadTestnetChain.id : monadMainnet.id;
   const activeNetwork = monadTestnet ? "testnet" : "mainnet";
+  const publicClient = usePublicClient({ chainId: vaultChainId });
   const { data: balance } = useBalance({ address, chainId: vaultChainId });
 
   const [agent, setAgent] = useState<Agent | null>(null);
@@ -248,6 +249,31 @@ export default function AgentDetailPage() {
     return (activeNetwork === "mainnet" ? mainnet : testnet) ?? fallback;
   }, [activeNetwork]);
   const agentIdBytes = agentIdToBytes32(agentId);
+
+  const verifyVaultContract = useCallback(async (): Promise<{ ok: true } | { ok: false; reason: string }> => {
+    if (!vaultAddress) {
+      return { ok: false, reason: "Vault contract is not configured. Deposits are disabled." };
+    }
+    if (!publicClient) {
+      return { ok: false, reason: "Vault RPC is unavailable. Try again." };
+    }
+
+    try {
+      const code = await publicClient.getBytecode({ address: vaultAddress });
+      if (!code || code === "0x") {
+        return {
+          ok: false,
+          reason:
+            `Configured vault ${vaultAddress} has no deployed contract code on ${activeNetwork}. ` +
+            "Deposits and withdrawals are blocked to prevent fund loss.",
+        };
+      }
+      return { ok: true };
+    } catch (error) {
+      const detail = error instanceof Error ? error.message : "Unknown RPC error";
+      return { ok: false, reason: `Vault verification failed: ${detail}` };
+    }
+  }, [activeNetwork, publicClient, vaultAddress]);
 
   // Read user shares from vault
   const { data: userShares } = useReadContract({
@@ -565,12 +591,10 @@ export default function AgentDetailPage() {
     setDepositing(true);
     setDepositStatus("");
 
-    // Check if vault contract is deployed
-    const hasVault = vaultAddress && vaultAddress.startsWith("0x") && vaultAddress.length === 42;
-
     try {
-      if (!hasVault) {
-        setDepositStatus("Vault contract is not configured. Deposits are disabled.");
+      const vaultCheck = await verifyVaultContract();
+      if (!vaultCheck.ok) {
+        setDepositStatus(vaultCheck.reason);
         setDepositing(false);
         return;
       }
@@ -625,8 +649,7 @@ export default function AgentDetailPage() {
   };
 
   const handleWithdraw = async () => {
-    const hasVault = vaultAddress && vaultAddress.startsWith("0x") && vaultAddress.length === 42;
-    if (!hasVault || !address || !userShares || !totalShares || totalShares === BigInt(0)) return;
+    if (!address || !userShares || !totalShares || totalShares === BigInt(0)) return;
     let sharesWei: bigint;
     try {
       sharesWei = parseUnits(withdrawShares || "0", 18);
@@ -648,6 +671,12 @@ export default function AgentDetailPage() {
     setWithdrawing(true);
     setWithdrawStatus("");
     try {
+      const vaultCheck = await verifyVaultContract();
+      if (!vaultCheck.ok) {
+        setWithdrawStatus(vaultCheck.reason);
+        return;
+      }
+
       await switchChainAsync({ chainId: vaultChainId });
       const hash = await writeContractAsync({
         address: vaultAddress!,
