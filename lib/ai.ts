@@ -30,6 +30,10 @@ const OPENAI_QUOTA_COOLDOWN_MS = Math.max(
   60_000,
   parseInt(process.env.OPENAI_QUOTA_COOLDOWN_MS || "900000", 10)
 );
+const OPENAI_REQUEST_TIMEOUT_MS = Math.max(
+  5000,
+  parseInt(process.env.OPENAI_REQUEST_TIMEOUT_MS || "60000", 10)
+);
 const GEMINI_MAX_CONCURRENT_REQUESTS = Math.max(
   1,
   parseInt(process.env.GEMINI_MAX_CONCURRENT_REQUESTS || "1", 10)
@@ -1090,9 +1094,17 @@ async function callModelRoute(
 
 function getOpenAI(): OpenAI {
   if (!openaiClient) {
-    const apiKey = process.env.OPENAI_API_KEY;
-    if (!apiKey) throw new Error("OPENAI_API_KEY not set");
-    openaiClient = new OpenAI({ apiKey });
+    const baseURL = process.env.OPENAI_API_BASE_URL?.trim();
+    const apiKey = process.env.OPENAI_API_KEY?.trim();
+    // When using a custom base URL (e.g. Ollama via ngrok), apiKey can be optional; use placeholder for local servers
+    if (!baseURL && !apiKey) throw new Error("OPENAI_API_KEY or OPENAI_API_BASE_URL must be set");
+    openaiClient = new OpenAI({
+      apiKey: apiKey || "local",
+      timeout: OPENAI_REQUEST_TIMEOUT_MS,
+      ...(baseURL ? { baseURL: baseURL.replace(/\/$/, "") } : {}),
+      // ngrok free tier shows 403 interstitial unless we skip browser warning (use "1" per ngrok docs)
+      ...(baseURL ? { defaultHeaders: { "ngrok-skip-browser-warning": "1" } } : {}),
+    });
   }
   return openaiClient;
 }
@@ -1254,7 +1266,7 @@ Provide your trading decision as JSON:`;
 
   let content: string | null = null;
   const modelChain = getConfiguredModelChain();
-  const hasOpenAiKey = Boolean(process.env.OPENAI_API_KEY?.trim());
+  const hasOpenAiKey = Boolean(process.env.OPENAI_API_KEY?.trim() || process.env.OPENAI_API_BASE_URL?.trim());
   const hasGeminiKey = Boolean(getGeminiApiKey());
   const hasNvidiaKey = Boolean(getNvidiaApiKey());
   let lastError: unknown = null;
