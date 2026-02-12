@@ -298,9 +298,13 @@ function toAgentRow(agent: Agent): AgentRow {
     vault_tvl_usd: agent.vaultTvlUsd,
     depositor_count: agent.depositorCount,
     pending_approval: agent.pendingApproval ?? null,
-    ai_api_key_provider: agent.aiApiKey?.provider ?? null,
-    ai_api_key_encrypted: agent.aiApiKey?.encryptedKey ?? null,
-    aip_attestation: agent.aipAttestation ?? null,
+    ...(agent.aiApiKey
+      ? {
+          ai_api_key_provider: agent.aiApiKey.provider,
+          ai_api_key_encrypted: agent.aiApiKey.encryptedKey,
+        }
+      : {}),
+    ...(agent.aipAttestation ? { aip_attestation: agent.aipAttestation } : {}),
   };
 }
 
