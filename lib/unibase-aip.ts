@@ -18,6 +18,18 @@ import { getTradeDecision } from "./ai";
 import { getEnrichedMarketData, getAccountState, getHistoricalPrices } from "./hyperliquid";
 import { ensureAgentOnchainAttestation } from "./agent-attestation";
 
+function parseBool(value: string | undefined, fallback: boolean): boolean {
+  if (value === undefined || value.trim() === "") return fallback;
+  const normalized = value.trim().toLowerCase();
+  if (["1", "true", "yes", "on"].includes(normalized)) return true;
+  if (["0", "false", "no", "off"].includes(normalized)) return false;
+  return fallback;
+}
+
+function isAttestationRequired(): boolean {
+  return parseBool(process.env.MONAD_AGENT_ATTESTATION_REQUIRED, false);
+}
+
 // ============================================
 // Types - AIP SDK Interface
 // ============================================
@@ -480,10 +492,20 @@ export async function registerAIPAgent(
     throw new Error("DIRECT mode requires publicEndpoint parameter");
   }
 
-  const attestationResult = await ensureAgentOnchainAttestation(hyperClawAgentId, {
-    reason: "aip_register",
-  });
-  agent = attestationResult.agent;
+  try {
+    const attestationResult = await ensureAgentOnchainAttestation(hyperClawAgentId, {
+      reason: "aip_register",
+    });
+    agent = attestationResult.agent;
+  } catch (error) {
+    if (isAttestationRequired()) {
+      throw error;
+    }
+    const message = error instanceof Error ? error.message : String(error);
+    console.warn(
+      `[AIP] Continuing registration without on-chain attestation for ${hyperClawAgentId}: ${message}`
+    );
+  }
 
   const config = buildAgentConfig(agent, mode, publicEndpoint);
   const handler = createAgentHandler(hyperClawAgentId);

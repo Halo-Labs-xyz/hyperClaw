@@ -7,6 +7,18 @@ import { type Agent, type AgentConfig } from "@/lib/types";
 import { getNetworkState } from "@/lib/network";
 import { ensureAgentOnchainAttestation } from "@/lib/agent-attestation";
 
+function parseBool(value: string | undefined, fallback: boolean): boolean {
+  if (value === undefined || value.trim() === "") return fallback;
+  const normalized = value.trim().toLowerCase();
+  if (["1", "true", "yes", "on"].includes(normalized)) return true;
+  if (["0", "false", "no", "off"].includes(normalized)) return false;
+  return fallback;
+}
+
+function isAttestationRequired(): boolean {
+  return parseBool(process.env.MONAD_AGENT_ATTESTATION_REQUIRED, false);
+}
+
 function normalizeString(value: unknown): string | undefined {
   if (typeof value !== "string") return undefined;
   const trimmed = value.trim();
@@ -65,12 +77,27 @@ async function finalizeCreatedAgentResponse(
     );
   } catch (attestationError) {
     console.error(`[AgentCreate] Attestation failed for ${agent.id}; pausing agent`, attestationError);
+    let pausedAgent: Agent = agent;
     try {
-      await updateAgent(agent.id, { status: "paused" });
+      const updated = await updateAgent(agent.id, { status: "paused" });
+      if (updated) pausedAgent = updated;
     } catch (pauseError) {
       console.error(`[AgentCreate] Failed to pause unattested agent ${agent.id}:`, pauseError);
     }
-    throw attestationError;
+    if (isAttestationRequired()) {
+      throw attestationError;
+    }
+    const message = attestationError instanceof Error ? attestationError.message : "unknown attestation error";
+    return NextResponse.json(
+      {
+        agent: pausedAgent,
+        ...extras,
+        attestation: null,
+        warning: "Agent created but on-chain attestation failed. Agent is paused until attested.",
+        attestationError: process.env.NODE_ENV === "development" ? message : undefined,
+      },
+      { status: 201 }
+    );
   }
 }
 
