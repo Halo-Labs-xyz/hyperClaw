@@ -1,9 +1,11 @@
 import OpenAI from "openai";
+import Anthropic from "@anthropic-ai/sdk";
 import axios from "axios";
 import { type TradeDecision, type MarketData, type IndicatorConfig } from "./types";
 import { evaluateIndicator, formatIndicatorForAI } from "./indicators";
 
 let openaiClient: OpenAI | null = null;
+let anthropicClient: Anthropic | null = null;
 
 const OPENAI_MAX_CONCURRENT_REQUESTS = Math.max(
   1,
@@ -120,7 +122,7 @@ let nvidiaRateLimitedUntilMs = 0;
 const modelCooldownUntilMs = new Map<string, number>();
 let balancedProviderStartOffset = 0;
 
-type AiProvider = "openai" | "gemini" | "nvidia";
+type AiProvider = "openai" | "gemini" | "nvidia" | "anthropic";
 
 interface ModelRoute {
   provider: AiProvider;
@@ -612,16 +614,9 @@ function getConfiguredNvidiaModels(): string[] {
 
 function inferProviderFromModel(model: string): AiProvider {
   const normalized = normalizeModelId(model);
-  if (normalized.startsWith("gemini") || normalized.startsWith("gemma")) {
-    return "gemini";
-  }
-  if (
-    normalized.startsWith("gpt-") ||
-    normalized.startsWith("o1") ||
-    normalized.startsWith("o3")
-  ) {
-    return "openai";
-  }
+  if (normalized.startsWith("claude")) return "anthropic";
+  if (normalized.startsWith("gemini") || normalized.startsWith("gemma")) return "gemini";
+  if (normalized.startsWith("gpt-") || normalized.startsWith("o1") || normalized.startsWith("o3")) return "openai";
   return "nvidia";
 }
 
@@ -671,7 +666,7 @@ function getConfiguredModelChain(): ModelRoute[] {
     if (!modelRaw) continue;
 
     const provider =
-      providerRaw === "openai" || providerRaw === "gemini" || providerRaw === "nvidia"
+      providerRaw === "openai" || providerRaw === "gemini" || providerRaw === "nvidia" || providerRaw === "anthropic"
         ? (providerRaw as AiProvider)
         : inferProviderFromModel(modelRaw);
     const normalizedModel = provider === "gemini" ? modelRaw.replace(/\s+/g, "-") : modelRaw;
@@ -691,6 +686,11 @@ function getGeminiApiKey(): string | null {
 
 function getNvidiaApiKey(): string | null {
   const key = (process.env.NVIDIA_API_KEY || "").trim();
+  return key || null;
+}
+
+function getAnthropicApiKey(): string | null {
+  const key = (process.env.ANTHROPIC_API_KEY || "").trim();
   return key || null;
 }
 
@@ -1054,14 +1054,15 @@ async function callOpenAiModel(
           { role: "user", content: userPrompt },
         ],
         temperature: 0.3,
-        max_tokens: 500,
+        max_tokens: process.env.OPENAI_API_BASE_URL ? 1000 : 500,
         response_format: { type: "json_object" },
       }),
     `OpenAI ${model}`,
     model
   );
 
-  const content = response.choices[0]?.message?.content ?? "";
+  const msg = response.choices[0]?.message;
+  const content = (msg?.content ?? (msg as { reasoning?: string })?.reasoning ?? "").trim();
   const promptTokens = response.usage?.prompt_tokens;
   const completionTokens = response.usage?.completion_tokens;
   adjustPromptTokenEstimate("openai", model, estimatedInputTokens, promptTokens);
@@ -1078,17 +1079,48 @@ async function callOpenAiModel(
   };
 }
 
+async function callAnthropicModel(
+  model: string,
+  systemPrompt: string,
+  userPrompt: string
+): Promise<ProviderCallResult> {
+  const anthropic = getAnthropic();
+  const response = await anthropic.messages.create({
+    model,
+    max_tokens: 1024,
+    system: systemPrompt,
+    messages: [{ role: "user", content: userPrompt }],
+  });
+  const text = response.content
+    .filter((b) => b.type === "text")
+    .map((b) => (b as { text: string }).text)
+    .join("")
+    .trim();
+  if (!text) throw new Error(`Anthropic ${model} returned empty content`);
+  return {
+    content: text,
+    promptTokens: response.usage?.input_tokens,
+    completionTokens: response.usage?.output_tokens,
+  };
+}
+
+function getAnthropic(): Anthropic {
+  if (!anthropicClient) {
+    const key = getAnthropicApiKey();
+    if (!key) throw new Error("ANTHROPIC_API_KEY not set");
+    anthropicClient = new Anthropic({ apiKey: key });
+  }
+  return anthropicClient;
+}
+
 async function callModelRoute(
   route: ModelRoute,
   systemPrompt: string,
   userPrompt: string
 ): Promise<ProviderCallResult> {
-  if (route.provider === "openai") {
-    return callOpenAiModel(route.model, systemPrompt, userPrompt);
-  }
-  if (route.provider === "gemini") {
-    return withGeminiRetry(route.model, systemPrompt, userPrompt);
-  }
+  if (route.provider === "openai") return callOpenAiModel(route.model, systemPrompt, userPrompt);
+  if (route.provider === "gemini") return withGeminiRetry(route.model, systemPrompt, userPrompt);
+  if (route.provider === "anthropic") return callAnthropicModel(route.model, systemPrompt, userPrompt);
   return withNvidiaRetry(route.model, systemPrompt, userPrompt);
 }
 
@@ -1269,12 +1301,14 @@ Provide your trading decision as JSON:`;
   const hasOpenAiKey = Boolean(process.env.OPENAI_API_KEY?.trim() || process.env.OPENAI_API_BASE_URL?.trim());
   const hasGeminiKey = Boolean(getGeminiApiKey());
   const hasNvidiaKey = Boolean(getNvidiaApiKey());
+  const hasAnthropicKey = Boolean(getAnthropicApiKey());
   let lastError: unknown = null;
 
   for (const route of modelChain) {
     if (route.provider === "openai" && !hasOpenAiKey) continue;
     if (route.provider === "gemini" && !hasGeminiKey) continue;
     if (route.provider === "nvidia" && !hasNvidiaKey) continue;
+    if (route.provider === "anthropic" && !hasAnthropicKey) continue;
 
     try {
       const result = await callModelRoute(route, SYSTEM_PROMPT, userPrompt);

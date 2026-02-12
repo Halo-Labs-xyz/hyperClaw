@@ -33,6 +33,7 @@
     "docker:ironclaw:aws:ps": "bash scripts/ironclaw-aws-stack.sh ps"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^0.74.0",
     "@aws-sdk/client-s3": "^3.985.0",
     "@lit-protocol/auth": "^8.2.3",
     "@lit-protocol/contracts": "^0.9.1",
