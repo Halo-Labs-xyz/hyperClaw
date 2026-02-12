@@ -82,7 +82,9 @@ export default function AgentDetailPage() {
   const { user } = usePrivy();
   const { monadTestnet } = useNetwork();
   const { address, isConnected } = useAccount();
-  const { data: balance } = useBalance({ address });
+  const vaultChainId = monadTestnet ? monadTestnetChain.id : monadMainnet.id;
+  const activeNetwork = monadTestnet ? "testnet" : "mainnet";
+  const { data: balance } = useBalance({ address, chainId: vaultChainId });
 
   const [agent, setAgent] = useState<Agent | null>(null);
   const [summaryAgent, setSummaryAgent] = useState<AgentSummary | null>(null);
@@ -194,11 +196,6 @@ export default function AgentDetailPage() {
   const { writeContractAsync } = useWriteContract();
   const { switchChainAsync } = useSwitchChain();
 
-  // Determine which chain the vault is on
-  const vaultChainId = process.env.NEXT_PUBLIC_MONAD_TESTNET === "true"
-    ? monadTestnetChain.id
-    : monadMainnet.id;
-
   // Watch for deposit tx confirmation
   const { isSuccess: depositConfirmed } = useWaitForTransactionReceipt({
     hash: depositTxHash,
@@ -214,6 +211,7 @@ export default function AgentDetailPage() {
 
   // Read user shares from vault
   const { data: userShares } = useReadContract({
+    chainId: vaultChainId,
     address: vaultAddress,
     abi: VAULT_ABI,
     functionName: "userShares",
@@ -222,6 +220,7 @@ export default function AgentDetailPage() {
   });
 
   const { data: totalShares } = useReadContract({
+    chainId: vaultChainId,
     address: vaultAddress,
     abi: VAULT_ABI,
     functionName: "totalShares",
@@ -236,8 +235,7 @@ export default function AgentDetailPage() {
       if (address) headers["x-owner-wallet-address"] = address.toLowerCase();
       if (user?.id) headers["x-owner-privy-id"] = user.id;
 
-      const network = monadTestnet ? "testnet" : "mainnet";
-      const summaryRes = await fetch(`/api/agents/${agentId}?view=summary&network=${network}`, { headers });
+      const summaryRes = await fetch(`/api/agents/${agentId}?view=summary&network=${activeNetwork}`, { headers });
       const summaryData = await summaryRes.json();
       if (!summaryRes.ok) {
         throw new Error(summaryData?.error ?? "Failed to load agent");
@@ -315,7 +313,7 @@ export default function AgentDetailPage() {
     } finally {
       setLoading(false);
     }
-  }, [address, agentId, monadTestnet, user?.id]);
+  }, [activeNetwork, address, agentId, user?.id]);
 
   const fetchChat = useCallback(async () => {
     try {
@@ -335,7 +333,7 @@ export default function AgentDetailPage() {
 
     setCapPreviewLoading(true);
     try {
-      const res = await fetch(`/api/hclaw/state?user=${address}&agentId=${agentId}`);
+      const res = await fetch(`/api/hclaw/state?user=${address}&agentId=${agentId}&network=${activeNetwork}`);
       const data = await res.json();
       const cap = data?.userContext?.cap;
       if (cap) {
@@ -355,7 +353,7 @@ export default function AgentDetailPage() {
     } finally {
       setCapPreviewLoading(false);
     }
-  }, [address, agentId]);
+  }, [activeNetwork, address, agentId]);
 
   useEffect(() => {
     fetchAgent();
@@ -414,7 +412,7 @@ export default function AgentDetailPage() {
       fetch("/api/deposit", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ txHash: depositTxHash }),
+        body: JSON.stringify({ txHash: depositTxHash, network: activeNetwork }),
       })
         .then((res) => res.json())
         .then((data) => {
@@ -453,7 +451,7 @@ export default function AgentDetailPage() {
           setDepositTxHash(undefined);
         });
     }
-  }, [depositConfirmed, depositTxHash, fetchAgent, fetchCapPreview]);
+  }, [activeNetwork, depositConfirmed, depositTxHash, fetchAgent, fetchCapPreview]);
 
   useEffect(() => {
     if (withdrawConfirmed && withdrawTxHash) {
@@ -461,7 +459,7 @@ export default function AgentDetailPage() {
       fetch("/api/deposit", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ txHash: withdrawTxHash }),
+        body: JSON.stringify({ txHash: withdrawTxHash, network: activeNetwork }),
       })
         .then((res) => res.json())
         .then((data) => {
@@ -484,7 +482,7 @@ export default function AgentDetailPage() {
           setWithdrawTxHash(undefined);
         });
     }
-  }, [withdrawConfirmed, withdrawTxHash, fetchAgent, fetchCapPreview]);
+  }, [activeNetwork, withdrawConfirmed, withdrawTxHash, fetchAgent, fetchCapPreview]);
 
   useEffect(() => {
     if (tab === "chat") {
@@ -605,19 +603,6 @@ export default function AgentDetailPage() {
       setWithdrawStatus(e instanceof Error ? e.message : "Withdraw failed.");
     } finally {
       setWithdrawing(false);
-    }
-  };
-
-  const handleTick = async () => {
-    setTicking(true);
-    try {
-      const res = await fetch(`/api/agents/${agentId}/tick`, { method: "POST" });
-      await res.json();
-      await fetchAgent();
-    } catch (e) {
-      console.error("Tick error:", e);
-    } finally {
-      setTicking(false);
     }
   };
 
@@ -781,8 +766,8 @@ export default function AgentDetailPage() {
         <header className="glass sticky top-0 z-50">
           <div className="max-w-6xl mx-auto px-4 sm:px-6 py-4 flex items-center justify-between">
             <Link href="/agents" className="flex items-center gap-3 group">
-              <div className="w-9 h-9 rounded-lg bg-accent/10 border border-accent/20 flex items-center justify-center group-hover:bg-accent/15 transition-colors">
-                <HyperclawIcon className="text-accent" size={18} />
+              <div className="w-11 h-11 rounded-lg bg-white/20 border border-white/30 flex items-center justify-center group-hover:bg-white/25 transition-colors">
+                <HyperclawIcon className="text-accent" size={28} />
               </div>
               <span className="text-sm font-semibold">Back to Agents</span>
             </Link>
@@ -930,8 +915,8 @@ export default function AgentDetailPage() {
         <div className="max-w-7xl mx-auto px-4 sm:px-6 py-4 flex items-center justify-between">
           <div className="flex items-center gap-2 text-sm min-w-0">
             <Link href="/" className="flex items-center gap-3 group shrink-0">
-              <div className="w-9 h-9 rounded-lg bg-accent/10 border border-accent/20 flex items-center justify-center group-hover:bg-accent/15 transition-colors">
-                <HyperclawIcon className="text-accent" size={18} />
+              <div className="w-11 h-11 rounded-lg bg-white/20 border border-white/30 flex items-center justify-center group-hover:bg-white/25 transition-colors">
+                <HyperclawIcon className="text-accent" size={28} />
               </div>
             </Link>
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="text-dim shrink-0"><path d="M9 18l6-6-6-6" /></svg>
@@ -941,18 +926,6 @@ export default function AgentDetailPage() {
           </div>
           <div className="flex items-center gap-2 sm:gap-3">
             <NetworkToggle />
-            <button
-              onClick={handleTick}
-              disabled={ticking || agent.status !== "active"}
-              className="btn-primary px-4 py-2 text-sm shrink-0 disabled:opacity-40"
-            >
-              {ticking ? (
-                <span className="flex items-center gap-2">
-                  <span className="w-3.5 h-3.5 border-2 border-background/30 border-t-background rounded-full animate-spin" />
-                  Running...
-                </span>
-              ) : agent.autonomy?.mode === "manual" ? "Trigger AI Trade" : "Force Tick"}
-            </button>
           </div>
         </div>
       </header>

@@ -16,13 +16,18 @@ function parseUser(value: string | null): Address | null {
   return trimmed as Address;
 }
 
+function parseNetwork(value: string | null): "mainnet" | "testnet" | null {
+  if (value === "mainnet" || value === "testnet") return value;
+  return null;
+}
+
 export async function GET(request: Request) {
   try {
     const { searchParams } = new URL(request.url);
     const user = parseUser(searchParams.get("user"));
     const agentId = searchParams.get("agentId") ?? undefined;
     const defaultNetwork = process.env.NEXT_PUBLIC_MONAD_TESTNET === "true" ? "testnet" : "mainnet";
-    const network = searchParams.get("network") === "testnet" ? "testnet" : defaultNetwork;
+    const network = parseNetwork(searchParams.get("network")) ?? defaultNetwork;
 
     const state = await getHclawState(network, {
       userAddress: user ?? undefined,
@@ -47,8 +52,8 @@ export async function GET(request: Request) {
     }
 
     const [capContext, lockState, points, claimable] = await Promise.all([
-      getUserCapContext(user, agentId),
-      getUserLockState(user),
+      getUserCapContext(user, agentId, network),
+      getUserLockState(user, network),
       getUserPointsSummary(user),
       getClaimableSummary(user),
     ]);

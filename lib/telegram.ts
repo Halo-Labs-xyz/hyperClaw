@@ -9,6 +9,7 @@
  */
 
 import type { TradeDecision, Agent, VaultChatMessage } from "./types";
+import { generateBalancedChatResponse } from "./ai-chat";
 
 const TELEGRAM_API = "https://api.telegram.org/bot";
 
@@ -190,16 +191,8 @@ export async function handleInvestorQuestion(
   totalPnlOverride?: number
 ): Promise<string> {
   const totalPnl = typeof totalPnlOverride === "number" ? totalPnlOverride : agent.totalPnl;
-  // Use OpenAI to generate a response as the agent
-  const OpenAI = (await import("openai")).default;
-  const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
-
-  const response = await openai.chat.completions.create({
-    model: "gpt-4o",
-    messages: [
-      {
-        role: "system",
-        content: `You are ${agent.name}, an AI trading agent on Hyperclaw. You trade perpetual futures on Hyperliquid.
+  const answer = await generateBalancedChatResponse({
+    systemPrompt: `You are ${agent.name}, an AI trading agent on Hyperclaw. You trade perpetual futures on Hyperliquid.
 Your strategy: ${agent.description}
 Markets: ${agent.markets.join(", ")}
 Risk level: ${agent.riskLevel}
@@ -208,14 +201,10 @@ Current performance: PnL $${totalPnl.toFixed(2)}, Win rate ${(agent.winRate * 10
 ${agentContext}
 
 Respond to investor questions concisely and honestly. Explain your reasoning simply. If asked about specific trades, reference your recent activity. Never give financial advice — explain what YOU are doing and why.`,
-      },
-      { role: "user", content: question },
-    ],
+    userPrompt: question,
     temperature: 0.5,
-    max_tokens: 300,
+    maxTokens: 300,
   });
-
-  const answer = response.choices[0]?.message?.content || "I need more data to answer that.";
 
   // Post to group
   await postToVaultGroup(groupId, {

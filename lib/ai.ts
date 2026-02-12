@@ -1,4 +1,5 @@
 import OpenAI from "openai";
+import axios from "axios";
 import { type TradeDecision, type MarketData, type IndicatorConfig } from "./types";
 import { evaluateIndicator, formatIndicatorForAI } from "./indicators";
 
@@ -53,6 +54,31 @@ const GEMINI_REQUEST_TIMEOUT_MS = Math.max(
   2000,
   parseInt(process.env.GEMINI_REQUEST_TIMEOUT_MS || "15000", 10)
 );
+const NVIDIA_MAX_CONCURRENT_REQUESTS = Math.max(
+  1,
+  parseInt(process.env.NVIDIA_MAX_CONCURRENT_REQUESTS || "1", 10)
+);
+const NVIDIA_MIN_REQUEST_SPACING_MS = Math.max(
+  0,
+  parseInt(process.env.NVIDIA_MIN_REQUEST_SPACING_MS || "1000", 10)
+);
+const NVIDIA_MAX_RETRIES = Math.max(
+  0,
+  parseInt(process.env.NVIDIA_MAX_RETRIES || "2", 10)
+);
+const NVIDIA_RETRY_BASE_DELAY_MS = Math.max(
+  500,
+  parseInt(process.env.NVIDIA_RETRY_BASE_DELAY_MS || "1500", 10)
+);
+const NVIDIA_RATE_LIMIT_MIN_COOLDOWN_MS = Math.max(
+  500,
+  parseInt(process.env.NVIDIA_RATE_LIMIT_MIN_COOLDOWN_MS || "15000", 10)
+);
+const NVIDIA_REQUEST_TIMEOUT_MS = Math.max(
+  2000,
+  parseInt(process.env.NVIDIA_REQUEST_TIMEOUT_MS || "15000", 10)
+);
+const NVIDIA_MODELS_DEFAULT = ["moonshotai/kimi-k2.5"];
 const DEFAULT_GEMINI_MODELS = [
   "gemini-2.5-flash",
   "gemini-3-flash-preview",
@@ -82,9 +108,15 @@ const geminiWaiters: Array<() => void> = [];
 let geminiNextRequestNotBeforeMs = 0;
 let geminiPaceQueue: Promise<void> = Promise.resolve();
 let geminiRateLimitedUntilMs = 0;
+let nvidiaInFlight = 0;
+const nvidiaWaiters: Array<() => void> = [];
+let nvidiaNextRequestNotBeforeMs = 0;
+let nvidiaPaceQueue: Promise<void> = Promise.resolve();
+let nvidiaRateLimitedUntilMs = 0;
 const modelCooldownUntilMs = new Map<string, number>();
+let balancedProviderStartOffset = 0;
 
-type AiProvider = "openai" | "gemini";
+type AiProvider = "openai" | "gemini" | "nvidia";
 
 interface ModelRoute {
   provider: AiProvider;
@@ -173,6 +205,25 @@ function releaseGeminiSlot(): void {
   if (next) next();
 }
 
+async function acquireNvidiaSlot(): Promise<void> {
+  if (nvidiaInFlight < NVIDIA_MAX_CONCURRENT_REQUESTS) {
+    nvidiaInFlight++;
+    return;
+  }
+  await new Promise<void>((resolve) => {
+    nvidiaWaiters.push(() => {
+      nvidiaInFlight++;
+      resolve();
+    });
+  });
+}
+
+function releaseNvidiaSlot(): void {
+  nvidiaInFlight = Math.max(0, nvidiaInFlight - 1);
+  const next = nvidiaWaiters.shift();
+  if (next) next();
+}
+
 async function waitForOpenAiPacing(): Promise<void> {
   let releaseCurrent!: () => void;
   const previous = openAiPaceQueue;
@@ -211,6 +262,25 @@ async function waitForGeminiPacing(): Promise<void> {
   }
 }
 
+async function waitForNvidiaPacing(): Promise<void> {
+  let releaseCurrent!: () => void;
+  const previous = nvidiaPaceQueue;
+  nvidiaPaceQueue = new Promise<void>((resolve) => {
+    releaseCurrent = resolve;
+  });
+
+  await previous;
+  try {
+    const now = Date.now();
+    if (now < nvidiaNextRequestNotBeforeMs) {
+      await sleep(nvidiaNextRequestNotBeforeMs - now);
+    }
+    nvidiaNextRequestNotBeforeMs = Date.now() + NVIDIA_MIN_REQUEST_SPACING_MS;
+  } finally {
+    releaseCurrent();
+  }
+}
+
 async function waitForOpenAiRateLimitCooldown(): Promise<void> {
   const now = Date.now();
   if (openAiRateLimitedUntilMs > now) {
@@ -240,6 +310,22 @@ function setGeminiRateLimitCooldown(ms: number): void {
   if (nextUntil > geminiRateLimitedUntilMs) {
     geminiRateLimitedUntilMs = nextUntil;
     console.warn(`[AI] Gemini rate limited, pausing Gemini requests for ${cooldownMs}ms`);
+  }
+}
+
+async function waitForNvidiaRateLimitCooldown(): Promise<void> {
+  const now = Date.now();
+  if (nvidiaRateLimitedUntilMs > now) {
+    await sleep(nvidiaRateLimitedUntilMs - now);
+  }
+}
+
+function setNvidiaRateLimitCooldown(ms: number): void {
+  const cooldownMs = Math.max(NVIDIA_RATE_LIMIT_MIN_COOLDOWN_MS, ms);
+  const nextUntil = Date.now() + cooldownMs;
+  if (nextUntil > nvidiaRateLimitedUntilMs) {
+    nvidiaRateLimitedUntilMs = nextUntil;
+    console.warn(`[AI] NVIDIA rate limited, pausing NVIDIA requests for ${cooldownMs}ms`);
   }
 }
 
@@ -306,7 +392,8 @@ function getModelQuota(provider: AiProvider, model: string): ModelQuota | null {
     null;
   if (fromKnown) return fromKnown;
 
-  const prefix = provider === "openai" ? "OPENAI" : "GEMINI";
+  const prefix =
+    provider === "openai" ? "OPENAI" : provider === "gemini" ? "GEMINI" : "NVIDIA";
   const rpm = parseInt(process.env[`${prefix}_QUOTA_RPM`] || "", 10);
   const tpm = parseInt(process.env[`${prefix}_QUOTA_TPM`] || "", 10);
   const rpd = parseInt(process.env[`${prefix}_QUOTA_RPD`] || "", 10);
@@ -424,6 +511,17 @@ async function runWithGeminiGate<T>(fn: () => Promise<T>): Promise<T> {
   }
 }
 
+async function runWithNvidiaGate<T>(fn: () => Promise<T>): Promise<T> {
+  await acquireNvidiaSlot();
+  try {
+    await waitForNvidiaRateLimitCooldown();
+    await waitForNvidiaPacing();
+    return await fn();
+  } finally {
+    releaseNvidiaSlot();
+  }
+}
+
 function getOpenAiStatus(error: unknown): number | null {
   const err = error as
     | { status?: number; response?: { status?: number } }
@@ -494,8 +592,25 @@ function getConfiguredGeminiModels(): string[] {
   return Array.from(new Set([...configured, ...DEFAULT_GEMINI_MODELS]));
 }
 
+function getConfiguredNvidiaModels(): string[] {
+  const raw =
+    process.env.NVIDIA_MODELS ||
+    process.env.NVIDIA_MODEL ||
+    NVIDIA_MODELS_DEFAULT.join(",");
+
+  const configured = raw
+    .split(",")
+    .map((x) => x.trim())
+    .filter(Boolean);
+
+  return Array.from(new Set([...configured, ...NVIDIA_MODELS_DEFAULT]));
+}
+
 function inferProviderFromModel(model: string): AiProvider {
   const normalized = normalizeModelId(model);
+  if (normalized.startsWith("gemini") || normalized.startsWith("gemma")) {
+    return "gemini";
+  }
   if (
     normalized.startsWith("gpt-") ||
     normalized.startsWith("o1") ||
@@ -503,7 +618,31 @@ function inferProviderFromModel(model: string): AiProvider {
   ) {
     return "openai";
   }
-  return "gemini";
+  return "nvidia";
+}
+
+function buildBalancedPrimaryRoutes(geminiModels: string[], nvidiaModels: string[]): ModelRoute[] {
+  const primary: ModelRoute[] = [];
+  const geminiQueue = [...geminiModels];
+  const nvidiaQueue = [...nvidiaModels];
+  const startWithGemini = balancedProviderStartOffset % 2 === 0;
+  balancedProviderStartOffset += 1;
+
+  let takeGemini = startWithGemini;
+  while (geminiQueue.length > 0 || nvidiaQueue.length > 0) {
+    if (takeGemini && geminiQueue.length > 0) {
+      primary.push({ provider: "gemini", model: geminiQueue.shift()! });
+    } else if (!takeGemini && nvidiaQueue.length > 0) {
+      primary.push({ provider: "nvidia", model: nvidiaQueue.shift()! });
+    } else if (geminiQueue.length > 0) {
+      primary.push({ provider: "gemini", model: geminiQueue.shift()! });
+    } else if (nvidiaQueue.length > 0) {
+      primary.push({ provider: "nvidia", model: nvidiaQueue.shift()! });
+    }
+    takeGemini = !takeGemini;
+  }
+
+  return primary;
 }
 
 function getConfiguredModelChain(): ModelRoute[] {
@@ -511,8 +650,10 @@ function getConfiguredModelChain(): ModelRoute[] {
   const chainItems = explicit
     ? explicit.split(",").map((x) => x.trim()).filter(Boolean)
     : [
+        ...buildBalancedPrimaryRoutes(getConfiguredGeminiModels(), getConfiguredNvidiaModels()).map(
+          (route) => `${route.provider}:${route.model}`
+        ),
         ...getConfiguredOpenAiModels().map((model) => `openai:${model}`),
-        ...getConfiguredGeminiModels().map((model) => `gemini:${model}`),
       ];
 
   const routes: ModelRoute[] = [];
@@ -526,7 +667,7 @@ function getConfiguredModelChain(): ModelRoute[] {
     if (!modelRaw) continue;
 
     const provider =
-      providerRaw === "openai" || providerRaw === "gemini"
+      providerRaw === "openai" || providerRaw === "gemini" || providerRaw === "nvidia"
         ? (providerRaw as AiProvider)
         : inferProviderFromModel(modelRaw);
     const normalizedModel = provider === "gemini" ? modelRaw.replace(/\s+/g, "-") : modelRaw;
@@ -541,6 +682,11 @@ function getConfiguredModelChain(): ModelRoute[] {
 
 function getGeminiApiKey(): string | null {
   const key = (process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY || "").trim();
+  return key || null;
+}
+
+function getNvidiaApiKey(): string | null {
+  const key = (process.env.NVIDIA_API_KEY || "").trim();
   return key || null;
 }
 
@@ -728,6 +874,115 @@ async function withGeminiRetry(
   throw lastError;
 }
 
+interface NvidiaChatResponse {
+  choices?: Array<{
+    message?: {
+      content?: string;
+    };
+  }>;
+  usage?: {
+    prompt_tokens?: number;
+    completion_tokens?: number;
+    total_tokens?: number;
+  };
+}
+
+async function callNvidiaModel(
+  model: string,
+  systemPrompt: string,
+  userPrompt: string
+): Promise<ProviderCallResult> {
+  const apiKey = getNvidiaApiKey();
+  if (!apiKey) throw new Error("NVIDIA API key missing (set NVIDIA_API_KEY)");
+  const endpoint = process.env.NVIDIA_BASE_URL || "https://integrate.api.nvidia.com/v1/chat/completions";
+  const estimatedInputTokens = estimateTokens(systemPrompt) + estimateTokens(userPrompt);
+  enforceNearLimitBudget("nvidia", model, estimatedInputTokens);
+  reserveModelUsage("nvidia", model, estimatedInputTokens);
+
+  const result = await runWithNvidiaGate(async () => {
+    const response = await axios.post<NvidiaChatResponse>(
+      endpoint,
+      {
+        model,
+        messages: [
+          { role: "system", content: systemPrompt },
+          { role: "user", content: userPrompt },
+        ],
+        max_tokens: 500,
+        temperature: 0.3,
+        top_p: 1,
+        stream: false,
+        chat_template_kwargs: { thinking: true },
+      },
+      {
+        timeout: NVIDIA_REQUEST_TIMEOUT_MS,
+        headers: {
+          Authorization: `Bearer ${apiKey}`,
+          Accept: "application/json",
+          "Content-Type": "application/json",
+        },
+      }
+    );
+    return response.data;
+  });
+
+  const content = (result.choices?.[0]?.message?.content || "").trim();
+  if (!content) throw new Error(`NVIDIA empty response for model ${model}`);
+  const promptTokens = result.usage?.prompt_tokens;
+  const completionTokens = result.usage?.completion_tokens;
+  adjustPromptTokenEstimate("nvidia", model, estimatedInputTokens, promptTokens);
+  if (Number.isFinite(completionTokens)) {
+    recordCompletionTokens("nvidia", model, completionTokens || 0);
+  } else {
+    recordCompletionTokens("nvidia", model, estimateTokens(content));
+  }
+
+  return {
+    content,
+    promptTokens,
+    completionTokens,
+  };
+}
+
+async function withNvidiaRetry(
+  model: string,
+  systemPrompt: string,
+  userPrompt: string
+): Promise<ProviderCallResult> {
+  let lastError: unknown;
+
+  for (let attempt = 0; attempt <= NVIDIA_MAX_RETRIES; attempt++) {
+    try {
+      return await callNvidiaModel(model, systemPrompt, userPrompt);
+    } catch (error: unknown) {
+      lastError = error;
+      const status = getErrorStatus(error);
+      const retryable = isGeminiRetryable(error);
+      const rateLimited = status === 429;
+
+      if (rateLimited) {
+        setNvidiaRateLimitCooldown(NVIDIA_RATE_LIMIT_MIN_COOLDOWN_MS);
+        setModelCooldown("nvidia", model, NVIDIA_RATE_LIMIT_MIN_COOLDOWN_MS, "429");
+      }
+
+      if (!retryable || attempt === NVIDIA_MAX_RETRIES) {
+        throw error;
+      }
+
+      const delay = Math.min(
+        NVIDIA_RETRY_BASE_DELAY_MS * Math.pow(2, attempt) + Math.random() * 300,
+        30_000
+      );
+      if (attempt === 0) {
+        console.warn(`[AI] NVIDIA ${model} failed, retrying...`);
+      }
+      await sleep(delay);
+    }
+  }
+
+  throw lastError;
+}
+
 async function withOpenAiRetry<T>(fn: () => Promise<T>, label: string, model: string): Promise<T> {
   let lastError: unknown;
 
@@ -827,7 +1082,10 @@ async function callModelRoute(
   if (route.provider === "openai") {
     return callOpenAiModel(route.model, systemPrompt, userPrompt);
   }
-  return withGeminiRetry(route.model, systemPrompt, userPrompt);
+  if (route.provider === "gemini") {
+    return withGeminiRetry(route.model, systemPrompt, userPrompt);
+  }
+  return withNvidiaRetry(route.model, systemPrompt, userPrompt);
 }
 
 function getOpenAI(): OpenAI {
@@ -998,11 +1256,13 @@ Provide your trading decision as JSON:`;
   const modelChain = getConfiguredModelChain();
   const hasOpenAiKey = Boolean(process.env.OPENAI_API_KEY?.trim());
   const hasGeminiKey = Boolean(getGeminiApiKey());
+  const hasNvidiaKey = Boolean(getNvidiaApiKey());
   let lastError: unknown = null;
 
   for (const route of modelChain) {
     if (route.provider === "openai" && !hasOpenAiKey) continue;
     if (route.provider === "gemini" && !hasGeminiKey) continue;
+    if (route.provider === "nvidia" && !hasNvidiaKey) continue;
 
     try {
       const result = await callModelRoute(route, SYSTEM_PROMPT, userPrompt);
@@ -1068,6 +1328,39 @@ Provide your trading decision as JSON:`;
   );
   decision.size = Math.max(0, Math.min(1, decision.size || 0));
   decision.confidence = Math.max(0, Math.min(1, decision.confidence || 0));
+  decision.asset = String(decision.asset || "").trim().toUpperCase();
+
+  const allowedMarketsUpper = new Set(params.allowedMarkets.map((m) => m.toUpperCase()));
+  const openPositionMarketsUpper = new Set(
+    params.currentPositions
+      .filter((p) => Math.abs(p.size) > 0)
+      .map((p) => p.coin.toUpperCase())
+  );
+
+  if (decision.action !== "hold" && !allowedMarketsUpper.has(decision.asset)) {
+    return {
+      action: "hold",
+      asset: params.allowedMarkets[0] || "BTC",
+      size: 0,
+      leverage: 1,
+      confidence: 0,
+      reasoning: `AI selected disallowed market (${decision.asset}); holding position.`,
+    };
+  }
+
+  if (decision.action === "close" && openPositionMarketsUpper.size > 0 && !openPositionMarketsUpper.has(decision.asset)) {
+    const firstOpenPosition = params.currentPositions.find((p) => Math.abs(p.size) > 0);
+    if (firstOpenPosition) {
+      decision.asset = firstOpenPosition.coin.toUpperCase();
+    }
+  }
+
+  if (typeof decision.stopLoss === "number" && !Number.isFinite(decision.stopLoss)) {
+    decision.stopLoss = undefined;
+  }
+  if (typeof decision.takeProfit === "number" && !Number.isFinite(decision.takeProfit)) {
+    decision.takeProfit = undefined;
+  }
 
   return decision;
 }

@@ -126,7 +126,7 @@ export async function getHclawState(
 
     if (opts?.userAddress) {
       const [capContext, points, claimable] = await Promise.all([
-        getUserCapContext(opts.userAddress, opts.agentId),
+        getUserCapContext(opts.userAddress, opts.agentId, network),
         getUserPointsSummary(opts.userAddress),
         getClaimableSummary(opts.userAddress),
       ]);

@@ -266,6 +266,14 @@ async function dedup<T>(key: string, fn: () => Promise<T>): Promise<T> {
 
 const FAILURE_COOLDOWN_MS = 30_000; // 30s cooldown after a timeout failure
 const failureCache = new Map<string, { error: Error; expiry: number }>();
+const ACCOUNT_STATE_CACHE_TTL_MS = Math.max(
+  1000,
+  parseInt(process.env.HL_ACCOUNT_STATE_CACHE_TTL_MS || "20000", 10)
+);
+const USER_FILLS_CACHE_TTL_MS = Math.max(
+  1000,
+  parseInt(process.env.HL_USER_FILLS_CACHE_TTL_MS || "45000", 10)
+);
 const CANDLE_CACHE_TTL_MS = Math.max(
   1000,
   parseInt(process.env.HL_CANDLE_CACHE_TTL_MS || "60000", 10)
@@ -275,6 +283,8 @@ const CANDLE_CACHE_MAX_ENTRIES = Math.max(
   parseInt(process.env.HL_CANDLE_CACHE_MAX_ENTRIES || "1000", 10)
 );
 const candleCache = new Map<string, { data: unknown[]; expiry: number }>();
+const accountStateCache = new Map<string, { data: unknown; expiry: number }>();
+const userFillsCache = new Map<string, { data: unknown[]; expiry: number }>();
 
 function checkFailureCache(key: string): Error | null {
   const entry = failureCache.get(key);
@@ -288,6 +298,29 @@ function checkFailureCache(key: string): Error | null {
 
 function setFailureCache(key: string, error: Error): void {
   failureCache.set(key, { error, expiry: Date.now() + FAILURE_COOLDOWN_MS });
+}
+
+function clearFailureCache(key: string): void {
+  failureCache.delete(key);
+}
+
+function getFreshCache<T>(cache: Map<string, { data: T; expiry: number }>, key: string): T | null {
+  const entry = cache.get(key);
+  if (!entry) return null;
+  if (Date.now() > entry.expiry) {
+    cache.delete(key);
+    return null;
+  }
+  return entry.data;
+}
+
+function setFreshCache<T>(
+  cache: Map<string, { data: T; expiry: number }>,
+  key: string,
+  data: T,
+  ttlMs: number
+): void {
+  cache.set(key, { data, expiry: Date.now() + ttlMs });
 }
 
 function getCandleCache(key: string): unknown[] | null {
@@ -640,18 +673,32 @@ export async function getHistoricalPrices(
 
 export async function getAccountState(user: Address) {
   const cacheKey = `clearinghouseState:${user}`;
+  const stale = getFreshCache(accountStateCache, cacheKey);
   // Fast-reject if this address recently failed — don't wait 30s again
   const cached = checkFailureCache(cacheKey);
-  if (cached) throw cached;
+  if (cached) {
+    if (stale) {
+      console.warn(`[HL] Using cached account state for ${user.slice(0, 8)} after recent failure`);
+      return stale as Awaited<ReturnType<InfoClient["clearinghouseState"]>>;
+    }
+    throw cached;
+  }
 
   return dedup(cacheKey, async () => {
     const info = getInfoClient();
     try {
-      return await withRetry(
+      const state = await withRetry(
         () => info.clearinghouseState({ user }),
         { label: `clearinghouseState(${user.slice(0, 8)})` }
       );
+      setFreshCache(accountStateCache, cacheKey, state, ACCOUNT_STATE_CACHE_TTL_MS);
+      clearFailureCache(cacheKey);
+      return state;
     } catch (error) {
+      if (stale) {
+        console.warn(`[HL] clearinghouseState fallback to cached snapshot for ${user.slice(0, 8)}`);
+        return stale as Awaited<ReturnType<InfoClient["clearinghouseState"]>>;
+      }
       // Cache the failure so next request within 30s returns immediately
       if (error instanceof Error) setFailureCache(cacheKey, error);
       throw error;
@@ -670,12 +717,24 @@ export async function getOpenOrders(user: Address) {
 }
 
 export async function getUserFills(user: Address) {
-  return dedup(`userFills:${user}`, async () => {
+  const cacheKey = `userFills:${user}`;
+  const stale = getFreshCache(userFillsCache, cacheKey);
+  return dedup(cacheKey, async () => {
     const info = getInfoClient();
-    return await withRetry(
+    try {
+      const fills = await withRetry(
       () => info.userFills({ user }),
       { label: `userFills(${user.slice(0, 8)})` }
-    );
+      );
+      setFreshCache(userFillsCache, cacheKey, fills as unknown[], USER_FILLS_CACHE_TTL_MS);
+      return fills;
+    } catch (error) {
+      if (stale) {
+        console.warn(`[HL] userFills fallback to cached snapshot for ${user.slice(0, 8)}`);
+        return stale as Awaited<ReturnType<InfoClient["userFills"]>>;
+      }
+      throw error;
+    }
   });
 }
 
@@ -1427,7 +1486,7 @@ export async function getAgentHlState(
       getAccountState(account.address),
       getRealizedPnlFromFills(account.address),
     ]);
-    const mids = await getInfoClient().allMids();
+    const mids = await withRetry(() => getInfoClient().allMids(), { label: "allMids(agent state)" });
     
     // Parse positions
     const positions: AgentPosition[] = (state.assetPositions || [])

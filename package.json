@@ -43,6 +43,7 @@
     "@privy-io/wagmi": "^1.0.4",
     "@serwist/next": "^9.0.15",
     "@tanstack/react-query": "^5.81.2",
+    "axios": "^1.11.0",
     "ethers": "^6.13.4",
     "next": "14.2.35",
     "openai": "^6.18.0",

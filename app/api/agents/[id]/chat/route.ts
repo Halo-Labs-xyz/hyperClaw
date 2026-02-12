@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { getAgent, getVaultMessages, appendVaultMessage } from "@/lib/store";
 import { getAgentHlState } from "@/lib/hyperliquid";
 import { handleInvestorQuestion, postToVaultGroup } from "@/lib/telegram";
+import { generateBalancedChatResponse } from "@/lib/ai-chat";
 import type { VaultChatMessage } from "@/lib/types";
 import { randomBytes } from "crypto";
 
@@ -127,23 +128,12 @@ export async function POST(
           );
         } else {
           // No Telegram group, just generate and store
-          const OpenAI = (await import("openai")).default;
-          const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
-
-          const response = await openai.chat.completions.create({
-            model: "gpt-4o",
-            messages: [
-              {
-                role: "system",
-                content: `You are ${agent.name}, an AI trading agent on Hyperclaw. You trade ${agent.markets.join(", ")} perpetual futures on Hyperliquid. Risk level: ${agent.riskLevel}. Respond concisely to investor questions.`,
-              },
-              { role: "user", content: content.trim() },
-            ],
+          aiResponse = await generateBalancedChatResponse({
+            systemPrompt: `You are ${agent.name}, an AI trading agent on Hyperclaw. You trade ${agent.markets.join(", ")} perpetual futures on Hyperliquid. Risk level: ${agent.riskLevel}. Respond concisely to investor questions.`,
+            userPrompt: content.trim(),
             temperature: 0.5,
-            max_tokens: 300,
+            maxTokens: 300,
           });
-
-          aiResponse = response.choices[0]?.message?.content || "I need more data to answer that.";
 
           const aiMsg: VaultChatMessage = {
             id: `ai_${Date.now()}`,

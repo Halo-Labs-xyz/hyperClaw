@@ -44,6 +44,7 @@ import {
 } from "./supabase-store";
 import { getUserCapContext } from "./hclaw-policy";
 import type { HclawPointsActivityInput } from "./hclaw-points";
+type MonadNetwork = "mainnet" | "testnet";
 
 // ============================================
 // MON -> USDC price conversion
@@ -238,12 +239,15 @@ const monadMainnetChain = {
   },
 } as const;
 
-function getMonadChain() {
+function getMonadChain(network?: MonadNetwork) {
+  if (network) {
+    return network === "testnet" ? monadTestnetChain : monadMainnetChain;
+  }
   return isMonadTestnet() ? monadTestnetChain : monadMainnetChain;
 }
 
-function getMonadClient() {
-  const chain = getMonadChain();
+function getMonadClient(network?: MonadNetwork) {
+  const chain = getMonadChain(network);
   return createPublicClient({
     chain,
     transport: http(chain.rpcUrls.default.http[0]),
@@ -425,7 +429,10 @@ const WITHDRAWN_TOPIC = toEventSelector(WITHDRAWN_EVENT);
  * Called after a user's Monad vault tx is confirmed.
  * Parses Deposited/Withdrawn events, updates relay ledger, and reconciles agent TVL.
  */
-export async function processVaultTx(txHash: string): Promise<VaultTxRecord | null> {
+export async function processVaultTx(
+  txHash: string,
+  options?: { network?: MonadNetwork }
+): Promise<VaultTxRecord | null> {
   const alreadyProcessed = await hasProcessedVaultTx(txHash);
   if (alreadyProcessed) {
     if (isSupabaseStoreEnabled()) {
@@ -442,13 +449,35 @@ export async function processVaultTx(txHash: string): Promise<VaultTxRecord | nu
   const vaultAddress = process.env.NEXT_PUBLIC_VAULT_ADDRESS as Address | undefined;
   if (!vaultAddress) return null;
 
-  const client = getMonadClient();
-
   try {
-    const receipt = await client.getTransactionReceipt({ hash: txHash as `0x${string}` });
+    const preferred = options?.network;
+    const networks: MonadNetwork[] = preferred
+      ? [preferred, preferred === "testnet" ? "mainnet" : "testnet"]
+      : [isMonadTestnet() ? "testnet" : "mainnet", isMonadTestnet() ? "mainnet" : "testnet"];
+
+    let activeNetwork: MonadNetwork | null = null;
+    let receipt: any = null;
+
+    for (const network of networks) {
+      const candidateClient = getMonadClient(network);
+      try {
+        const candidateReceipt = await candidateClient.getTransactionReceipt({
+          hash: txHash as `0x${string}`,
+        });
+        if (candidateReceipt?.status === "success") {
+          activeNetwork = network;
+          receipt = candidateReceipt;
+          break;
+        }
+      } catch {
+        // Keep trying alternate network.
+      }
+    }
+
     if (!receipt || receipt.status !== "success") {
       return null;
     }
+    const client = getMonadClient(activeNetwork ?? undefined);
 
     for (const log of receipt.logs) {
       if (log.address.toLowerCase() !== vaultAddress.toLowerCase()) continue;
@@ -493,7 +522,11 @@ export async function processVaultTx(txHash: string): Promise<VaultTxRecord | nu
               }
             | undefined;
           try {
-            capContext = await getUserCapContext(userAddress, agentIdHex);
+            capContext = await getUserCapContext(
+              userAddress,
+              agentIdHex,
+              activeNetwork ?? undefined
+            );
           } catch {
             capContext = undefined;
           }
@@ -571,7 +604,7 @@ export async function processVaultTx(txHash: string): Promise<VaultTxRecord | nu
           }
 
           if (agent) {
-            const tvlUsd = await getVaultTvlOnChain(agentIdHex);
+            const tvlUsd = await getVaultTvlOnChain(agentIdHex, activeNetwork ?? undefined);
             await updateAgent(agentIdHex, {
               vaultTvlUsd: tvlUsd,
               depositorCount: agent.depositorCount + (isNewDepositor ? 1 : 0),
@@ -612,7 +645,7 @@ export async function processVaultTx(txHash: string): Promise<VaultTxRecord | nu
 
           const agent = await getAgent(agentIdHex);
           if (agent) {
-            const tvlUsd = await getVaultTvlOnChain(agentIdHex);
+            const tvlUsd = await getVaultTvlOnChain(agentIdHex, activeNetwork ?? undefined);
             let depositorCount = agent.depositorCount;
 
             try {
@@ -765,12 +798,13 @@ export async function getTotalDepositedUsd(agentId: string): Promise<number> {
  */
 export async function getUserSharePercent(
   agentId: string,
-  user: Address
+  user: Address,
+  network?: MonadNetwork
 ): Promise<number> {
   const vaultAddress = process.env.NEXT_PUBLIC_VAULT_ADDRESS as Address | undefined;
   if (!vaultAddress) return 0;
 
-  const client = getMonadClient();
+  const client = getMonadClient(network);
 
   try {
     const agentIdBytes = ("0x" + agentId.padStart(64, "0")) as `0x${string}`;
@@ -800,11 +834,11 @@ export async function getUserSharePercent(
 /**
  * Read vault TVL for an agent from on-chain
  */
-export async function getVaultTvlOnChain(agentId: string): Promise<number> {
+export async function getVaultTvlOnChain(agentId: string, network?: MonadNetwork): Promise<number> {
   const vaultAddress = process.env.NEXT_PUBLIC_VAULT_ADDRESS as Address | undefined;
   if (!vaultAddress) return 0;
 
-  const client = getMonadClient();
+  const client = getMonadClient(network);
 
   try {
     const agentIdBytes = ("0x" + agentId.padStart(64, "0")) as `0x${string}`;

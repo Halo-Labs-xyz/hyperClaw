@@ -1,26 +1,19 @@
 "use client";
 
+import Image from "next/image";
+
 /**
- * Hyperclaw icon: stylized claw marks.
- * Represents AI trading agents, perps, and sharp execution.
+ * Hyperclaw icon: HCLAW logo mark.
  */
-export function HyperclawIcon({ className = "", size = 18 }: { className?: string; size?: number }) {
+export function HyperclawIcon({ className = "", size = 28 }: { className?: string; size?: number }) {
   return (
-    <svg
+    <Image
+      src="/icons/hclawlogo.png"
+      alt="Hyperclaw"
       width={size}
       height={size}
-      viewBox="0 0 24 24"
-      fill="none"
-      className={className}
-      stroke="currentColor"
-      strokeWidth="2"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-    >
-      {/* Three claw scratches - curved, predatory */}
-      <path d="M6 6 Q12 10 18 5" />
-      <path d="M6 12 Q12 14 18 11" />
-      <path d="M6 18 Q12 18 18 15" />
-    </svg>
+      className={`object-contain ${className}`}
+      aria-hidden="true"
+    />
   );
 }

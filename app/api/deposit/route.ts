@@ -9,6 +9,13 @@ import {
 import { type Address } from "viem";
 import { getUserCapContext } from "@/lib/hclaw-policy";
 
+type MonadNetwork = "mainnet" | "testnet";
+
+function parseNetwork(value: unknown): MonadNetwork | undefined {
+  if (value === "mainnet" || value === "testnet") return value;
+  return undefined;
+}
+
 /**
  * POST /api/deposit
  *
@@ -35,7 +42,7 @@ export async function POST(request: Request) {
       );
     }
 
-    const result = await processVaultTx(body.txHash);
+    const result = await processVaultTx(body.txHash, { network: parseNetwork(body.network) });
 
     if (!result) {
       return NextResponse.json(
@@ -68,7 +75,11 @@ export async function POST(request: Request) {
             boostedCapUsd: record.userCapUsd ?? 0,
             capRemainingUsd: record.userCapRemainingUsd ?? 0,
           }
-        : await getUserCapContext(record.user, record.agentId);
+        : await getUserCapContext(
+            record.user,
+            record.agentId,
+            parseNetwork(body.network)
+          );
 
     return NextResponse.json({
       success: true,
@@ -119,17 +130,18 @@ export async function GET(request: Request) {
   const agentId = searchParams.get("agentId");
   const user = searchParams.get("user") as Address | null;
   const tvl = searchParams.get("tvl");
+  const network = parseNetwork(searchParams.get("network"));
 
   try {
     // TVL query
     if (agentId && tvl === "true") {
-      const tvlUsd = await getVaultTvlOnChain(agentId);
+      const tvlUsd = await getVaultTvlOnChain(agentId, network);
       return NextResponse.json({ agentId, tvlUsd });
     }
 
     // Share percent query
     if (agentId && user) {
-      const sharePercent = await getUserSharePercent(agentId, user);
+      const sharePercent = await getUserSharePercent(agentId, user, network);
       const userDeposits = await getDepositsForUser(user);
       const deposits = userDeposits.filter(
         (d) => d.agentId === agentId
@@ -145,7 +157,7 @@ export async function GET(request: Request) {
     // Agent deposits
     if (agentId) {
       const deposits = await getDepositsForAgent(agentId);
-      const tvlUsd = await getVaultTvlOnChain(agentId);
+      const tvlUsd = await getVaultTvlOnChain(agentId, network);
       return NextResponse.json({ agentId, tvlUsd, deposits });
     }
 

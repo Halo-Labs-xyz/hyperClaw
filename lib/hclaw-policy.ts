@@ -5,7 +5,7 @@ import {
 } from "@/lib/env";
 import { isMonadTestnet } from "@/lib/network";
 import type { HclawCapContext, HclawLockTier } from "@/lib/types";
-import { getUserLockState, tierToBoostBps, tierToRebateBps } from "@/lib/hclaw-lock";
+import { getUserLockState, tierToBoostBps, tierToRebateBps, type MonadNetwork } from "@/lib/hclaw-lock";
 import { agentIdToBytes32, HCLAW_POLICY_ABI, VAULT_ABI } from "@/lib/vault";
 
 interface PolicyRead {
@@ -20,30 +20,34 @@ interface PolicyRead {
 const POLICY_CACHE_TTL_MS = 15_000;
 const policyCache = new Map<string, { expiresAt: number; value: PolicyRead }>();
 
-function getMonadRpcUrl(): string {
+function getMonadRpcUrl(network?: MonadNetwork): string {
+  if (network) {
+    return network === "testnet" ? "https://testnet-rpc.monad.xyz" : "https://rpc.monad.xyz";
+  }
   return isMonadTestnet() ? "https://testnet-rpc.monad.xyz" : "https://rpc.monad.xyz";
 }
 
-function getMonadChain() {
+function getMonadChain(network?: MonadNetwork) {
+  const testnet = network ? network === "testnet" : isMonadTestnet();
   return {
-    id: isMonadTestnet() ? 10143 : 143,
-    name: isMonadTestnet() ? "Monad Testnet" : "Monad",
+    id: testnet ? 10143 : 143,
+    name: testnet ? "Monad Testnet" : "Monad",
     nativeCurrency: { name: "MON", symbol: "MON", decimals: 18 },
-    rpcUrls: { default: { http: [getMonadRpcUrl()] } },
+    rpcUrls: { default: { http: [getMonadRpcUrl(network)] } },
   } as const;
 }
 
-function getPublicClient() {
-  const chain = getMonadChain();
+function getPublicClient(network?: MonadNetwork) {
+  const chain = getMonadChain(network);
   return createPublicClient({ chain, transport: http(chain.rpcUrls.default.http[0]) });
 }
 
-async function readBaseCapFallback(): Promise<number> {
+async function readBaseCapFallback(network?: MonadNetwork): Promise<number> {
   const vaultAddress = getVaultAddressIfDeployed();
   if (!vaultAddress) return 100;
 
   try {
-    const client = getPublicClient();
+    const client = getPublicClient(network);
     const baseCapRaw = (await client.readContract({
       address: vaultAddress,
       abi: VAULT_ABI,
@@ -55,16 +59,17 @@ async function readBaseCapFallback(): Promise<number> {
   }
 }
 
-async function readPolicyFromChain(user: Address): Promise<PolicyRead> {
-  const cacheKey = user.toLowerCase();
+async function readPolicyFromChain(user: Address, network?: MonadNetwork): Promise<PolicyRead> {
+  const networkKey = network ?? (isMonadTestnet() ? "testnet" : "mainnet");
+  const cacheKey = `${networkKey}:${user.toLowerCase()}`;
   const cached = policyCache.get(cacheKey);
   if (cached && cached.expiresAt > Date.now()) return cached.value;
 
   const policyAddress = getHclawPolicyAddressIfSet();
-  const lockState = await getUserLockState(user);
+  const lockState = await getUserLockState(user, network);
 
   if (!policyAddress) {
-    const baseCapUsd = await readBaseCapFallback();
+    const baseCapUsd = await readBaseCapFallback(network);
     const boostedCapUsd = (baseCapUsd * lockState.boostBps) / 10_000;
     const fallbackValue: PolicyRead = {
       baseCapUsd,
@@ -78,7 +83,7 @@ async function readPolicyFromChain(user: Address): Promise<PolicyRead> {
     return fallbackValue;
   }
 
-  const client = getPublicClient();
+  const client = getPublicClient(network);
 
   try {
     const [baseCapRaw, userCapRaw, rebateBpsRaw, boostBpsRaw, tierRaw, powerRaw] = await Promise.all([
@@ -132,7 +137,7 @@ async function readPolicyFromChain(user: Address): Promise<PolicyRead> {
     return value;
   } catch (error) {
     console.warn("[HCLAW] policy read fallback:", error);
-    const baseCapUsd = await readBaseCapFallback();
+    const baseCapUsd = await readBaseCapFallback(network);
     const tier = lockState.tier;
     const boostBps = tierToBoostBps(tier);
     const value: PolicyRead = {
@@ -148,12 +153,12 @@ async function readPolicyFromChain(user: Address): Promise<PolicyRead> {
   }
 }
 
-async function readUserDepositsUsd(agentId: string, user: Address): Promise<number> {
+async function readUserDepositsUsd(agentId: string, user: Address, network?: MonadNetwork): Promise<number> {
   const vaultAddress = getVaultAddressIfDeployed();
   if (!vaultAddress) return 0;
 
   try {
-    const client = getPublicClient();
+    const client = getPublicClient(network);
     const userDepositsRaw = (await client.readContract({
       address: vaultAddress,
       abi: VAULT_ABI,
@@ -166,9 +171,13 @@ async function readUserDepositsUsd(agentId: string, user: Address): Promise<numb
   }
 }
 
-export async function getUserCapContext(user: Address, agentId?: string): Promise<HclawCapContext> {
-  const policy = await readPolicyFromChain(user);
-  const depositedUsd = agentId ? await readUserDepositsUsd(agentId, user) : 0;
+export async function getUserCapContext(
+  user: Address,
+  agentId?: string,
+  network?: MonadNetwork
+): Promise<HclawCapContext> {
+  const policy = await readPolicyFromChain(user, network);
+  const depositedUsd = agentId ? await readUserDepositsUsd(agentId, user, network) : 0;
 
   return {
     user,
@@ -182,12 +191,12 @@ export async function getUserCapContext(user: Address, agentId?: string): Promis
   };
 }
 
-export async function getBaseCapUsd(): Promise<number> {
+export async function getBaseCapUsd(network?: MonadNetwork): Promise<number> {
   const policyAddress = getHclawPolicyAddressIfSet();
-  if (!policyAddress) return readBaseCapFallback();
+  if (!policyAddress) return readBaseCapFallback(network);
 
   try {
-    const client = getPublicClient();
+    const client = getPublicClient(network);
     const baseCapRaw = (await client.readContract({
       address: policyAddress,
       abi: HCLAW_POLICY_ABI,
@@ -195,6 +204,6 @@ export async function getBaseCapUsd(): Promise<number> {
     })) as bigint;
     return Number(formatEther(baseCapRaw));
   } catch {
-    return readBaseCapFallback();
+    return readBaseCapFallback(network);
   }
 }

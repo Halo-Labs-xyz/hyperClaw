@@ -5,22 +5,27 @@ import type { HclawLockState, HclawLockTier } from "@/lib/types";
 import { HCLAW_LOCK_ABI } from "@/lib/vault";
 
 export const HCLAW_LOCK_DURATIONS = [30, 90, 180] as const;
+export type MonadNetwork = "mainnet" | "testnet";
 
-function getMonadRpcUrl(): string {
+function getMonadRpcUrl(network?: MonadNetwork): string {
+  if (network) {
+    return network === "testnet" ? "https://testnet-rpc.monad.xyz" : "https://rpc.monad.xyz";
+  }
   return isMonadTestnet() ? "https://testnet-rpc.monad.xyz" : "https://rpc.monad.xyz";
 }
 
-function getMonadChain() {
+function getMonadChain(network?: MonadNetwork) {
+  const testnet = network ? network === "testnet" : isMonadTestnet();
   return {
-    id: isMonadTestnet() ? 10143 : 143,
-    name: isMonadTestnet() ? "Monad Testnet" : "Monad",
+    id: testnet ? 10143 : 143,
+    name: testnet ? "Monad Testnet" : "Monad",
     nativeCurrency: { name: "MON", symbol: "MON", decimals: 18 },
-    rpcUrls: { default: { http: [getMonadRpcUrl()] } },
+    rpcUrls: { default: { http: [getMonadRpcUrl(network)] } },
   } as const;
 }
 
-function getPublicClient() {
-  const chain = getMonadChain();
+function getPublicClient(network?: MonadNetwork) {
+  const chain = getMonadChain(network);
   return createPublicClient({ chain, transport: http(chain.rpcUrls.default.http[0]) });
 }
 
@@ -62,11 +67,11 @@ export function getEmptyLockState(user: Address): HclawLockState {
   };
 }
 
-export async function getUserLockState(user: Address): Promise<HclawLockState> {
+export async function getUserLockState(user: Address, network?: MonadNetwork): Promise<HclawLockState> {
   const lockAddress = getHclawLockAddressIfSet();
   if (!lockAddress) return getEmptyLockState(user);
 
-  const client = getPublicClient();
+  const client = getPublicClient(network);
 
   try {
     const [tierRaw, powerRaw, lockIdsRaw] = await Promise.all([

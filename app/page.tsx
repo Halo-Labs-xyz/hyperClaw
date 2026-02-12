@@ -347,8 +347,8 @@ export default function Dashboard() {
       <header className="glass sticky top-0 z-50">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 py-4 flex items-center justify-between">
           <Link href="/" className="flex items-center gap-3 group">
-            <div className="w-9 h-9 rounded-lg bg-accent/10 border border-accent/20 flex items-center justify-center group-hover:bg-accent/15 transition-colors">
-              <HyperclawIcon className="text-accent" size={18} />
+            <div className="w-11 h-11 rounded-lg bg-white/20 border border-white/30 flex items-center justify-center group-hover:bg-white/25 transition-colors">
+              <HyperclawIcon className="text-accent" size={28} />
             </div>
             <HyperclawLogo className="text-lg font-bold tracking-tight" />
           </Link>
@@ -456,9 +456,9 @@ export default function Dashboard() {
             <Link href="/agents" className="btn-primary px-6 py-3 text-sm">
               Explore Agents
             </Link>
-            <Link href="/agents/new" className="btn-secondary px-6 py-3 text-sm">
+            {/*<Link href="/agents/new" className="btn-secondary px-6 py-3 text-sm">
               Create Agent
-            </Link>
+            </Link>*/}
             <Link href="/hclaw" className="btn-secondary px-6 py-3 text-sm">
               HCLAW Hub
             </Link>

@@ -83,6 +83,35 @@ const AGENT_AI_THROTTLE_LOG_INTERVAL_MS = Math.max(
   60_000,
   parseInt(process.env.AGENT_AI_THROTTLE_LOG_INTERVAL_MS || "900000", 10)
 );
+const AGENT_MIN_ORDER_NOTIONAL_USD = Math.max(
+  1,
+  parseFloat(process.env.AGENT_MIN_ORDER_NOTIONAL_USD || "10")
+);
+
+function getRiskMaxSizeFraction(riskLevel: "conservative" | "moderate" | "aggressive"): number {
+  switch (riskLevel) {
+    case "conservative":
+      return 0.2;
+    case "aggressive":
+      return 0.75;
+    case "moderate":
+    default:
+      return 0.5;
+  }
+}
+
+function getConfiguredMinConfidence(agent: {
+  riskLevel: "conservative" | "moderate" | "aggressive";
+  autonomy?: { aggressiveness?: number; minConfidence?: number };
+}): number {
+  const explicit = agent.autonomy?.minConfidence;
+  if (typeof explicit === "number" && Number.isFinite(explicit)) {
+    return Math.max(0, Math.min(1, explicit));
+  }
+  const aggressiveness = Math.max(0, Math.min(100, agent.autonomy?.aggressiveness ?? 50));
+  const derived = 1 - (aggressiveness / 100) * 0.5;
+  return Math.max(0, Math.min(1, derived));
+}
 
 function parseUtcHourToken(token: string): number | null {
   const n = Number.parseInt(token.trim(), 10);
@@ -507,7 +536,7 @@ async function executeTickInternal(agentId: string): Promise<TradeLog> {
     }
 
     // 4. Ask AI for trade decision (with indicator and strategy if configured)
-    const decision = await getTradeDecision({
+    let decision = await getTradeDecision({
       markets,
       currentPositions: positions,
       availableBalance,
@@ -522,6 +551,46 @@ async function executeTickInternal(agentId: string): Promise<TradeLog> {
       agentStrategy: agent.description, // The agent's description IS its strategy
     });
 
+    const minConfidence = getConfiguredMinConfidence(agent);
+    const allowedMarkets = new Set(agent.markets.map((m) => m.toUpperCase()));
+    const maxSizeByRisk = getRiskMaxSizeFraction(agent.riskLevel);
+    const hasPositionForAsset = (asset: string) =>
+      positions.some((p) => p.coin.toUpperCase() === asset.toUpperCase() && Math.abs(p.size) > 0);
+
+    decision.asset = String(decision.asset || "").toUpperCase();
+    decision.size = Math.max(0, Math.min(decision.size || 0, maxSizeByRisk));
+    decision.confidence = Math.max(0, Math.min(1, decision.confidence || 0));
+    decision.leverage = Math.max(1, Math.min(agent.maxLeverage, Math.round(decision.leverage || 1)));
+
+    if (decision.action !== "hold" && !allowedMarkets.has(decision.asset)) {
+      decision = {
+        action: "hold",
+        asset: agent.markets[0] || "BTC",
+        size: 0,
+        leverage: 1,
+        confidence: 0,
+        reasoning: `Blocked trade on disallowed market ${decision.asset}.`,
+      };
+    } else if (decision.action === "close" && !hasPositionForAsset(decision.asset)) {
+      decision = {
+        action: "hold",
+        asset: decision.asset || agent.markets[0] || "BTC",
+        size: 0,
+        leverage: 1,
+        confidence: 0,
+        reasoning: `Close requested with no open position on ${decision.asset}.`,
+      };
+    } else if (decision.action !== "hold" && decision.confidence < minConfidence) {
+      decision = {
+        action: "hold",
+        asset: decision.asset || agent.markets[0] || "BTC",
+        size: 0,
+        leverage: 1,
+        confidence: decision.confidence,
+        reasoning: `Confidence ${decision.confidence.toFixed(2)} below min ${minConfidence.toFixed(2)}.`,
+      };
+    }
+
     // 5. Execute full order pipeline
     let executed = false;
     let executionResult: TradeLog["executionResult"] = undefined;
@@ -529,7 +598,7 @@ async function executeTickInternal(agentId: string): Promise<TradeLog> {
     console.log(`[Agent ${agentId}] Decision: ${decision.action} ${decision.asset} @ ${decision.confidence*100}% confidence`);
     console.log(`[Agent ${agentId}] Available balance: $${availableBalance}, Has exchange client: ${!!ex}`);
 
-    if (decision.action !== "hold" && decision.confidence >= 0.6) {
+    if (decision.action !== "hold") {
       console.log(`[Agent ${agentId}] Attempting to execute trade...`);
       try {
         const assetIndex = await getAssetIndex(decision.asset);
@@ -552,15 +621,24 @@ async function executeTickInternal(agentId: string): Promise<TradeLog> {
         }
 
         // Calculate order size with safety checks
-        const capitalToUse = availableBalance * decision.size;
+        const matchingPosition = positions.find((p) => p.coin === decision.asset);
+        const capitalToUse = decision.action === "close"
+          ? Math.abs(matchingPosition?.size ?? 0) * (markets.find((m) => m.coin === decision.asset)?.price || 0)
+          : availableBalance * decision.size;
         const price =
           markets.find((m) => m.coin === decision.asset)?.price || 0;
-        const orderSize = price > 0 ? capitalToUse / price : 0;
-        
+        const orderSize = decision.action === "close"
+          ? Math.abs(matchingPosition?.size ?? 0)
+          : (price > 0 ? capitalToUse / price : 0);
+
         console.log(`[Agent ${agentId}] Order calculation: capital=$${capitalToUse}, price=$${price}, size=${orderSize}`);
 
         if (!isFinite(orderSize) || isNaN(orderSize) || orderSize <= 0) {
           console.warn(`[Agent ${agentId}] SKIPPING: Invalid order size: ${orderSize} (capital=${capitalToUse}, price=${price})`);
+        } else if (decision.action !== "close" && capitalToUse < AGENT_MIN_ORDER_NOTIONAL_USD) {
+          console.warn(
+            `[Agent ${agentId}] SKIPPING: Notional $${capitalToUse.toFixed(2)} below minimum $${AGENT_MIN_ORDER_NOTIONAL_USD.toFixed(2)}`
+          );
         } else {
           console.log(`[Agent ${agentId}] Order size valid: ${orderSize}`);
           const isBuy =
@@ -763,6 +841,12 @@ export async function executeApprovedTrade(
   }
 
   const decision = pending.decision;
+  if (
+    decision.action !== "hold" &&
+    !agent.markets.some((m) => m.toUpperCase() === decision.asset.toUpperCase())
+  ) {
+    throw new Error(`Approved trade asset ${decision.asset} is not in agent allowed markets`);
+  }
   let executed = false;
   let executionResult: TradeLog["executionResult"] = undefined;
 
@@ -781,12 +865,15 @@ export async function executeApprovedTrade(
       const capitalToUse = availableBalance * decision.size;
       const price =
         markets.find((m) => m.coin === decision.asset)?.price || 0;
-      const orderSize = price > 0 ? capitalToUse / price : 0;
+      const positions = (accountState.assetPositions || [])
+        .filter((p) => parseFloat(p.position.szi) !== 0)
+        .map((p) => ({ coin: p.position.coin, size: parseFloat(p.position.szi) }));
+      const matchingPosition = positions.find((p) => p.coin === decision.asset);
+      const orderSize = decision.action === "close"
+        ? Math.abs(matchingPosition?.size ?? 0)
+        : (price > 0 ? capitalToUse / price : 0);
 
       if (orderSize > 0) {
-        const positions = (accountState.assetPositions || [])
-          .filter((p) => parseFloat(p.position.szi) !== 0)
-          .map((p) => ({ coin: p.position.coin, size: parseFloat(p.position.szi) }));
         const isBuy =
           decision.action === "long" ||
           (decision.action === "close" &&
