@@ -53,6 +53,7 @@
     "react": "^18",
     "react-dom": "^18",
     "serwist": "latest",
+    "supermemory": "^4.11.1",
     "viem": "2.38.3",
     "wagmi": "^2.15.6",
     "web-push": "3.6.7",

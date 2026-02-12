@@ -1,6 +1,28 @@
 "use client";
 
+import { useState } from "react";
 import type { TradeLog } from "@/lib/types";
+
+function ReasoningCell({ reasoning }: { reasoning?: string }) {
+  const [expanded, setExpanded] = useState(false);
+  const text = reasoning?.trim() || "—";
+  const isLong = text.length > 60;
+  return (
+    <button
+      type="button"
+      onClick={() => isLong && setExpanded((e) => !e)}
+      className={`text-left w-full block max-w-[280px] ${isLong ? "cursor-pointer hover:text-foreground/80" : ""}`}
+      title={isLong ? (expanded ? "Click to collapse" : "Click to see full reasoning") : undefined}
+    >
+      {expanded ? (
+        <span className="whitespace-pre-wrap break-words block max-h-32 overflow-y-auto text-xs">{text}</span>
+      ) : (
+        <span className={isLong ? "truncate block" : ""}>{text}</span>
+      )}
+      {isLong && <span className="text-[10px] text-muted ml-1">{expanded ? "▲" : "⋯"}</span>}
+    </button>
+  );
+}
 
 interface Props {
   trades: TradeLog[];
@@ -138,8 +160,8 @@ export function BacktestResults({ trades, startTime, endTime }: Props) {
                     <span className="text-muted">No</span>
                   )}
                 </td>
-                <td className="px-4 py-2 text-xs text-muted max-w-[200px] truncate">
-                  {trade.decision.reasoning}
+                <td className="px-4 py-2 text-xs text-muted max-w-[200px]">
+                  <ReasoningCell reasoning={trade.decision.reasoning} />
                 </td>
               </tr>
             ))}

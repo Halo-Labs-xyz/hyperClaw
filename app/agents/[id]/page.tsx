@@ -22,6 +22,27 @@ const AUTONOMY_LABELS = {
   manual: { icon: "👤", label: "Manual", color: "text-muted", bg: "bg-muted/10", border: "border-muted/20" },
 };
 
+function ReasoningCell({ reasoning }: { reasoning?: string }) {
+  const [expanded, setExpanded] = useState(false);
+  const text = reasoning?.trim() || "—";
+  const isLong = text.length > 60;
+  return (
+    <button
+      type="button"
+      onClick={() => isLong && setExpanded((e) => !e)}
+      className={`text-left w-full block max-w-[280px] ${isLong ? "cursor-pointer hover:text-foreground/80" : ""}`}
+      title={isLong ? (expanded ? "Click to collapse" : "Click to see full reasoning") : undefined}
+    >
+      {expanded ? (
+        <span className="whitespace-pre-wrap break-words block max-h-32 overflow-y-auto text-xs">{text}</span>
+      ) : (
+        <span className={isLong ? "truncate block" : ""}>{text}</span>
+      )}
+      {isLong && <span className="text-[10px] text-muted ml-1">{expanded ? "▲" : "⋯"}</span>}
+    </button>
+  );
+}
+
 function CopyAddressButton({ address }: { address: string }) {
   const [copied, setCopied] = useState(false);
   const copy = () => {
@@ -1514,8 +1535,8 @@ export default function AgentDetailPage() {
                               <span className="chip chip-stopped text-[10px]">Skipped</span>
                             )}
                           </td>
-                          <td className="px-5 py-3.5 text-dim text-xs max-w-[200px] truncate">
-                            {trade.decision.reasoning}
+                          <td className="px-5 py-3.5 text-dim text-xs max-w-[200px]">
+                            <ReasoningCell reasoning={trade.decision.reasoning} />
                           </td>
                         </tr>
                       ))}

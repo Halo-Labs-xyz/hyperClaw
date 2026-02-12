@@ -770,14 +770,11 @@ export async function placeOrder(params: {
   reduceOnly: boolean;
   orderType: "Gtc" | "Ioc" | "Alo";
   vaultAddress?: Address;
-  builder?: { b: string; f: number };
+  builder?: { b: string; f: number } | null;
 }, exchange?: ExchangeClient) {
   const exchangeClient = exchange ?? getExchangeClient();
-  
-  // Add builder code if available
-  const { assertBuilderConfiguredForTrading, getBuilderParam } = await import("./builder");
-  assertBuilderConfiguredForTrading();
-  const builderParam = params.builder ?? getBuilderParam();
+  const { getBuilderParam } = await import("./builder");
+  const builderParam = params.builder === null ? undefined : (params.builder ?? getBuilderParam());
   
   return await exchangeClient.order({
     orders: [
@@ -854,7 +851,7 @@ export async function placeMarketOrder(params: {
   slippagePercent?: number;
   reduceOnly?: boolean;
   vaultAddress?: Address;
-  builder?: { b: string; f: number };
+  builder?: { b: string; f: number } | null;
 }, exchange?: ExchangeClient) {
   const info = getInfoClient();
   const meta = await info.meta();
@@ -899,7 +896,7 @@ export async function placeStopLossOrder(params: {
   triggerPrice: string;
   isTpsl?: boolean;
   vaultAddress?: Address;
-  builder?: { b: string; f: number };
+  builder?: { b: string; f: number } | null;
 }, exchange?: ExchangeClient) {
   const exchangeClient = exchange ?? getExchangeClient();
   const info = getInfoClient();
@@ -908,11 +905,8 @@ export async function placeStopLossOrder(params: {
   const formattedSize = parseFloat(params.size).toFixed(szDecimals);
   const formattedPrice = formatHlPrice(parseFloat(params.price));
   const formattedTrigger = formatHlPrice(parseFloat(params.triggerPrice));
-  
-  // Add builder code if available
-  const { assertBuilderConfiguredForTrading, getBuilderParam } = await import("./builder");
-  assertBuilderConfiguredForTrading();
-  const builderParam = params.builder ?? getBuilderParam();
+  const { getBuilderParam } = await import("./builder");
+  const builderParam = params.builder === null ? undefined : (params.builder ?? getBuilderParam());
   
   return await exchangeClient.order({
     orders: [
@@ -945,7 +939,7 @@ export async function placeTakeProfitOrder(params: {
   triggerPrice: string;
   isTpsl?: boolean;
   vaultAddress?: Address;
-  builder?: { b: string; f: number };
+  builder?: { b: string; f: number } | null;
 }, exchange?: ExchangeClient) {
   const exchangeClient = exchange ?? getExchangeClient();
   const info = getInfoClient();
@@ -954,11 +948,8 @@ export async function placeTakeProfitOrder(params: {
   const formattedSize = parseFloat(params.size).toFixed(szDecimals);
   const formattedPrice = formatHlPrice(parseFloat(params.price));
   const formattedTrigger = formatHlPrice(parseFloat(params.triggerPrice));
-  
-  // Add builder code if available
-  const { assertBuilderConfiguredForTrading, getBuilderParam } = await import("./builder");
-  assertBuilderConfiguredForTrading();
-  const builderParam = params.builder ?? getBuilderParam();
+  const { getBuilderParam } = await import("./builder");
+  const builderParam = params.builder === null ? undefined : (params.builder ?? getBuilderParam());
   
   return await exchangeClient.order({
     orders: [
@@ -983,22 +974,29 @@ export async function placeTakeProfitOrder(params: {
   });
 }
 
+/** Option to skip builder fee for agent/API wallets (HL requires main-wallet sign for approval). */
+export type ExecuteOrderOpts = { skipBuilder?: boolean };
+
 /**
  * Unified order placement - resolves order type and executes.
  * If exchange is provided (e.g. agent's wallet), uses that; otherwise uses operator key.
+ * Pass skipBuilder: true for agent/API wallets—Hyperliquid requires main-wallet sign for builder approval.
  */
 export async function executeOrder(
   params: PlaceOrderParams,
-  exchange?: ExchangeClient
+  exchange?: ExchangeClient,
+  opts?: ExecuteOrderOpts
 ): Promise<unknown> {
   const assetIndex = await getAssetIndex(params.coin);
   const isBuy =
     params.side === "buy" || params.side === "long";
 
-  // Get builder param if available
   const { assertBuilderConfiguredForTrading, getBuilderParam } = await import("./builder");
-  assertBuilderConfiguredForTrading();
-  const builderParam = getBuilderParam();
+  /** null = explicitly skip builder (agent wallets); undefined = use default */
+  const builderParam: { b: string; f: number } | null | undefined = opts?.skipBuilder
+    ? null
+    : getBuilderParam();
+  if (!opts?.skipBuilder) assertBuilderConfiguredForTrading();
 
   switch (params.orderType) {
     case "market":
@@ -1009,7 +1007,7 @@ export async function executeOrder(
         slippagePercent: params.slippagePercent,
         reduceOnly: params.reduceOnly,
         vaultAddress: params.vaultAddress,
-        builder: builderParam,
+        builder: builderParam === null ? null : builderParam,
       }, exchange);
 
     case "limit":
@@ -1022,7 +1020,7 @@ export async function executeOrder(
         reduceOnly: params.reduceOnly ?? false,
         orderType: params.tif ?? DEFAULT_ORDER_CONFIG.defaultTif,
         vaultAddress: params.vaultAddress,
-        builder: builderParam,
+        builder: builderParam === null ? null : builderParam,
       }, exchange);
 
     case "stop-loss":
@@ -1036,7 +1034,7 @@ export async function executeOrder(
         triggerPrice: params.triggerPrice.toString(),
         isTpsl: params.isTpsl,
         vaultAddress: params.vaultAddress,
-        builder: builderParam,
+        builder: builderParam === null ? null : builderParam,
       }, exchange);
 
     case "take-profit":
@@ -1050,7 +1048,7 @@ export async function executeOrder(
         triggerPrice: params.triggerPrice.toString(),
         isTpsl: params.isTpsl,
         vaultAddress: params.vaultAddress,
-        builder: builderParam,
+        builder: builderParam === null ? null : builderParam,
       }, exchange);
 
     default:

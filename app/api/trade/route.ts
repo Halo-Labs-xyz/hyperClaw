@@ -81,34 +81,16 @@ export async function POST(request: Request) {
       }
     }
 
-    // Auto-approve builder code on first trade (Vincent-style)
-    // Supports both traditional and PKP wallets
-    if (agentAddress && body.agentId) {
-      try {
-        const { ensureBuilderApproval } = await import("@/lib/builder");
-        const approved = await ensureBuilderApproval(
-          agentAddress, 
-          agentPrivateKey, // undefined for PKP
-          body.agentId      // used for PKP signing
-        );
-        if (!approved) {
-          console.warn("[Trade] Builder approval failed, proceeding anyway");
-        }
-      } catch (err) {
-        console.error("[Trade] Builder approval check error:", err);
-        // Don't block trade if approval check fails
-      }
-    }
-
     const orderParams = { ...body } as PlaceOrderParams & { agentId?: string };
     delete orderParams.agentId;
+    const skipBuilder = Boolean(body.agentId);
     const result =
       body.agentId && usePKP
         ? await (await import("@/lib/lit-signing")).executeOrderWithPKP(
             body.agentId,
             orderParams
           )
-        : await executeOrder(orderParams, exchange);
+        : await executeOrder(orderParams, exchange, skipBuilder ? { skipBuilder: true } : undefined);
 
     return NextResponse.json({
       success: true,

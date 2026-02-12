@@ -1225,6 +1225,7 @@ export async function getTradeDecision(params: {
   // Agent identity and strategy
   agentName?: string;
   agentStrategy?: string; // The agent's custom strategy description
+  agentId?: string; // For Supermemory per-agent context
 }): Promise<TradeDecision> {
   // Evaluate indicator if configured
   let indicatorSection = "";
@@ -1248,6 +1249,28 @@ IMPORTANT: The above indicator is configured as a KEY signal source. ${
     : `Weight this signal at ${params.indicator.weight}% in your decision. You may reason against it if other factors strongly contradict.`
 }
 `;
+    }
+  }
+
+  // Supermemory: fetch per-agent context (profile + search) if agentId provided
+  let memorySection = "";
+  if (params.agentId) {
+    try {
+      const { getAgentMemoryContext, hasSupermemoryKey } = await import("./supermemory");
+      if (hasSupermemoryKey()) {
+        const query = [
+          params.markets.filter((m) => params.allowedMarkets.includes(m.coin)).map((m) => `${m.coin} $${m.price}`).join(", "),
+          params.currentPositions.map((p) => `${p.coin} ${p.size}`).join(", ") || "no positions",
+        ].join(" | ");
+        const ctx = await getAgentMemoryContext(params.agentId, query);
+        const parts: string[] = [];
+        if (ctx.profileStatic.length) parts.push(`Agent profile (static): ${ctx.profileStatic.join("; ")}`);
+        if (ctx.profileDynamic.length) parts.push(`Agent profile (recent): ${ctx.profileDynamic.join("; ")}`);
+        if (ctx.searchMemories.length) parts.push(`Relevant memories: ${ctx.searchMemories.slice(0, 5).join("; ")}`);
+        if (parts.length) memorySection = `\n=== AGENT MEMORY (from past decisions & outcomes) ===\n${parts.join("\n")}\n`;
+      }
+    } catch (e) {
+      console.warn("[AI] Supermemory context fetch failed:", e);
     }
   }
 
@@ -1297,6 +1320,7 @@ ACCOUNT:
 - Aggressiveness: ${params.aggressiveness ?? 50}% (higher = more willing to take trades even with weaker signals)
 ${strategySection}
 ${(params.aggressiveness ?? 50) >= 80 ? 'NOTE: High aggressiveness - be willing to take trades with moderate signals. Do not require strong momentum.' : ''}
+${memorySection}
 ${indicatorSection}
 Provide your trading decision as JSON:`;
 

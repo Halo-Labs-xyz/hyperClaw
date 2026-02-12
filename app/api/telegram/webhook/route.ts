@@ -33,7 +33,6 @@ import {
   getExchangeClientForPKP,
 } from "@/lib/hyperliquid";
 import type { Agent, OrderSide, PlaceOrderParams } from "@/lib/types";
-import { ensureBuilderApproval } from "@/lib/builder";
 import { executeOrderWithPKP } from "@/lib/lit-signing";
 import { handleMcpRequest } from "@/lib/mcp-server";
 import { getTelegramPrivyLink, linkTelegramPrivy } from "@/lib/telegram-privy-link";
@@ -1396,20 +1395,10 @@ async function executeOrderForAgent(
     await updateLeverage(assetIndex, leverage, mode === "cross", executionCtx.exchange);
   }
 
-  try {
-    await ensureBuilderApproval(
-      executionCtx.address,
-      executionCtx.privateKey ?? undefined,
-      agentId
-    );
-  } catch (error) {
-    console.warn(`[Telegram webhook] Builder approval check failed for ${agentId}:`, error);
-  }
-
   const result =
     executionCtx.signingMethod === "pkp"
       ? await executeOrderWithPKP(agentId, order)
-      : await executeOrder(order, executionCtx.exchange);
+      : await executeOrder(order, executionCtx.exchange, { skipBuilder: true });
 
   return { result, signingMethod: executionCtx.signingMethod };
 }

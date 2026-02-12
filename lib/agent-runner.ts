@@ -99,6 +99,8 @@ const TESTNET_MIN_ORDER_NOTIONAL_USD = (() => {
   if (!Number.isFinite(parsed)) return 1;
   return Math.max(0, parsed);
 })();
+/** When true, never skip trades: minConfidence=0, min notional=$0.01. Default true. */
+const AGENT_NEVER_SKIP_TRADES = process.env.AGENT_NEVER_SKIP_TRADES !== "false";
 
 function getAgentDeploymentNetwork(agent: {
   autonomy?: { deploymentNetwork?: string };
@@ -422,7 +424,7 @@ async function executeTickInternal(agentId: string): Promise<TradeLog> {
   }
 
   const ex = agentExchange ?? undefined;
-  const cadence = testnetContinuousExecution
+  const cadence = testnetContinuousExecution || AGENT_NEVER_SKIP_TRADES
     ? {
         shouldThrottle: false,
         reason: "",
@@ -567,7 +569,7 @@ async function executeTickInternal(agentId: string): Promise<TradeLog> {
       }
     }
 
-    // 4. Ask AI for trade decision (with indicator and strategy if configured)
+    // 4. Ask AI for trade decision (with indicator, strategy, and Supermemory context)
     let decision = await getTradeDecision({
       markets,
       currentPositions: positions,
@@ -578,14 +580,16 @@ async function executeTickInternal(agentId: string): Promise<TradeLog> {
       aggressiveness: agent.autonomy?.aggressiveness ?? 50,
       indicator: agent.indicator,
       historicalPrices: Object.keys(historicalPrices).length > 0 ? historicalPrices : undefined,
-      // Pass agent identity and custom strategy
       agentName: agent.name,
-      agentStrategy: agent.description, // The agent's description IS its strategy
+      agentStrategy: agent.description,
+      agentId,
     });
 
-    const minConfidence = testnetContinuousExecution
-      ? Math.min(getConfiguredMinConfidence(agent), TESTNET_MIN_CONFIDENCE_OVERRIDE)
-      : getConfiguredMinConfidence(agent);
+    const minConfidence = AGENT_NEVER_SKIP_TRADES
+      ? 0
+      : testnetContinuousExecution
+        ? Math.min(getConfiguredMinConfidence(agent), TESTNET_MIN_CONFIDENCE_OVERRIDE)
+        : getConfiguredMinConfidence(agent);
     const allowedMarkets = new Set(agent.markets.map((m) => m.toUpperCase()));
     const maxSizeByRisk = getRiskMaxSizeFraction(agent.riskLevel);
     const hasPositionForAsset = (asset: string) =>
@@ -667,9 +671,11 @@ async function executeTickInternal(agentId: string): Promise<TradeLog> {
 
         console.log(`[Agent ${agentId}] Order calculation: capital=$${capitalToUse}, price=$${price}, size=${orderSize}`);
 
-        const minOrderNotionalUsd = testnetContinuousExecution
-          ? TESTNET_MIN_ORDER_NOTIONAL_USD
-          : AGENT_MIN_ORDER_NOTIONAL_USD;
+        const minOrderNotionalUsd = AGENT_NEVER_SKIP_TRADES
+          ? 0.01
+          : testnetContinuousExecution
+            ? TESTNET_MIN_ORDER_NOTIONAL_USD
+            : AGENT_MIN_ORDER_NOTIONAL_USD;
 
         if (!isFinite(orderSize) || isNaN(orderSize) || orderSize <= 0) {
           console.warn(`[Agent ${agentId}] SKIPPING: Invalid order size: ${orderSize} (capital=${capitalToUse}, price=${price})`);
@@ -705,7 +711,7 @@ async function executeTickInternal(agentId: string): Promise<TradeLog> {
             console.log(`[Agent ${agentId}] PKP order executed successfully!`);
           } else if (ex) {
             console.log(`[Agent ${agentId}] Executing order:`, JSON.stringify(entryParams));
-            await executeOrder(entryParams, ex);
+            await executeOrder(entryParams, ex, { skipBuilder: true });
             console.log(`[Agent ${agentId}] Order executed successfully!`);
           } else {
             console.warn(`[Agent ${agentId}] No exchange client - skipping order execution`);
@@ -738,7 +744,7 @@ async function executeTickInternal(agentId: string): Promise<TradeLog> {
                 const { executeOrderWithPKP } = await import("./lit-signing");
                 await executeOrderWithPKP(agentId, slParams);
               } else {
-                await executeOrder(slParams, ex);
+                await executeOrder(slParams, ex, { skipBuilder: true });
               }
             } catch (slError) {
               console.error(`[Agent ${agentId}] Stop-loss placement failed:`, slError);
@@ -764,7 +770,7 @@ async function executeTickInternal(agentId: string): Promise<TradeLog> {
                 const { executeOrderWithPKP } = await import("./lit-signing");
                 await executeOrderWithPKP(agentId, tpParams);
               } else {
-                await executeOrder(tpParams, ex);
+                await executeOrder(tpParams, ex, { skipBuilder: true });
               }
             } catch (tpError) {
               console.error(`[Agent ${agentId}] Take-profit placement failed:`, tpError);
@@ -796,6 +802,24 @@ async function executeTickInternal(agentId: string): Promise<TradeLog> {
     };
 
     await appendTradeLog(tradeLog);
+
+    // 5b. Store in Supermemory for future context
+    try {
+      const { addAgentMemory, hasSupermemoryKey } = await import("./supermemory");
+      if (hasSupermemoryKey()) {
+        const outcome = executed && executionResult
+          ? `executed: ${decision.action} ${decision.asset} size=${executionResult.fillSize} price=$${executionResult.fillPrice}`
+          : `skipped: ${decision.reasoning?.slice(0, 100)}`;
+        const marketSummary = markets.filter((m) => agent.markets.includes(m.coin)).map((m) => `${m.coin}=$${m.price}`).join(", ") || "N/A";
+        await addAgentMemory(
+          agentId,
+          `Market: ${marketSummary}. Decision: ${decision.action} ${decision.asset} @ ${(decision.confidence ?? 0) * 100}% confidence. Reasoning: ${decision.reasoning ?? ""}. Outcome: ${outcome}`,
+          { type: "trade_decision", executed: String(executed), timestamp: String(Date.now()) }
+        );
+      }
+    } catch (smErr) {
+      console.warn(`[Agent ${agentId}] Supermemory add failed:`, smErr);
+    }
 
     // 6. Update agent stats
     await updateAgent(agentId, {
@@ -931,7 +955,7 @@ export async function executeApprovedTrade(
           const { executeOrderWithPKP } = await import("./lit-signing");
           await executeOrderWithPKP(agentId, entryParams);
         } else if (agentExchange) {
-          await executeOrder(entryParams, agentExchange);
+          await executeOrder(entryParams, agentExchange, { skipBuilder: true });
         }
         executed = true;
         executionResult = {
@@ -957,7 +981,7 @@ export async function executeApprovedTrade(
             const { executeOrderWithPKP } = await import("./lit-signing");
             await executeOrderWithPKP(agentId, slParams);
           } else if (agentExchange) {
-            await executeOrder(slParams, agentExchange);
+            await executeOrder(slParams, agentExchange, { skipBuilder: true });
           }
         }
         if (decision.takeProfit && decision.action !== "close") {
@@ -976,7 +1000,7 @@ export async function executeApprovedTrade(
             const { executeOrderWithPKP } = await import("./lit-signing");
             await executeOrderWithPKP(agentId, tpParams);
           } else if (agentExchange) {
-            await executeOrder(tpParams, agentExchange);
+            await executeOrder(tpParams, agentExchange, { skipBuilder: true });
           }
         }
       }
