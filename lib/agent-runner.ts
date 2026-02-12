@@ -109,6 +109,16 @@ const TESTNET_MIN_ORDER_NOTIONAL_USD = (() => {
 /** When true, never skip trades: minConfidence=0, min notional=$0.01. Default true. */
 const AGENT_NEVER_SKIP_TRADES = process.env.AGENT_NEVER_SKIP_TRADES !== "false";
 
+/** Testing wallet: no AI cap, 30 min interval for our internal testing */
+const TESTING_WALLET = (process.env.AGENT_TESTING_WALLET_ADDRESS || "0xF3dCE9f6a8dC77d30847Ece744d68b652a730185").toLowerCase();
+const TESTING_WALLET_INTERVAL_MS = 30 * 60 * 1000; // 30 min
+
+function isTestingWallet(agent: { hlAddress?: string; telegram?: { ownerWalletAddress?: string } }): boolean {
+  const a = agent.hlAddress?.toLowerCase();
+  const b = agent.telegram?.ownerWalletAddress?.toLowerCase();
+  return (!!a && a === TESTING_WALLET) || (!!b && b === TESTING_WALLET);
+}
+
 function getAgentDeploymentNetwork(agent: {
   autonomy?: { deploymentNetwork?: string };
 }): "testnet" | "mainnet" {
@@ -197,7 +207,11 @@ function getUtcHour(nowMs: number): number {
   return new Date(nowMs).getUTCHours();
 }
 
-function evaluateDecisionCadence(agentId: string, nowMs: number): {
+function evaluateDecisionCadence(
+  agentId: string,
+  nowMs: number,
+  agent?: { hlAddress?: string; telegram?: { ownerWalletAddress?: string } }
+): {
   shouldThrottle: boolean;
   reason: string;
   nextEligibleAtMs: number;
@@ -206,9 +220,11 @@ function evaluateDecisionCadence(agentId: string, nowMs: number): {
   const cadence = getDecisionCadence(agentId);
   const hour = getUtcHour(nowMs);
   const inHotHours = AGENT_AI_HOT_HOURS_UTC.has(hour);
-  const intervalMs = inHotHours
-    ? AGENT_AI_HOT_HOURS_DECISION_MIN_INTERVAL_MS
-    : AGENT_AI_OFF_HOURS_DECISION_MIN_INTERVAL_MS;
+  const intervalMs = agent && isTestingWallet(agent)
+    ? TESTING_WALLET_INTERVAL_MS
+    : inHotHours
+      ? AGENT_AI_HOT_HOURS_DECISION_MIN_INTERVAL_MS
+      : AGENT_AI_OFF_HOURS_DECISION_MIN_INTERVAL_MS;
 
   if (cadence.lastDecisionAtMs <= 0 || nowMs - cadence.lastDecisionAtMs >= intervalMs) {
     cadence.lastDecisionAtMs = nowMs;
@@ -319,7 +335,9 @@ export async function startAgent(
   if (!agent) throw new Error(`Agent ${agentId} not found`);
   const skipAdaptiveBackoff = TESTNET_FORCE_CONTINUOUS_EXECUTION && isTestnetAgent(agent);
 
-  const tickInterval = intervalMs ?? parseInt(process.env.AGENT_TICK_INTERVAL || String(AGENT_TICK_INTERVAL_DEFAULT_MS));
+  const tickInterval = isTestingWallet(agent)
+    ? TESTING_WALLET_INTERVAL_MS
+    : (intervalMs ?? parseInt(process.env.AGENT_TICK_INTERVAL || String(AGENT_TICK_INTERVAL_DEFAULT_MS)));
 
   const state: AgentRunnerState = {
     agentId,
@@ -438,7 +456,7 @@ async function executeTickInternal(agentId: string): Promise<TradeLog> {
         nextEligibleAtMs: Date.now(),
         shouldPersistThrottleLog: false,
       }
-    : evaluateDecisionCadence(agentId, Date.now());
+    : evaluateDecisionCadence(agentId, Date.now(), agent);
   if (cadence.shouldThrottle) {
     const holdLog: TradeLog = {
       id: randomBytes(8).toString("hex"),
@@ -592,7 +610,8 @@ async function executeTickInternal(agentId: string): Promise<TradeLog> {
 
     if (!hasAgentOwnKey || !agentApiKeys) {
       const { checkAgentBudget } = await import("./ai-budget");
-      const budget = await checkAgentBudget(agentId);
+      const ownerWallet = agent.hlAddress ?? agent.telegram?.ownerWalletAddress;
+      const budget = await checkAgentBudget(agentId, { ownerWallet });
       if (!budget.allowed) {
         const holdLog: TradeLog = {
           id: randomBytes(8).toString("hex"),
@@ -679,8 +698,8 @@ async function executeTickInternal(agentId: string): Promise<TradeLog> {
       };
     }
 
-    // 6. Record AI cost when using platform key (not agent's own)
-    if (!hasAgentOwnKey) {
+    // 6. Record AI cost when using platform key (not agent's own). Skip for testing wallet.
+    if (!hasAgentOwnKey && !isTestingWallet(agent)) {
       try {
         const { recordAgentDecisionCost } = await import("./ai-budget");
         await recordAgentDecisionCost(agentId);
