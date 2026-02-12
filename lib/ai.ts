@@ -651,7 +651,7 @@ function getConfiguredModelChain(): ModelRoute[] {
   const railwayChain = (process.env.RAILWAY_AI_MODEL_CHAIN || "").trim();
   const chainSource = onRailway && railwayChain ? railwayChain : (process.env.AI_MODEL_CHAIN || "").trim();
   const chainItems = chainSource
-    ? explicit.split(",").map((x) => x.trim()).filter(Boolean)
+    ? chainSource.split(",").map((x) => x.trim()).filter(Boolean)
     : [
         ...buildBalancedPrimaryRoutes(getConfiguredGeminiModels(), getConfiguredNvidiaModels()).map(
           (route) => `${route.provider}:${route.model}`
