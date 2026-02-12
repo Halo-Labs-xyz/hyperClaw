@@ -3,6 +3,8 @@
  */
 import { getAddress } from "viem";
 
+export type MonadNetwork = "mainnet" | "testnet";
+
 const PLACEHOLDER_VALUES = [
   "your_deployed_vault_contract_address",
   "your_hclaw_token_address_after_deployment",
@@ -41,28 +43,121 @@ export function getAddressIfSet(name: string): `0x${string}` | null {
   return normalizeHexAddress(value);
 }
 
-export function getVaultAddressIfDeployed(): `0x${string}` | null {
-  return getAddressIfSet("NEXT_PUBLIC_VAULT_ADDRESS");
+function getAddressFromCandidates(candidates: string[]): `0x${string}` | null {
+  for (const candidate of candidates) {
+    const address = getAddressIfSet(candidate);
+    if (address) return address;
+  }
+  return null;
 }
 
-export function getHclawAddressIfSet(): `0x${string}` | null {
-  return getAddressIfSet("NEXT_PUBLIC_HCLAW_TOKEN_ADDRESS");
+function getNetworkScopedAddress(
+  network: MonadNetwork | undefined,
+  options: { fallback: string; mainnet: string[]; testnet: string[] }
+): `0x${string}` | null {
+  if (network === "mainnet") {
+    return getAddressFromCandidates([...options.mainnet, options.fallback]);
+  }
+  if (network === "testnet") {
+    return getAddressFromCandidates([...options.testnet, options.fallback]);
+  }
+  return getAddressFromCandidates([options.fallback]);
 }
 
-export function getHclawLockAddressIfSet(): `0x${string}` | null {
-  return getAddressIfSet("NEXT_PUBLIC_HCLAW_LOCK_ADDRESS");
+export function getVaultAddressIfDeployed(network?: MonadNetwork): `0x${string}` | null {
+  return getNetworkScopedAddress(network, {
+    fallback: "NEXT_PUBLIC_VAULT_ADDRESS",
+    mainnet: [
+      "MONAD_MAINNET_VAULT_ADDRESS",
+      "NEXT_PUBLIC_MONAD_MAINNET_VAULT_ADDRESS",
+      "NEXT_PUBLIC_VAULT_ADDRESS_MAINNET",
+    ],
+    testnet: [
+      "MONAD_TESTNET_VAULT_ADDRESS",
+      "NEXT_PUBLIC_MONAD_TESTNET_VAULT_ADDRESS",
+      "NEXT_PUBLIC_VAULT_ADDRESS_TESTNET",
+    ],
+  });
 }
 
-export function getHclawPolicyAddressIfSet(): `0x${string}` | null {
-  return getAddressIfSet("NEXT_PUBLIC_HCLAW_POLICY_ADDRESS");
+export function getHclawAddressIfSet(network?: MonadNetwork): `0x${string}` | null {
+  return getNetworkScopedAddress(network, {
+    fallback: "NEXT_PUBLIC_HCLAW_TOKEN_ADDRESS",
+    mainnet: [
+      "NEXT_PUBLIC_HCLAW_TOKEN_ADDRESS_MAINNET",
+      "NEXT_PUBLIC_MONAD_MAINNET_HCLAW_TOKEN_ADDRESS",
+      "MONAD_MAINNET_HCLAW_TOKEN_ADDRESS",
+    ],
+    testnet: [
+      "NEXT_PUBLIC_HCLAW_TOKEN_ADDRESS_TESTNET",
+      "NEXT_PUBLIC_MONAD_TESTNET_HCLAW_TOKEN_ADDRESS",
+      "MONAD_TESTNET_HCLAW_TOKEN_ADDRESS",
+    ],
+  });
 }
 
-export function getHclawRewardsAddressIfSet(): `0x${string}` | null {
-  return getAddressIfSet("NEXT_PUBLIC_HCLAW_REWARDS_ADDRESS");
+export function getHclawLockAddressIfSet(network?: MonadNetwork): `0x${string}` | null {
+  return getNetworkScopedAddress(network, {
+    fallback: "NEXT_PUBLIC_HCLAW_LOCK_ADDRESS",
+    mainnet: [
+      "NEXT_PUBLIC_HCLAW_LOCK_ADDRESS_MAINNET",
+      "NEXT_PUBLIC_MONAD_MAINNET_HCLAW_LOCK_ADDRESS",
+      "MONAD_MAINNET_HCLAW_LOCK_ADDRESS",
+    ],
+    testnet: [
+      "NEXT_PUBLIC_HCLAW_LOCK_ADDRESS_TESTNET",
+      "NEXT_PUBLIC_MONAD_TESTNET_HCLAW_LOCK_ADDRESS",
+      "MONAD_TESTNET_HCLAW_LOCK_ADDRESS",
+    ],
+  });
 }
 
-export function getAgenticLpVaultAddressIfSet(): `0x${string}` | null {
-  return getAddressIfSet("NEXT_PUBLIC_AGENTIC_LP_VAULT_ADDRESS");
+export function getHclawPolicyAddressIfSet(network?: MonadNetwork): `0x${string}` | null {
+  return getNetworkScopedAddress(network, {
+    fallback: "NEXT_PUBLIC_HCLAW_POLICY_ADDRESS",
+    mainnet: [
+      "NEXT_PUBLIC_HCLAW_POLICY_ADDRESS_MAINNET",
+      "NEXT_PUBLIC_MONAD_MAINNET_HCLAW_POLICY_ADDRESS",
+      "MONAD_MAINNET_HCLAW_POLICY_ADDRESS",
+    ],
+    testnet: [
+      "NEXT_PUBLIC_HCLAW_POLICY_ADDRESS_TESTNET",
+      "NEXT_PUBLIC_MONAD_TESTNET_HCLAW_POLICY_ADDRESS",
+      "MONAD_TESTNET_HCLAW_POLICY_ADDRESS",
+    ],
+  });
+}
+
+export function getHclawRewardsAddressIfSet(network?: MonadNetwork): `0x${string}` | null {
+  return getNetworkScopedAddress(network, {
+    fallback: "NEXT_PUBLIC_HCLAW_REWARDS_ADDRESS",
+    mainnet: [
+      "NEXT_PUBLIC_HCLAW_REWARDS_ADDRESS_MAINNET",
+      "NEXT_PUBLIC_MONAD_MAINNET_HCLAW_REWARDS_ADDRESS",
+      "MONAD_MAINNET_HCLAW_REWARDS_ADDRESS",
+    ],
+    testnet: [
+      "NEXT_PUBLIC_HCLAW_REWARDS_ADDRESS_TESTNET",
+      "NEXT_PUBLIC_MONAD_TESTNET_HCLAW_REWARDS_ADDRESS",
+      "MONAD_TESTNET_HCLAW_REWARDS_ADDRESS",
+    ],
+  });
+}
+
+export function getAgenticLpVaultAddressIfSet(network?: MonadNetwork): `0x${string}` | null {
+  return getNetworkScopedAddress(network, {
+    fallback: "NEXT_PUBLIC_AGENTIC_LP_VAULT_ADDRESS",
+    mainnet: [
+      "NEXT_PUBLIC_AGENTIC_LP_VAULT_ADDRESS_MAINNET",
+      "NEXT_PUBLIC_MONAD_MAINNET_AGENTIC_LP_VAULT_ADDRESS",
+      "MONAD_MAINNET_AGENTIC_LP_VAULT_ADDRESS",
+    ],
+    testnet: [
+      "NEXT_PUBLIC_AGENTIC_LP_VAULT_ADDRESS_TESTNET",
+      "NEXT_PUBLIC_MONAD_TESTNET_AGENTIC_LP_VAULT_ADDRESS",
+      "MONAD_TESTNET_AGENTIC_LP_VAULT_ADDRESS",
+    ],
+  });
 }
 
 export function getHclawPointsCloseKey(): string | null {

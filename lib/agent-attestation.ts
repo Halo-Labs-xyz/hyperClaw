@@ -9,6 +9,7 @@ import {
 } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
 import { monadMainnet, monadTestnet } from "@/lib/chains";
+import { buildMonadVisionTxUrl } from "@/lib/monad-vision";
 import { getAgent, updateAgent } from "@/lib/store";
 import { getNetworkState } from "@/lib/network";
 import type { Agent, AgentOnchainAttestation } from "@/lib/types";
@@ -152,12 +153,8 @@ function buildAttestationData(agent: Agent, metadataHash: Hex): Hex {
   return stringToHex(JSON.stringify(envelope));
 }
 
-function buildExplorerUrl(network: DeploymentNetwork, txHash: Hex): string {
-  const base =
-    network === "mainnet"
-      ? monadMainnet.blockExplorers?.default?.url || "https://explorer.monad.xyz"
-      : monadTestnet.blockExplorers?.default?.url || "https://testnet.monadexplorer.com";
-  return `${base.replace(/\/+$/, "")}/tx/${txHash}`;
+function buildExplorerUrl(_network: DeploymentNetwork, txHash: Hex): string {
+  return buildMonadVisionTxUrl(txHash);
 }
 
 function hasFreshAttestation(

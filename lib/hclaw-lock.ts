@@ -80,7 +80,7 @@ export async function getLockContractStatus(network?: MonadNetwork): Promise<{
   address: Address | null;
   deployed: boolean;
 }> {
-  const address = getHclawLockAddressIfSet();
+  const address = getHclawLockAddressIfSet(network);
   if (!address) return { address: null, deployed: false };
 
   try {
@@ -93,7 +93,7 @@ export async function getLockContractStatus(network?: MonadNetwork): Promise<{
 }
 
 export async function getUserLockState(user: Address, network?: MonadNetwork): Promise<HclawLockState> {
-  const lockAddress = getHclawLockAddressIfSet();
+  const lockAddress = getHclawLockAddressIfSet(network);
   if (!lockAddress) return getEmptyLockState(user);
 
   const client = getPublicClient(network);
@@ -179,15 +179,17 @@ export async function getUserLockState(user: Address, network?: MonadNetwork): P
   }
 }
 
-export function buildLockWriteRequest(params:
+export function buildLockWriteRequest(
+  params:
   | { action: "lock"; amountWei: bigint; durationDays: 30 | 90 | 180 }
   | { action: "extendLock"; lockId: bigint; durationDays: 30 | 90 | 180 }
   | { action: "increaseLock"; lockId: bigint; amountWei: bigint }
-  | { action: "unlock"; lockId: bigint }
+  | { action: "unlock"; lockId: bigint },
+  network?: MonadNetwork
 ):
   | { address: Address; abi: typeof HCLAW_LOCK_ABI; functionName: string; args: readonly unknown[] }
   | null {
-  const lockAddress = getHclawLockAddressIfSet();
+  const lockAddress = getHclawLockAddressIfSet(network);
   if (!lockAddress) return null;
 
   if (params.action === "lock") {

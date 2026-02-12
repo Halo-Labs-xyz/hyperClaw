@@ -137,7 +137,7 @@ export async function POST(request: Request) {
           action: "lock",
           amountWei: parseEther(String(amount)),
           durationDays,
-        });
+        }, network);
         return NextResponse.json({ network, tx: serializeTxRequest(req) });
       }
 
@@ -154,7 +154,7 @@ export async function POST(request: Request) {
           action: "extendLock",
           lockId,
           durationDays,
-        });
+        }, network);
         return NextResponse.json({ network, tx: serializeTxRequest(req) });
       }
 
@@ -171,7 +171,7 @@ export async function POST(request: Request) {
           action: "increaseLock",
           lockId,
           amountWei: parseEther(String(amount)),
-        });
+        }, network);
         return NextResponse.json({ network, tx: serializeTxRequest(req) });
       }
 
@@ -183,7 +183,7 @@ export async function POST(request: Request) {
           return NextResponse.json({ error: "lockId is required" }, { status: 400 });
         }
 
-        const req = buildLockWriteRequest({ action: "unlock", lockId });
+        const req = buildLockWriteRequest({ action: "unlock", lockId }, network);
         return NextResponse.json({ network, tx: serializeTxRequest(req) });
       }
 

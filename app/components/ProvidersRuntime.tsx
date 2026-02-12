@@ -15,7 +15,7 @@ export default function ProvidersRuntime({
 }: {
   children: ReactNode;
 }) {
-  const useTestnet = process.env.NEXT_PUBLIC_MONAD_TESTNET === "true";
+  const useTestnet = process.env.NEXT_PUBLIC_MONAD_TESTNET !== "false";
   const wagmiConfig = useMemo(
     () =>
       createConfig({

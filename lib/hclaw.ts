@@ -276,7 +276,7 @@ export async function getHclawState(
   network: "mainnet" | "testnet" = "mainnet",
   opts?: { userAddress?: Address; agentId?: string }
 ): Promise<HclawState | null> {
-  const tokenAddress = getHclawAddressIfSet() as Address | null;
+  const tokenAddress = getHclawAddressIfSet(network) as Address | null;
   if (!tokenAddress) {
     return null;
   }

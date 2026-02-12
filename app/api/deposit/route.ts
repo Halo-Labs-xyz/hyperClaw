@@ -16,6 +16,21 @@ function parseNetwork(value: unknown): MonadNetwork | undefined {
   return undefined;
 }
 
+function summarizeVaultConfig() {
+  const mainnet =
+    process.env.MONAD_MAINNET_VAULT_ADDRESS ||
+    process.env.NEXT_PUBLIC_MONAD_MAINNET_VAULT_ADDRESS ||
+    process.env.NEXT_PUBLIC_VAULT_ADDRESS_MAINNET ||
+    null;
+  const testnet =
+    process.env.MONAD_TESTNET_VAULT_ADDRESS ||
+    process.env.NEXT_PUBLIC_MONAD_TESTNET_VAULT_ADDRESS ||
+    process.env.NEXT_PUBLIC_VAULT_ADDRESS_TESTNET ||
+    null;
+  const fallback = process.env.NEXT_PUBLIC_VAULT_ADDRESS || null;
+  return { mainnet, testnet, fallback };
+}
+
 /**
  * POST /api/deposit
  *
@@ -46,7 +61,14 @@ export async function POST(request: Request) {
 
     if (!result) {
       return NextResponse.json(
-        { error: "No vault event found in transaction" },
+        {
+          error: "No vault event found in transaction",
+          detail: {
+            txHash: body.txHash,
+            requestedNetwork: parseNetwork(body.network) ?? null,
+            vaultConfig: summarizeVaultConfig(),
+          },
+        },
         { status: 404 }
       );
     }

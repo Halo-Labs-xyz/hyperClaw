@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import { useParams } from "next/navigation";
 import { useAccount, useBalance, useWriteContract, useReadContract, useWaitForTransactionReceipt, useSwitchChain } from "wagmi";
 import { parseEther, parseUnits, formatEther, type Address } from "viem";
@@ -233,7 +233,20 @@ export default function AgentDetailPage() {
     hash: withdrawTxHash,
   });
 
-  const vaultAddress = process.env.NEXT_PUBLIC_VAULT_ADDRESS as Address | undefined;
+  const vaultAddress = useMemo(() => {
+    const pick = (value: string | undefined) =>
+      value && /^0x[a-fA-F0-9]{40}$/.test(value) ? (value as Address) : undefined;
+
+    const mainnet =
+      pick(process.env.NEXT_PUBLIC_MONAD_MAINNET_VAULT_ADDRESS) ??
+      pick(process.env.NEXT_PUBLIC_VAULT_ADDRESS_MAINNET);
+    const testnet =
+      pick(process.env.NEXT_PUBLIC_MONAD_TESTNET_VAULT_ADDRESS) ??
+      pick(process.env.NEXT_PUBLIC_VAULT_ADDRESS_TESTNET);
+    const fallback = pick(process.env.NEXT_PUBLIC_VAULT_ADDRESS);
+
+    return (activeNetwork === "mainnet" ? mainnet : testnet) ?? fallback;
+  }, [activeNetwork]);
   const agentIdBytes = agentIdToBytes32(agentId);
 
   // Read user shares from vault

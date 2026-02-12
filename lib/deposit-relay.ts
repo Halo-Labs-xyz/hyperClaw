@@ -248,6 +248,28 @@ function getMonadRpcUrl(network?: MonadNetwork): string {
   return isMonadTestnet() ? testnetRpc : mainnetRpc;
 }
 
+function getVaultAddress(network?: MonadNetwork): Address | undefined {
+  const selectedNetwork = network ?? (isMonadTestnet() ? "testnet" : "mainnet");
+
+  const mainnetCandidates = [
+    process.env.MONAD_MAINNET_VAULT_ADDRESS,
+    process.env.NEXT_PUBLIC_MONAD_MAINNET_VAULT_ADDRESS,
+    process.env.NEXT_PUBLIC_VAULT_ADDRESS_MAINNET,
+  ];
+  const testnetCandidates = [
+    process.env.MONAD_TESTNET_VAULT_ADDRESS,
+    process.env.NEXT_PUBLIC_MONAD_TESTNET_VAULT_ADDRESS,
+    process.env.NEXT_PUBLIC_VAULT_ADDRESS_TESTNET,
+  ];
+
+  const preferred = selectedNetwork === "mainnet" ? mainnetCandidates : testnetCandidates;
+  const fallback = process.env.NEXT_PUBLIC_VAULT_ADDRESS;
+  const value = [...preferred, fallback].find(
+    (candidate) => typeof candidate === "string" && /^0x[a-fA-F0-9]{40}$/.test(candidate.trim())
+  );
+  return value?.trim() as Address | undefined;
+}
+
 function getMonadChain(network?: MonadNetwork) {
   const testnet = network ? network === "testnet" : isMonadTestnet();
   return {
@@ -472,7 +494,7 @@ export async function processVaultTx(
     // callers can still get withdrawal confirmation details.
   }
 
-  const vaultAddress = process.env.NEXT_PUBLIC_VAULT_ADDRESS as Address | undefined;
+  const vaultAddress = getVaultAddress(options?.network);
   if (!vaultAddress) return null;
 
   try {
@@ -834,7 +856,7 @@ let pollInterval: ReturnType<typeof setInterval> | null = null;
 export async function startDepositPoller(intervalMs: number = 10_000): Promise<void> {
   if (pollInterval) return; // Already running
 
-  const vaultAddress = process.env.NEXT_PUBLIC_VAULT_ADDRESS as Address | undefined;
+  const vaultAddress = getVaultAddress();
   if (!vaultAddress) {
     console.warn("[DepositRelay] No VAULT_ADDRESS configured, poller not started");
     return;
@@ -933,7 +955,7 @@ export async function getUserSharePercent(
   user: Address,
   network?: MonadNetwork
 ): Promise<number> {
-  const vaultAddress = process.env.NEXT_PUBLIC_VAULT_ADDRESS as Address | undefined;
+  const vaultAddress = getVaultAddress(network);
   if (!vaultAddress) return 0;
 
   const client = getMonadClient(network);
@@ -967,7 +989,7 @@ export async function getUserSharePercent(
  * Read vault TVL for an agent from on-chain
  */
 export async function getVaultTvlOnChain(agentId: string, network?: MonadNetwork): Promise<number> {
-  const vaultAddress = process.env.NEXT_PUBLIC_VAULT_ADDRESS as Address | undefined;
+  const vaultAddress = getVaultAddress(network);
   if (!vaultAddress) return 0;
 
   const client = getMonadClient(network);

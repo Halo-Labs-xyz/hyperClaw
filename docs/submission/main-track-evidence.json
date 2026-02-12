@@ -17,9 +17,9 @@
     "chainId": 143,
     "contracts": {
       "vault": "0x11C095FD374CCf908Bee6F9eb7CA266d94132Dbf",
-      "hclawLock": "0xcBA4ac3a4A343944Ce4c1856AF2329cfb11B7fa3",
-      "hclawPolicy": "0x2D63f4BBC5ec39EAca0F8b8bF88bbD1813c12DBF",
-      "hclawRewards": "0x7375217B67ED81A13C295Bfa96b1278736986ea5",
+      "hclawLock": "0x4aD49fDfDe2103e6Af7858639c82FDf585Fd33C6",
+      "hclawPolicy": "0xb7f9bFf88ceA67dC4741Ef641724859d1caaA654",
+      "hclawRewards": "0xcBA4ac3a4A343944Ce4c1856AF2329cfb11B7fa3",
       "agenticLpVault": "0xcCAABa6A2903cb7fC609Ff4ff20c8D996177f386",
       "treasuryRouter": "0x2125F78Ca894C55f97D991bC5e17d3aFd290D83d"
     },

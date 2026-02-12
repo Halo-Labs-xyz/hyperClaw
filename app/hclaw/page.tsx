@@ -14,6 +14,7 @@ import { TelegramChatButton } from "@/app/components/TelegramChatButton";
 import { NetworkToggle } from "@/app/components/NetworkToggle";
 import { useNetwork } from "@/app/components/NetworkContext";
 import { monadMainnet, monadTestnet as monadTestnetChain } from "@/lib/chains";
+import { buildMonadVisionTxUrl } from "@/lib/monad-vision";
 import { ERC20_ABI, HCLAW_LOCK_ABI } from "@/lib/vault";
 
 interface HclawPageData {
@@ -87,11 +88,53 @@ interface HclawPageData {
 
 type MonadNetwork = "mainnet" | "testnet";
 
-function getExplorerTxUrl(network: MonadNetwork, txHash: string): string {
-  if (network === "testnet") {
-    return `https://testnet.monadexplorer.com/tx/${txHash}`;
+function getExplorerTxUrl(_network: MonadNetwork, txHash: string): string {
+  return buildMonadVisionTxUrl(txHash);
+}
+
+function normalizeClientAddress(value: string | undefined): Address | undefined {
+  if (!value) return undefined;
+  const trimmed = value.trim();
+  if (!/^0x[a-fA-F0-9]{40}$/.test(trimmed)) return undefined;
+  return trimmed as Address;
+}
+
+function pickClientAddress(candidates: Array<string | undefined>): Address | undefined {
+  for (const candidate of candidates) {
+    const normalized = normalizeClientAddress(candidate);
+    if (normalized) return normalized;
   }
-  return `https://explorer.monad.xyz/tx/${txHash}`;
+  return undefined;
+}
+
+function getClientHclawTokenAddress(network: MonadNetwork): Address | undefined {
+  if (network === "mainnet") {
+    return pickClientAddress([
+      process.env.NEXT_PUBLIC_HCLAW_TOKEN_ADDRESS_MAINNET,
+      process.env.NEXT_PUBLIC_MONAD_MAINNET_HCLAW_TOKEN_ADDRESS,
+      process.env.NEXT_PUBLIC_HCLAW_TOKEN_ADDRESS,
+    ]);
+  }
+  return pickClientAddress([
+    process.env.NEXT_PUBLIC_HCLAW_TOKEN_ADDRESS_TESTNET,
+    process.env.NEXT_PUBLIC_MONAD_TESTNET_HCLAW_TOKEN_ADDRESS,
+    process.env.NEXT_PUBLIC_HCLAW_TOKEN_ADDRESS,
+  ]);
+}
+
+function getClientHclawLockAddress(network: MonadNetwork): Address | undefined {
+  if (network === "mainnet") {
+    return pickClientAddress([
+      process.env.NEXT_PUBLIC_HCLAW_LOCK_ADDRESS_MAINNET,
+      process.env.NEXT_PUBLIC_MONAD_MAINNET_HCLAW_LOCK_ADDRESS,
+      process.env.NEXT_PUBLIC_HCLAW_LOCK_ADDRESS,
+    ]);
+  }
+  return pickClientAddress([
+    process.env.NEXT_PUBLIC_HCLAW_LOCK_ADDRESS_TESTNET,
+    process.env.NEXT_PUBLIC_MONAD_TESTNET_HCLAW_LOCK_ADDRESS,
+    process.env.NEXT_PUBLIC_HCLAW_LOCK_ADDRESS,
+  ]);
 }
 
 function formatMs(ms: number): string {
@@ -109,8 +152,8 @@ export default function HclawHubPage() {
   const activeNetwork: MonadNetwork = monadTestnet ? "testnet" : "mainnet";
   const activeChainId = monadTestnet ? monadTestnetChain.id : monadMainnet.id;
 
-  const hclawTokenAddress = process.env.NEXT_PUBLIC_HCLAW_TOKEN_ADDRESS as Address | undefined;
-  const hclawLockAddress = process.env.NEXT_PUBLIC_HCLAW_LOCK_ADDRESS as Address | undefined;
+  const hclawTokenAddress = useMemo(() => getClientHclawTokenAddress(activeNetwork), [activeNetwork]);
+  const hclawLockAddress = useMemo(() => getClientHclawLockAddress(activeNetwork), [activeNetwork]);
 
   const [loading, setLoading] = useState(true);
   const [data, setData] = useState<HclawPageData>({});
@@ -261,7 +304,31 @@ export default function HclawHubPage() {
     }
 
     if (!hclawTokenAddress || !hclawLockAddress) {
-      setLockStatus("Set NEXT_PUBLIC_HCLAW_TOKEN_ADDRESS and NEXT_PUBLIC_HCLAW_LOCK_ADDRESS.");
+      setLockStatus(
+        activeNetwork === "mainnet"
+          ? "Set NEXT_PUBLIC_HCLAW_TOKEN_ADDRESS_MAINNET and NEXT_PUBLIC_HCLAW_LOCK_ADDRESS_MAINNET (or fallback NEXT_PUBLIC_HCLAW_* values)."
+          : "Set NEXT_PUBLIC_HCLAW_TOKEN_ADDRESS_TESTNET and NEXT_PUBLIC_HCLAW_LOCK_ADDRESS_TESTNET (or fallback NEXT_PUBLIC_HCLAW_* values)."
+      );
+      return;
+    }
+
+    try {
+      const preflight = await fetch(`/api/hclaw/lock?network=${activeNetwork}`, { cache: "no-store" });
+      const preflightBody = await preflight.json();
+      const deployed = Boolean(preflightBody?.contract?.deployed);
+      if (preflightBody?.contract) {
+        setData((prev) => ({ ...prev, lockContract: preflightBody.contract }));
+      }
+      if (!deployed) {
+        setLockStatus(
+          activeNetwork === "mainnet"
+            ? "Lock contract has no code on mainnet. Set NEXT_PUBLIC_HCLAW_LOCK_ADDRESS_MAINNET to the deployed mainnet lock contract."
+            : "Lock contract has no code on testnet. Set NEXT_PUBLIC_HCLAW_LOCK_ADDRESS_TESTNET to the deployed testnet lock contract."
+        );
+        return;
+      }
+    } catch {
+      setLockStatus("Lock preflight failed. Try Refresh and retry.");
       return;
     }
 
@@ -442,7 +509,9 @@ export default function HclawHubPage() {
                   <div>
                     Lock contract:{" "}
                     {data.lockContract?.address ? (
-                      data.lockContract?.deployed ? "deployed" : "missing code on selected network"
+                      data.lockContract?.deployed
+                        ? "deployed"
+                        : `missing code on ${activeNetwork}`
                     ) : "not configured"}
                   </div>
                 </div>

@@ -28,6 +28,17 @@ function requireEnv(name, errors) {
   return value.trim();
 }
 
+function requireOneOfEnv(names, errors, label) {
+  for (const name of names) {
+    const value = process.env[name];
+    if (value && value.trim() !== "") {
+      return value.trim();
+    }
+  }
+  errors.push(`${label} is required (set one of: ${names.join(", ")})`);
+  return "";
+}
+
 function isAddress(value) {
   return /^0x[a-fA-F0-9]{40}$/.test(value);
 }
@@ -47,27 +58,55 @@ if (allowRuntimeSwitch) {
   errors.push("ALLOW_RUNTIME_NETWORK_SWITCH must be false for production");
 }
 
-const vaultAddress = requireEnv("NEXT_PUBLIC_VAULT_ADDRESS", errors);
+const vaultAddress = requireOneOfEnv(
+  [
+    "NEXT_PUBLIC_MONAD_MAINNET_VAULT_ADDRESS",
+    "NEXT_PUBLIC_VAULT_ADDRESS_MAINNET",
+    "NEXT_PUBLIC_VAULT_ADDRESS",
+  ],
+  errors,
+  "Mainnet vault address"
+);
 if (vaultAddress && !isAddress(vaultAddress)) {
-  errors.push("NEXT_PUBLIC_VAULT_ADDRESS must be a valid 0x address");
+  errors.push("Mainnet vault address must be a valid 0x address");
 }
 
 const onMainnet = !monadTestnet || !hlTestnet;
 if (onMainnet) {
-  const hclawToken = requireEnv("NEXT_PUBLIC_HCLAW_TOKEN_ADDRESS", errors);
+  const hclawToken = requireOneOfEnv(
+    ["NEXT_PUBLIC_HCLAW_TOKEN_ADDRESS_MAINNET", "NEXT_PUBLIC_HCLAW_TOKEN_ADDRESS"],
+    errors,
+    "Mainnet HCLAW token address"
+  );
   requireEnv("HYPERCLAW_API_KEY", errors);
-  const hclawLock = requireEnv("NEXT_PUBLIC_HCLAW_LOCK_ADDRESS", errors);
-  const hclawPolicy = requireEnv("NEXT_PUBLIC_HCLAW_POLICY_ADDRESS", errors);
-  const hclawRewards = requireEnv("NEXT_PUBLIC_HCLAW_REWARDS_ADDRESS", errors);
-  const agenticVault = requireEnv("NEXT_PUBLIC_AGENTIC_LP_VAULT_ADDRESS", errors);
+  const hclawLock = requireOneOfEnv(
+    ["NEXT_PUBLIC_HCLAW_LOCK_ADDRESS_MAINNET", "NEXT_PUBLIC_HCLAW_LOCK_ADDRESS"],
+    errors,
+    "Mainnet HCLAW lock address"
+  );
+  const hclawPolicy = requireOneOfEnv(
+    ["NEXT_PUBLIC_HCLAW_POLICY_ADDRESS_MAINNET", "NEXT_PUBLIC_HCLAW_POLICY_ADDRESS"],
+    errors,
+    "Mainnet HCLAW policy address"
+  );
+  const hclawRewards = requireOneOfEnv(
+    ["NEXT_PUBLIC_HCLAW_REWARDS_ADDRESS_MAINNET", "NEXT_PUBLIC_HCLAW_REWARDS_ADDRESS"],
+    errors,
+    "Mainnet HCLAW rewards address"
+  );
+  const agenticVault = requireOneOfEnv(
+    ["NEXT_PUBLIC_AGENTIC_LP_VAULT_ADDRESS_MAINNET", "NEXT_PUBLIC_AGENTIC_LP_VAULT_ADDRESS"],
+    errors,
+    "Mainnet agentic LP vault address"
+  );
   requireEnv("HCLAW_POINTS_CLOSE_KEY", errors);
 
   for (const [key, value] of [
-    ["NEXT_PUBLIC_HCLAW_TOKEN_ADDRESS", hclawToken],
-    ["NEXT_PUBLIC_HCLAW_LOCK_ADDRESS", hclawLock],
-    ["NEXT_PUBLIC_HCLAW_POLICY_ADDRESS", hclawPolicy],
-    ["NEXT_PUBLIC_HCLAW_REWARDS_ADDRESS", hclawRewards],
-    ["NEXT_PUBLIC_AGENTIC_LP_VAULT_ADDRESS", agenticVault],
+    ["Mainnet HCLAW token address", hclawToken],
+    ["Mainnet HCLAW lock address", hclawLock],
+    ["Mainnet HCLAW policy address", hclawPolicy],
+    ["Mainnet HCLAW rewards address", hclawRewards],
+    ["Mainnet agentic LP vault address", agenticVault],
   ]) {
     if (value && !isAddress(value)) {
       errors.push(`${key} must be a valid 0x address`);

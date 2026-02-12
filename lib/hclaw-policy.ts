@@ -51,7 +51,7 @@ function getPublicClient(network?: MonadNetwork) {
 }
 
 async function readBaseCapFallback(network?: MonadNetwork): Promise<number> {
-  const vaultAddress = getVaultAddressIfDeployed();
+  const vaultAddress = getVaultAddressIfDeployed(network);
   if (!vaultAddress) return 100;
 
   try {
@@ -73,7 +73,7 @@ async function readPolicyFromChain(user: Address, network?: MonadNetwork): Promi
   const cached = policyCache.get(cacheKey);
   if (cached && cached.expiresAt > Date.now()) return cached.value;
 
-  const policyAddress = getHclawPolicyAddressIfSet();
+  const policyAddress = getHclawPolicyAddressIfSet(network);
   const lockState = await getUserLockState(user, network);
 
   if (!policyAddress) {
@@ -185,7 +185,7 @@ async function readPolicyFromChain(user: Address, network?: MonadNetwork): Promi
 }
 
 async function readUserDepositsUsd(agentId: string, user: Address, network?: MonadNetwork): Promise<number> {
-  const vaultAddress = getVaultAddressIfDeployed();
+  const vaultAddress = getVaultAddressIfDeployed(network);
   if (!vaultAddress) return 0;
 
   try {
@@ -223,7 +223,7 @@ export async function getUserCapContext(
 }
 
 export async function getBaseCapUsd(network?: MonadNetwork): Promise<number> {
-  const policyAddress = getHclawPolicyAddressIfSet();
+  const policyAddress = getHclawPolicyAddressIfSet(network);
   if (!policyAddress) return readBaseCapFallback(network);
 
   try {
