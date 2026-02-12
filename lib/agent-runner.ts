@@ -578,7 +578,7 @@ async function executeTickInternal(agentId: string): Promise<TradeLog> {
         const key = decrypt(agent.aiApiKey!.encryptedKey);
         if (agent.aiApiKey!.provider === "anthropic") agentApiKeys = { anthropic: key };
         else agentApiKeys = { openai: key };
-      } catch (e) {
+      } catch (_e) {
         console.warn(`[Agent ${agentId}] Failed to decrypt API key, using platform budget`);
       }
     }
