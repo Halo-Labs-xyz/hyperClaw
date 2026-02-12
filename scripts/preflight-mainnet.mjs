@@ -54,6 +54,7 @@ if (vaultAddress && !isAddress(vaultAddress)) {
 
 const onMainnet = !monadTestnet || !hlTestnet;
 if (onMainnet) {
+  const hclawToken = requireEnv("NEXT_PUBLIC_HCLAW_TOKEN_ADDRESS", errors);
   requireEnv("HYPERCLAW_API_KEY", errors);
   const hclawLock = requireEnv("NEXT_PUBLIC_HCLAW_LOCK_ADDRESS", errors);
   const hclawPolicy = requireEnv("NEXT_PUBLIC_HCLAW_POLICY_ADDRESS", errors);
@@ -62,6 +63,7 @@ if (onMainnet) {
   requireEnv("HCLAW_POINTS_CLOSE_KEY", errors);
 
   for (const [key, value] of [
+    ["NEXT_PUBLIC_HCLAW_TOKEN_ADDRESS", hclawToken],
     ["NEXT_PUBLIC_HCLAW_LOCK_ADDRESS", hclawLock],
     ["NEXT_PUBLIC_HCLAW_POLICY_ADDRESS", hclawPolicy],
     ["NEXT_PUBLIC_HCLAW_REWARDS_ADDRESS", hclawRewards],

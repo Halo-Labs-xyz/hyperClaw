@@ -16,6 +16,8 @@ type PnlPoint = {
 };
 
 const MAX_POINTS = 96;
+const TICK_INTERVAL_MS = 4000;
+const CHART_TRANSITION_MS = 3800;
 const CHART_COLORS = [
   "#4AF0FF",
   "#30E8A0",
@@ -46,6 +48,24 @@ function buildPath(points: Array<{ x: number; y: number }>): string {
   if (!points.length) return "";
   if (points.length === 1) return `M ${points[0].x} ${points[0].y}`;
   return points.map((p, i) => `${i === 0 ? "M" : "L"} ${p.x} ${p.y}`).join(" ");
+}
+
+function normalizeHistory(history: PnlPoint[], desiredPoints: number, fallbackValue: number): PnlPoint[] {
+  if (desiredPoints <= 0) return [];
+  if (history.length === 0) {
+    return Array.from({ length: desiredPoints }, () => ({ t: Date.now(), v: fallbackValue }));
+  }
+
+  const trimmed = history.slice(-desiredPoints);
+  if (trimmed.length === desiredPoints) return trimmed;
+
+  const padCount = desiredPoints - trimmed.length;
+  const first = trimmed[0];
+  const padding = Array.from({ length: padCount }, (_, idx) => ({
+    t: first.t - (padCount - idx),
+    v: first.v,
+  }));
+  return [...padding, ...trimmed];
 }
 
 export default function ArenaPage() {
@@ -79,7 +99,7 @@ export default function ArenaPage() {
     };
 
     fetchAgents();
-    const interval = setInterval(fetchAgents, 4000);
+    const interval = setInterval(fetchAgents, TICK_INTERVAL_MS);
     return () => {
       mounted = false;
       clearInterval(interval);
@@ -93,35 +113,46 @@ export default function ArenaPage() {
     const queue = [...agents];
     const concurrency = Math.min(4, queue.length);
 
-    const fetchOne = async () => {
-      while (!cancelled) {
-        const a = queue.shift();
-        if (!a) return;
+    const fetchPnlSnapshot = async () => {
+      const updates: Record<string, number> = {};
 
-        try {
-          const res = await fetch("/api/fund", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ action: "agent-balance", agentId: a.id, includePnl: true }),
-            signal: AbortSignal.timeout(7000),
-          });
-          const data = await res.json();
-          if (cancelled || typeof data.totalPnl !== "number") continue;
+      const fetchOne = async () => {
+        while (!cancelled) {
+          const a = queue.shift();
+          if (!a) return;
 
-          const ts = Date.now();
-          setPnlMap((prev) => ({ ...prev, [a.id]: data.totalPnl as number }));
-          setHistoryMap((prev) => {
-            const current = prev[a.id] || [];
-            const next = [...current, { t: ts, v: data.totalPnl as number }].slice(-MAX_POINTS);
-            return { ...prev, [a.id]: next };
-          });
-        } catch {
-          // non-critical
+          try {
+            const res = await fetch("/api/fund", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ action: "agent-balance", agentId: a.id, includePnl: true }),
+              signal: AbortSignal.timeout(7000),
+            });
+            const data = await res.json();
+            if (cancelled || typeof data.totalPnl !== "number") continue;
+            updates[a.id] = data.totalPnl as number;
+          } catch {
+            // non-critical
+          }
         }
-      }
+      };
+
+      await Promise.all(Array.from({ length: concurrency }, () => fetchOne()));
+      if (cancelled || Object.keys(updates).length === 0) return;
+
+      const ts = Date.now();
+      setPnlMap((prev) => ({ ...prev, ...updates }));
+      setHistoryMap((prev) => {
+        const nextMap = { ...prev };
+        for (const [agentId, pnl] of Object.entries(updates)) {
+          const current = nextMap[agentId] || [];
+          nextMap[agentId] = [...current, { t: ts, v: pnl }].slice(-MAX_POINTS);
+        }
+        return nextMap;
+      });
     };
 
-    Promise.all(Array.from({ length: concurrency }, () => fetchOne()));
+    void fetchPnlSnapshot();
 
     return () => {
       cancelled = true;
@@ -173,11 +204,10 @@ export default function ArenaPage() {
     const visibleAgents =
       chartMode === "focus" && selectedAgent ? [selectedAgent] : chartAgents;
 
+    const desiredPoints = TIMEFRAME_POINTS[timeframe];
     const withHistory = visibleAgents.map((agent) => ({
       agent,
-      history: (historyMap[agent.id] || [{ t: Date.now(), v: getPnl(agent) }]).slice(
-        -TIMEFRAME_POINTS[timeframe]
-      ),
+      history: normalizeHistory(historyMap[agent.id] || [], desiredPoints, getPnl(agent)),
     }));
 
     const allValues = withHistory.flatMap((s) => s.history.map((p) => p.v));
@@ -191,7 +221,7 @@ export default function ArenaPage() {
     if (rawMax <= 0) maxValue = Math.max(maxValue, base * 0.08);
     const span = Math.max(0.0001, maxValue - minValue);
 
-    const pointCount = Math.max(2, Math.max(...withHistory.map((s) => s.history.length)));
+    const pointCount = Math.max(2, desiredPoints);
 
     const lines = withHistory.map((series, idx) => {
       const points = series.history.map((point, i) => {
@@ -385,7 +415,7 @@ export default function ArenaPage() {
                       strokeWidth={selectedAgent?.id === line.agent.id ? 0.85 : 0.55}
                       strokeLinecap="round"
                       strokeLinejoin="round"
-                      style={{ transition: "d 650ms cubic-bezier(0.22, 0.61, 0.36, 1)" }}
+                      style={{ transition: `d ${CHART_TRANSITION_MS}ms linear` }}
                     />
                   ))}
                 </svg>
@@ -407,7 +437,8 @@ export default function ArenaPage() {
                         top: `${line.last.y}%`,
                         transform: "translate(-50%, -50%)",
                         zIndex: active ? 40 : 25,
-                        transition: "left 650ms cubic-bezier(0.22, 0.61, 0.36, 1), top 650ms cubic-bezier(0.22, 0.61, 0.36, 1)",
+                        transition: `left ${CHART_TRANSITION_MS}ms linear, top ${CHART_TRANSITION_MS}ms linear`,
+                        willChange: "left, top",
                       }}
                       title={`${line.agent.name} ${formatUsd(getPnl(line.agent))}`}
                     >
@@ -445,23 +476,6 @@ export default function ArenaPage() {
                   </div>
                 </div>
 
-                <div className="absolute left-3 top-10 flex flex-wrap gap-1.5 max-w-[70%]">
-                  {chartSeries.lines.map((line) => (
-                    <button
-                      key={line.agent.id}
-                      type="button"
-                      onClick={() => setSelectedAgentId(line.agent.id)}
-                      className={`inline-flex items-center gap-1.5 px-2 py-1 rounded border text-[10px] ${
-                        selectedAgent?.id === line.agent.id
-                          ? "bg-card/90 border-white/30 text-foreground"
-                          : "bg-black/35 border-white/10 text-muted hover:text-foreground"
-                      }`}
-                    >
-                      <span className="w-2 h-2 rounded-full" style={{ backgroundColor: line.color }} />
-                      {line.agent.name}
-                    </button>
-                  ))}
-                </div>
               </div>
             )}
           </div>

@@ -621,9 +621,12 @@ export const NADFUN_CONFIG = {
   mainnet: {
     chainId: 143,
     apiUrl: "https://api.nadapp.net",
+    dexFactory: "0x6B5F564339DbAD6b780249827f2198a841FEB7F3" as Address,
+    wmon: "0x3bd359C1119dA7Da1D913D1C4D2B7c461115433A" as Address,
     bondingCurveRouter: "0x6F6B8F1a20703309951a5127c45B49b1CD981A22" as Address,
     lens: "0x7e78A8DE94f21804F7a17F4E8BF9EC2c872187ea" as Address,
     curve: "0xA7283d07812a02AFB7C09B60f8896bCEA3F90aCE" as Address,
+    dexRouter: "0x0B79d71AE99528D1dB24A4148b5f4F865cc2b137" as Address,
   },
   testnet: {
     chainId: 10143,
