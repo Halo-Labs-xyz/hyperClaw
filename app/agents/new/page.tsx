@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, useRef } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { usePrivy } from "@privy-io/react-auth";
@@ -8,7 +8,8 @@ import { NetworkToggle } from "@/app/components/NetworkToggle";
 import { useNetwork } from "@/app/components/NetworkContext";
 import { HyperclawIcon } from "@/app/components/HyperclawIcon";
 import { TelegramChatButton } from "@/app/components/TelegramChatButton";
-import type { AutonomyMode } from "@/lib/types";
+import { buildMonadVisionTxUrl } from "@/lib/monad-vision";
+import type { AutonomyMode, AgentOnchainAttestation } from "@/lib/types";
 import type { PerpMarketInfo, SpotMarketInfo } from "@/lib/hyperliquid";
 
 const RISK_CONFIG = {
@@ -50,6 +51,22 @@ const AUTONOMY_MODES: { value: AutonomyMode; label: string; desc: string; icon: 
 // Top perp markets shown first (pinned)
 const PINNED_PERPS = ["BTC", "ETH", "SOL", "DOGE", "AVAX", "ARB", "OP", "LINK", "UNI", "AAVE"];
 
+type CreateProgressStage =
+  | "idle"
+  | "submitting"
+  | "provisioning"
+  | "attesting"
+  | "confirmed"
+  | "failed";
+
+const CREATE_STAGE_LABELS: Record<Exclude<CreateProgressStage, "idle">, string> = {
+  submitting: "Preparing",
+  provisioning: "Securing Wallet",
+  attesting: "Registering On-Chain",
+  confirmed: "Completed",
+  failed: "Failed",
+};
+
 export default function CreateAgentPage() {
   const router = useRouter();
   const { user } = usePrivy();
@@ -75,6 +92,17 @@ export default function CreateAgentPage() {
 
   const [creating, setCreating] = useState(false);
   const [error, setError] = useState("");
+  const [createProgress, setCreateProgress] = useState<{
+    stage: CreateProgressStage;
+    message: string;
+  }>({
+    stage: "idle",
+    message: "",
+  });
+  const [createdAgentId, setCreatedAgentId] = useState<string | null>(null);
+  const [createdAttestation, setCreatedAttestation] = useState<AgentOnchainAttestation | null>(null);
+  const [createWarning, setCreateWarning] = useState<string | null>(null);
+  const createProgressTimers = useRef<number[]>([]);
 
   // Market data from Hyperliquid
   const [perpMarkets, setPerpMarkets] = useState<PerpMarketInfo[]>([]);
@@ -216,8 +244,32 @@ export default function CreateAgentPage() {
   const handleCreate = async () => {
     if (!name.trim()) { setError("Agent name is required"); return; }
     if (markets.length === 0) { setError("Select at least one market"); return; }
+
+    createProgressTimers.current.forEach((timer) => window.clearTimeout(timer));
+    createProgressTimers.current = [];
     setCreating(true);
     setError("");
+    setCreateWarning(null);
+    setCreatedAgentId(null);
+    setCreatedAttestation(null);
+    setCreateProgress({
+      stage: "submitting",
+      message: "Submitting secure agent configuration...",
+    });
+
+    const queueProgress = (delayMs: number, stage: CreateProgressStage, message: string) => {
+      const timer = window.setTimeout(() => {
+        setCreateProgress((prev) => {
+          if (prev.stage === "confirmed" || prev.stage === "failed") return prev;
+          return { stage, message };
+        });
+      }, delayMs);
+      createProgressTimers.current.push(timer);
+    };
+
+    queueProgress(900, "provisioning", "Provisioning secure signing wallet...");
+    queueProgress(2500, "attesting", "Registering agent attestation on Monad...");
+
     try {
       const network = monadTestnet ? "testnet" : "mainnet";
       const res = await fetch("/api/agents", {
@@ -253,17 +305,68 @@ export default function CreateAgentPage() {
         throw new Error(msg);
       }
       const data = await res.json();
-      router.push(`/agents/${data.agent.id}`);
+      createProgressTimers.current.forEach((timer) => window.clearTimeout(timer));
+      createProgressTimers.current = [];
+
+      const agentId = typeof data?.agent?.id === "string" ? data.agent.id : null;
+      const attestation = (data?.attestation ?? null) as AgentOnchainAttestation | null;
+      const warning = typeof data?.warning === "string" ? data.warning : null;
+
+      setCreatedAgentId(agentId);
+      setCreatedAttestation(attestation);
+      setCreateWarning(warning);
+
+      if (attestation?.txHash) {
+        setCreateProgress({
+          stage: "confirmed",
+          message: `Secure agent registered on Monad ${attestation.network}.`,
+        });
+      } else if (warning) {
+        setCreateProgress({
+          stage: "failed",
+          message: warning,
+        });
+      } else {
+        setCreateProgress({
+          stage: "confirmed",
+          message: "Agent created successfully.",
+        });
+      }
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Failed to create agent. Please try again.");
+      const message = e instanceof Error ? e.message : "Failed to create agent. Please try again.";
+      setError(message);
+      setCreateProgress({
+        stage: "failed",
+        message,
+      });
     } finally {
       setCreating(false);
+      createProgressTimers.current.forEach((timer) => window.clearTimeout(timer));
+      createProgressTimers.current = [];
     }
   };
 
   const leveragePercent = ((maxLeverage - 1) / 49) * 100;
   const stopLossPercent = ((stopLoss - 1) / 24) * 100;
   const aggressivenessPercent = aggressiveness;
+  const createStageLabel =
+    createProgress.stage === "idle" ? null : CREATE_STAGE_LABELS[createProgress.stage as Exclude<CreateProgressStage, "idle">];
+  const createProgressTone =
+    createProgress.stage === "confirmed"
+      ? "border-success/30 bg-success/10 text-success"
+      : createProgress.stage === "failed"
+      ? "border-danger/30 bg-danger/10 text-danger"
+      : "border-accent/30 bg-accent/10 text-accent";
+  const createdAttestationExplorerUrl = createdAttestation?.txHash
+    ? createdAttestation.explorerUrl ?? buildMonadVisionTxUrl(createdAttestation.txHash)
+    : null;
+
+  useEffect(() => {
+    return () => {
+      createProgressTimers.current.forEach((timer) => window.clearTimeout(timer));
+      createProgressTimers.current = [];
+    };
+  }, []);
 
   return (
     <div className="min-h-screen page-bg relative overflow-hidden">
@@ -817,6 +920,71 @@ export default function CreateAgentPage() {
             </div>
           )}
 
+          {createProgress.stage !== "idle" && (
+            <div className={`rounded-xl border p-4 space-y-3 ${createProgressTone}`}>
+              <div className="flex items-start gap-3">
+                <div className="w-5 h-5 mt-0.5">
+                  {createProgress.stage === "confirmed" ? (
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.25">
+                      <path d="M20 6L9 17l-5-5" strokeLinecap="round" strokeLinejoin="round" />
+                    </svg>
+                  ) : createProgress.stage === "failed" ? (
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.25">
+                      <circle cx="12" cy="12" r="9" /><path d="M15 9l-6 6m0-6l6 6" strokeLinecap="round" />
+                    </svg>
+                  ) : (
+                    <span className="inline-block w-5 h-5 border-2 border-current/25 border-t-current rounded-full animate-spin" />
+                  )}
+                </div>
+                <div className="min-w-0">
+                  <p className="text-[11px] uppercase tracking-wider font-semibold">{createStageLabel}</p>
+                  <p className="text-sm font-medium mt-0.5 break-words">{createProgress.message}</p>
+                  <p className="text-[11px] text-dim mt-2">
+                    Wallet signature is not required during creation. Hyperclaw signs the Monad attestation transaction with the secure attestor key.
+                  </p>
+                </div>
+              </div>
+
+              {createdAttestation && (
+                <div className="rounded-lg border border-current/20 bg-black/20 p-3 text-xs space-y-1.5">
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="text-dim uppercase tracking-wider">On-Chain Registration</span>
+                    <span className="font-medium">{createdAttestation.network}</span>
+                  </div>
+                  <div className="text-dim">Chain ID {createdAttestation.chainId} • Block {createdAttestation.blockNumber}</div>
+                  {createdAttestationExplorerUrl ? (
+                    <a
+                      href={createdAttestationExplorerUrl}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="inline-flex items-center gap-1 text-accent hover:text-accent/80 underline break-all"
+                    >
+                      {createdAttestation.txHash}
+                    </a>
+                  ) : (
+                    <span className="break-all">{createdAttestation.txHash}</span>
+                  )}
+                </div>
+              )}
+
+              {createWarning && (
+                <div className="rounded-lg border border-warning/30 bg-warning/10 p-3 text-xs text-warning">
+                  {createWarning}
+                </div>
+              )}
+
+              {createdAgentId && (
+                <button
+                  type="button"
+                  onClick={() => router.push(`/agents/${createdAgentId}`)}
+                  className="btn-primary w-full py-3 text-sm"
+                >
+                  Open Agent Dashboard
+                </button>
+              )}
+            </div>
+          )}
+
           {/* Submit */}
           <button
             onClick={handleCreate}
@@ -826,9 +994,13 @@ export default function CreateAgentPage() {
             {creating ? (
               <span className="flex items-center justify-center gap-2">
                 <span className="w-4 h-4 border-2 border-background/30 border-t-background rounded-full animate-spin" />
-                Creating Agent...
+                {createProgress.stage === "attesting"
+                  ? "Registering on Monad..."
+                  : createProgress.stage === "provisioning"
+                  ? "Provisioning Secure Wallet..."
+                  : "Creating Agent..."}
               </span>
-            ) : "Launch Agent"}
+            ) : createProgress.stage === "confirmed" ? "Create Another Agent" : "Launch Agent"}
           </button>
 
           {/* Summary preview */}

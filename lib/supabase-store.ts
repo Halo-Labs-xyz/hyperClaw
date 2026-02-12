@@ -144,19 +144,19 @@ export interface HclawTreasuryFlowRow {
 }
 
 function supabaseBaseUrl(): string {
-  const url = process.env.SUPABASE_URL;
+  const url = process.env.SUPABASE_URL?.trim();
   if (!url) throw new Error("SUPABASE_URL is not set");
   return url.replace(/\/$/, "");
 }
 
 function supabaseKey(): string {
-  const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  const key = process.env.SUPABASE_SERVICE_ROLE_KEY?.trim();
   if (!key) throw new Error("SUPABASE_SERVICE_ROLE_KEY is not set");
   return key;
 }
 
 export function isSupabaseStoreEnabled(): boolean {
-  return !!process.env.SUPABASE_URL && !!process.env.SUPABASE_SERVICE_ROLE_KEY;
+  return !!process.env.SUPABASE_URL?.trim() && !!process.env.SUPABASE_SERVICE_ROLE_KEY?.trim();
 }
 
 function buildQuery(query?: Record<string, string>): string {

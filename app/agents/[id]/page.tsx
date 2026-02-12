@@ -15,12 +15,27 @@ import type { Agent, TradeLog, MonadToken, VaultChatMessage, IndicatorConfig } f
 import { MONAD_TOKENS, INDICATOR_TEMPLATES } from "@/lib/types";
 import { VAULT_ABI, ERC20_ABI, agentIdToBytes32 } from "@/lib/vault";
 import { monadTestnet as monadTestnetChain, monadMainnet } from "@/lib/chains";
+import { buildMonadVisionTxUrl } from "@/lib/monad-vision";
 
 const AUTONOMY_LABELS = {
   full: { icon: "🤖", label: "Full Auto", color: "text-success", bg: "bg-success/10", border: "border-success/20" },
   semi: { icon: "🤝", label: "Semi-Auto", color: "text-accent", bg: "bg-accent/10", border: "border-accent/20" },
   manual: { icon: "👤", label: "Manual", color: "text-muted", bg: "bg-muted/10", border: "border-muted/20" },
 };
+
+type TxUiPhase =
+  | "idle"
+  | "switching"
+  | "signing"
+  | "confirming"
+  | "syncing"
+  | "confirmed"
+  | "error";
+
+function shortenTxHash(hash: string): string {
+  if (!hash) return hash;
+  return `${hash.slice(0, 10)}...${hash.slice(-8)}`;
+}
 
 function ReasoningCell({ reasoning }: { reasoning?: string }) {
   const [expanded, setExpanded] = useState(false);
@@ -123,6 +138,10 @@ export default function AgentDetailPage() {
   const [depositing, setDepositing] = useState(false);
   const [depositTxHash, setDepositTxHash] = useState<`0x${string}` | undefined>();
   const [depositStatus, setDepositStatus] = useState<string>("");
+  const [depositPhase, setDepositPhase] = useState<TxUiPhase>("idle");
+  const [submittedDepositApproveTxHash, setSubmittedDepositApproveTxHash] = useState<`0x${string}` | undefined>();
+  const [submittedDepositTxHash, setSubmittedDepositTxHash] = useState<`0x${string}` | undefined>();
+  const [depositTxNetwork, setDepositTxNetwork] = useState<"testnet" | "mainnet" | null>(null);
   const [capPreview, setCapPreview] = useState<{
     baseCapUsd: number;
     boostedCapUsd: number;
@@ -138,6 +157,9 @@ export default function AgentDetailPage() {
   const [withdrawing, setWithdrawing] = useState(false);
   const [withdrawTxHash, setWithdrawTxHash] = useState<`0x${string}` | undefined>();
   const [withdrawStatus, setWithdrawStatus] = useState<string>("");
+  const [withdrawPhase, setWithdrawPhase] = useState<TxUiPhase>("idle");
+  const [submittedWithdrawTxHash, setSubmittedWithdrawTxHash] = useState<`0x${string}` | undefined>();
+  const [withdrawTxNetwork, setWithdrawTxNetwork] = useState<"testnet" | "mainnet" | null>(null);
 
   // HL wallet balance and positions
   const [hlBalance, setHlBalance] = useState<{
@@ -478,7 +500,8 @@ export default function AgentDetailPage() {
   // When deposit tx confirms, relay to backend
   useEffect(() => {
     if (depositConfirmed && depositTxHash) {
-      setDepositStatus("Confirming deposit with relay...");
+      setDepositPhase("syncing");
+      setDepositStatus("Deposit confirmed on-chain. Syncing relay status...");
       fetch("/api/deposit", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -499,6 +522,7 @@ export default function AgentDetailPage() {
             const hclawInfo = d.rebateBps
               ? ` Tier ${d.lockTier} active. Rebate ${(Number(d.rebateBps) / 100).toFixed(2)}%. Remaining cap $${Number(d.userCapRemainingUsd || 0).toFixed(2)}.`
               : "";
+            setDepositPhase("confirmed");
             setDepositStatus(
               `Deposit confirmed! ${d.shares} shares minted.${hlInfo}${bridgeInfo ? ` ${bridgeInfo}` : ""}${hclawInfo}`
             );
@@ -514,13 +538,16 @@ export default function AgentDetailPage() {
             fetchAgent();
             fetchCapPreview();
           } else if (data.success) {
+            setDepositPhase("confirmed");
             setDepositStatus("Deposit confirmed on-chain. Relay sync pending.");
             fetchCapPreview();
           } else {
+            setDepositPhase("error");
             setDepositStatus(`Relay note: ${data.error || "Deposit recorded on-chain"}`);
           }
         })
         .catch(() => {
+          setDepositPhase("confirmed");
           setDepositStatus("On-chain deposit confirmed. Relay sync pending.");
         })
         .finally(() => {
@@ -532,7 +559,8 @@ export default function AgentDetailPage() {
 
   useEffect(() => {
     if (withdrawConfirmed && withdrawTxHash) {
-      setWithdrawStatus("Confirming withdrawal with relay...");
+      setWithdrawPhase("syncing");
+      setWithdrawStatus("Withdrawal confirmed on-chain. Syncing relay status...");
       fetch("/api/deposit", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -547,12 +575,15 @@ export default function AgentDetailPage() {
                   w.bridgeTxHash ? ` (${String(w.bridgeTxHash).slice(0, 10)}...)` : ""
                 }.${w.bridgeNote ? ` ${w.bridgeNote}` : ""}`
               : "";
+            setWithdrawPhase("confirmed");
             setWithdrawStatus(
               `Withdrawal confirmed and synced.${bridgeInfo ? ` ${bridgeInfo}` : ""}`
             );
           } else if (data.success) {
+            setWithdrawPhase("confirmed");
             setWithdrawStatus("Withdrawal confirmed.");
           } else {
+            setWithdrawPhase("error");
             setWithdrawStatus(`Withdrawal confirmed on-chain. Relay note: ${data.error || "sync pending"}`);
           }
           setWithdrawShares("");
@@ -560,10 +591,12 @@ export default function AgentDetailPage() {
           fetchCapPreview();
         })
         .catch(() => {
+          setWithdrawPhase("confirmed");
           setWithdrawStatus("Withdrawal confirmed on-chain. Relay sync pending.");
           fetchAgent();
         })
         .finally(() => {
+          setWithdrawing(false);
           setWithdrawTxHash(undefined);
         });
     }
@@ -589,25 +622,28 @@ export default function AgentDetailPage() {
   const handleDeposit = async () => {
     if (!depositAmount || !address || parseFloat(depositAmount) <= 0) return;
     setDepositing(true);
+    setDepositPhase("switching");
     setDepositStatus("");
+    setSubmittedDepositApproveTxHash(undefined);
+    setSubmittedDepositTxHash(undefined);
+    setDepositTxNetwork(activeNetwork);
 
     try {
       const vaultCheck = await verifyVaultContract();
       if (!vaultCheck.ok) {
+        setDepositPhase("error");
         setDepositStatus(vaultCheck.reason);
         setDepositing(false);
         return;
       }
 
       // ========== On-chain deposit via Monad vault ==========
-      try {
-        await switchChainAsync({ chainId: vaultChainId });
-      } catch {
-        // May already be on the right chain
-      }
+      setDepositStatus(`Switch network to Monad ${activeNetwork} in wallet...`);
+      await switchChainAsync({ chainId: vaultChainId });
 
       if (depositToken.symbol === "MON") {
-        setDepositStatus("Sending MON deposit transaction...");
+        setDepositPhase("signing");
+        setDepositStatus("Check wallet and sign MON deposit transaction...");
         const hash = await writeContractAsync({
           address: vaultAddress!,
           abi: VAULT_ABI,
@@ -615,32 +651,43 @@ export default function AgentDetailPage() {
           args: [agentIdBytes],
           value: parseEther(depositAmount),
         });
+        setDepositTxNetwork(activeNetwork);
+        setSubmittedDepositTxHash(hash);
         setDepositTxHash(hash);
-        setDepositStatus("Transaction submitted. Waiting for confirmation...");
+        setDepositPhase("confirming");
+        setDepositStatus("Deposit submitted. Waiting for on-chain confirmation...");
       } else {
         // ERC20: approve then deposit
         const amountWei = parseUnits(depositAmount, depositToken.decimals);
 
-        setDepositStatus(`Approving ${depositToken.symbol}...`);
-        await writeContractAsync({
+        setDepositPhase("signing");
+        setDepositStatus(`Check wallet and sign ${depositToken.symbol} approval...`);
+        const approveHash = await writeContractAsync({
           address: depositToken.address,
           abi: ERC20_ABI,
           functionName: "approve",
           args: [vaultAddress!, amountWei],
         });
+        setDepositTxNetwork(activeNetwork);
+        setSubmittedDepositApproveTxHash(approveHash);
 
-        setDepositStatus(`Depositing ${depositToken.symbol}...`);
+        setDepositPhase("signing");
+        setDepositStatus(`Approval submitted. Check wallet and sign ${depositToken.symbol} deposit...`);
         const hash = await writeContractAsync({
           address: vaultAddress!,
           abi: VAULT_ABI,
           functionName: "depositERC20",
           args: [agentIdBytes, depositToken.address, amountWei],
         });
+        setDepositTxNetwork(activeNetwork);
+        setSubmittedDepositTxHash(hash);
         setDepositTxHash(hash);
-        setDepositStatus("Transaction submitted. Waiting for confirmation...");
+        setDepositPhase("confirming");
+        setDepositStatus("Deposit submitted. Waiting for on-chain confirmation...");
       }
     } catch (e) {
       console.error("Deposit error:", e);
+      setDepositPhase("error");
       setDepositStatus(
         e instanceof Error ? e.message : "Deposit failed. Check wallet and try again."
       );
@@ -654,42 +701,56 @@ export default function AgentDetailPage() {
     try {
       sharesWei = parseUnits(withdrawShares || "0", 18);
     } catch {
+      setWithdrawPhase("error");
       setWithdrawStatus("Invalid shares amount.");
       return;
     }
     if (sharesWei <= BigInt(0)) return;
     if (sharesWei > userShares) {
+      setWithdrawPhase("error");
       setWithdrawStatus("Insufficient shares.");
       return;
     }
     const maxWithdrawRaw = (BigInt(100) * userShares - BigInt(5) * totalShares) / BigInt(95);
     const maxWithdrawShares = maxWithdrawRaw > BigInt(0) ? maxWithdrawRaw : BigInt(0);
     if (sharesWei > maxWithdrawShares) {
+      setWithdrawPhase("error");
       setWithdrawStatus("Hyperliquid rule: you must keep ≥5% of vault. Reduce amount.");
       return;
     }
     setWithdrawing(true);
+    setWithdrawPhase("switching");
     setWithdrawStatus("");
+    setSubmittedWithdrawTxHash(undefined);
+    setWithdrawTxNetwork(activeNetwork);
     try {
       const vaultCheck = await verifyVaultContract();
       if (!vaultCheck.ok) {
+        setWithdrawPhase("error");
         setWithdrawStatus(vaultCheck.reason);
+        setWithdrawing(false);
         return;
       }
 
+      setWithdrawStatus(`Switch network to Monad ${activeNetwork} in wallet...`);
       await switchChainAsync({ chainId: vaultChainId });
+      setWithdrawPhase("signing");
+      setWithdrawStatus("Check wallet and sign withdrawal transaction...");
       const hash = await writeContractAsync({
         address: vaultAddress!,
         abi: VAULT_ABI,
         functionName: "withdraw",
         args: [agentIdBytes, sharesWei],
       });
+      setWithdrawTxNetwork(activeNetwork);
+      setSubmittedWithdrawTxHash(hash);
       setWithdrawTxHash(hash);
-      setWithdrawStatus("Transaction submitted. Waiting for confirmation...");
+      setWithdrawPhase("confirming");
+      setWithdrawStatus("Withdrawal submitted. Waiting for on-chain confirmation...");
     } catch (e) {
       console.error("Withdraw error:", e);
+      setWithdrawPhase("error");
       setWithdrawStatus(e instanceof Error ? e.message : "Withdraw failed.");
-    } finally {
       setWithdrawing(false);
     }
   };
@@ -992,6 +1053,32 @@ export default function AgentDetailPage() {
 
   const autonomyInfo = AUTONOMY_LABELS[agent.autonomy?.mode ?? "semi"];
   const hasPendingApproval = agent.pendingApproval?.status === "pending";
+  const isDepositBusy = ["switching", "signing", "confirming", "syncing"].includes(depositPhase);
+  const isWithdrawBusy = ["switching", "signing", "confirming", "syncing"].includes(withdrawPhase);
+  const depositStatusTone =
+    depositPhase === "confirmed"
+      ? "bg-success/10 border-success/20 text-success"
+      : depositPhase === "error"
+      ? "bg-danger/10 border-danger/20 text-danger"
+      : "bg-accent/10 border-accent/20 text-accent";
+  const withdrawStatusTone =
+    withdrawPhase === "confirmed"
+      ? "bg-success/10 border-success/20 text-success"
+      : withdrawPhase === "error"
+      ? "bg-danger/10 border-danger/20 text-danger"
+      : "bg-accent/10 border-accent/20 text-accent";
+  const submittedDepositApproveTxUrl = submittedDepositApproveTxHash
+    ? buildMonadVisionTxUrl(submittedDepositApproveTxHash)
+    : null;
+  const submittedDepositTxUrl = submittedDepositTxHash
+    ? buildMonadVisionTxUrl(submittedDepositTxHash)
+    : null;
+  const submittedWithdrawTxUrl = submittedWithdrawTxHash
+    ? buildMonadVisionTxUrl(submittedWithdrawTxHash)
+    : null;
+  const attestationExplorerUrl = agent.aipAttestation?.txHash
+    ? agent.aipAttestation.explorerUrl ?? buildMonadVisionTxUrl(agent.aipAttestation.txHash)
+    : null;
 
   const tabs: { key: TabKey; label: string; badge?: boolean }[] = [
     { key: "overview", label: "Overview" },
@@ -1065,6 +1152,43 @@ export default function AgentDetailPage() {
             </div>
             <p className="text-muted text-sm leading-relaxed max-w-2xl">{agent.description}</p>
           </div>
+        </div>
+
+        {/* On-chain registration */}
+        <div className={`mb-6 rounded-2xl border p-4 ${
+          agent.aipAttestation ? "bg-success/5 border-success/20" : "bg-warning/5 border-warning/20"
+        }`}>
+          {agent.aipAttestation ? (
+            <div className="flex flex-col gap-2 text-xs">
+              <div className="flex items-center gap-2">
+                <div className="w-2 h-2 rounded-full bg-success" />
+                <span className="font-semibold text-success uppercase tracking-wider">
+                  Secure Agent Registered On Monad {agent.aipAttestation.network}
+                </span>
+              </div>
+              <div className="text-dim">
+                Chain ID {agent.aipAttestation.chainId} • Block {agent.aipAttestation.blockNumber} •{" "}
+                {new Date(agent.aipAttestation.attestedAt).toLocaleString()}
+              </div>
+              {attestationExplorerUrl ? (
+                <a
+                  href={attestationExplorerUrl}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="text-accent underline break-all"
+                >
+                  {agent.aipAttestation.txHash}
+                </a>
+              ) : (
+                <span className="break-all">{agent.aipAttestation.txHash}</span>
+              )}
+            </div>
+          ) : (
+            <div className="flex items-center gap-2 text-xs text-warning">
+              <div className="w-2 h-2 rounded-full bg-warning" />
+              <span>On-chain registration record is not available yet.</span>
+            </div>
+          )}
         </div>
 
         {/* Pending Approval Banner */}
@@ -1737,18 +1861,57 @@ export default function AgentDetailPage() {
                 )}
 
                 {/* Deposit Status */}
-                {depositStatus && (
-                  <div className={`mb-4 p-3 rounded-xl text-xs ${
-                    depositStatus.includes("confirmed") || depositStatus.includes("success")
-                      ? "bg-success/10 border border-success/20 text-success"
-                      : depositStatus.includes("failed") || depositStatus.includes("error") || depositStatus.includes("Error")
-                      ? "bg-danger/10 border border-danger/20 text-danger"
-                      : "bg-accent/10 border border-accent/20 text-accent"
-                  }`}>
-                    {depositing && (
-                      <span className="inline-block w-3 h-3 border-2 border-current/30 border-t-current rounded-full animate-spin mr-2 align-middle" />
+                {(depositStatus || submittedDepositApproveTxHash || submittedDepositTxHash) && (
+                  <div className={`mb-4 p-3 rounded-xl border text-xs space-y-2 ${depositStatusTone}`}>
+                    {depositStatus && (
+                      <div className="flex items-start gap-2">
+                        {isDepositBusy ? (
+                          <span className="inline-block mt-0.5 w-3.5 h-3.5 border-2 border-current/30 border-t-current rounded-full animate-spin shrink-0" />
+                        ) : (
+                          <span className="inline-block mt-1 w-2 h-2 rounded-full bg-current shrink-0" />
+                        )}
+                        <span>{depositStatus}</span>
+                      </div>
                     )}
-                    {depositStatus}
+
+                    {(submittedDepositApproveTxHash || submittedDepositTxHash) && (
+                      <div className="rounded-lg border border-current/20 bg-black/20 p-2.5 space-y-1.5">
+                        {submittedDepositApproveTxHash && (
+                          <div className="break-all">
+                            <span className="text-dim">Approve tx ({depositTxNetwork || activeNetwork}): </span>
+                            {submittedDepositApproveTxUrl ? (
+                              <a
+                                href={submittedDepositApproveTxUrl}
+                                target="_blank"
+                                rel="noreferrer"
+                                className="underline text-accent hover:text-accent/80"
+                              >
+                                {shortenTxHash(submittedDepositApproveTxHash)}
+                              </a>
+                            ) : (
+                              submittedDepositApproveTxHash
+                            )}
+                          </div>
+                        )}
+                        {submittedDepositTxHash && (
+                          <div className="break-all">
+                            <span className="text-dim">Deposit tx ({depositTxNetwork || activeNetwork}): </span>
+                            {submittedDepositTxUrl ? (
+                              <a
+                                href={submittedDepositTxUrl}
+                                target="_blank"
+                                rel="noreferrer"
+                                className="underline text-accent hover:text-accent/80"
+                              >
+                                {shortenTxHash(submittedDepositTxHash)}
+                              </a>
+                            ) : (
+                              submittedDepositTxHash
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    )}
                   </div>
                 )}
 
@@ -1762,7 +1925,13 @@ export default function AgentDetailPage() {
                     {depositing ? (
                       <span className="flex items-center justify-center gap-2">
                         <span className="w-4 h-4 border-2 border-background/30 border-t-background rounded-full animate-spin" />
-                        {depositStatus ? "Processing..." : "Depositing..."}
+                        {depositPhase === "signing"
+                          ? "Awaiting Wallet Signature..."
+                          : depositPhase === "confirming"
+                          ? "Waiting For Confirmation..."
+                          : depositPhase === "syncing"
+                          ? "Syncing Relay..."
+                          : "Depositing..."}
                       </span>
                     ) : `Deposit ${depositToken.symbol}`}
                   </button>
@@ -1810,9 +1979,35 @@ export default function AgentDetailPage() {
                         Max
                       </button>
                     </div>
-                    {withdrawStatus && (
-                      <div className={`mb-2 text-xs ${withdrawStatus.startsWith("Hyperliquid") ? "text-warning" : withdrawStatus.includes("confirmed") ? "text-success" : "text-dim"}`}>
-                        {withdrawStatus}
+                    {(withdrawStatus || submittedWithdrawTxHash) && (
+                      <div className={`mb-2 p-2.5 rounded-lg border text-xs space-y-1.5 ${withdrawStatusTone}`}>
+                        {withdrawStatus && (
+                          <div className="flex items-start gap-2">
+                            {isWithdrawBusy ? (
+                              <span className="inline-block mt-0.5 w-3.5 h-3.5 border-2 border-current/30 border-t-current rounded-full animate-spin shrink-0" />
+                            ) : (
+                              <span className="inline-block mt-1 w-2 h-2 rounded-full bg-current shrink-0" />
+                            )}
+                            <span>{withdrawStatus}</span>
+                          </div>
+                        )}
+                        {submittedWithdrawTxHash && (
+                          <div className="break-all">
+                            <span className="text-dim">Withdraw tx ({withdrawTxNetwork || activeNetwork}): </span>
+                            {submittedWithdrawTxUrl ? (
+                              <a
+                                href={submittedWithdrawTxUrl}
+                                target="_blank"
+                                rel="noreferrer"
+                                className="underline text-accent hover:text-accent/80"
+                              >
+                                {shortenTxHash(submittedWithdrawTxHash)}
+                              </a>
+                            ) : (
+                              submittedWithdrawTxHash
+                            )}
+                          </div>
+                        )}
                       </div>
                     )}
                     {isConnected ? (
@@ -1824,7 +2019,13 @@ export default function AgentDetailPage() {
                         {withdrawing ? (
                           <span className="flex items-center justify-center gap-2">
                             <span className="w-3.5 h-3.5 border-2 border-current/30 border-t-current rounded-full animate-spin" />
-                            Withdrawing...
+                            {withdrawPhase === "signing"
+                              ? "Awaiting Wallet Signature..."
+                              : withdrawPhase === "confirming"
+                              ? "Waiting For Confirmation..."
+                              : withdrawPhase === "syncing"
+                              ? "Syncing Relay..."
+                              : "Withdrawing..."}
                           </span>
                         ) : "Withdraw from vault"}
                       </button>
