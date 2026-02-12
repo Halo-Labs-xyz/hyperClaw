@@ -69,6 +69,9 @@ function decrypt(encrypted: string): string {
   return decrypted;
 }
 
+/** Encrypt/decrypt for agent API keys (uses same ACCOUNT_ENCRYPTION_KEY) */
+export { encrypt, decrypt };
+
 // ============================================
 // Account storage (uses store-backend: file or S3)
 // ============================================

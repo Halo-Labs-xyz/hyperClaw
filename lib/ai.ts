@@ -1043,9 +1043,12 @@ async function withOpenAiRetry<T>(fn: () => Promise<T>, label: string, model: st
 async function callOpenAiModel(
   model: string,
   systemPrompt: string,
-  userPrompt: string
+  userPrompt: string,
+  apiKeyOverride?: string
 ): Promise<ProviderCallResult> {
-  const openai = getOpenAI();
+  const openai = apiKeyOverride
+    ? new OpenAI({ apiKey: apiKeyOverride })
+    : getOpenAI();
   const estimatedInputTokens = estimateTokens(systemPrompt) + estimateTokens(userPrompt);
   enforceNearLimitBudget("openai", model, estimatedInputTokens);
   reserveModelUsage("openai", model, estimatedInputTokens);
@@ -1086,9 +1089,10 @@ async function callOpenAiModel(
 async function callAnthropicModel(
   model: string,
   systemPrompt: string,
-  userPrompt: string
+  userPrompt: string,
+  apiKeyOverride?: string
 ): Promise<ProviderCallResult> {
-  const anthropic = getAnthropic();
+  const anthropic = apiKeyOverride ? new Anthropic({ apiKey: apiKeyOverride }) : getAnthropic();
   const response = await anthropic.messages.create({
     model,
     max_tokens: 1024,
@@ -1117,14 +1121,17 @@ function getAnthropic(): Anthropic {
   return anthropicClient;
 }
 
+export type AgentApiKeys = { anthropic?: string; openai?: string };
+
 async function callModelRoute(
   route: ModelRoute,
   systemPrompt: string,
-  userPrompt: string
+  userPrompt: string,
+  agentKeys?: AgentApiKeys
 ): Promise<ProviderCallResult> {
-  if (route.provider === "openai") return callOpenAiModel(route.model, systemPrompt, userPrompt);
+  if (route.provider === "openai") return callOpenAiModel(route.model, systemPrompt, userPrompt, agentKeys?.openai);
   if (route.provider === "gemini") return withGeminiRetry(route.model, systemPrompt, userPrompt);
-  if (route.provider === "anthropic") return callAnthropicModel(route.model, systemPrompt, userPrompt);
+  if (route.provider === "anthropic") return callAnthropicModel(route.model, systemPrompt, userPrompt, agentKeys?.anthropic);
   return withNvidiaRetry(route.model, systemPrompt, userPrompt);
 }
 
@@ -1226,6 +1233,7 @@ export async function getTradeDecision(params: {
   agentName?: string;
   agentStrategy?: string; // The agent's custom strategy description
   agentId?: string; // For Supermemory per-agent context
+  agentApiKeys?: AgentApiKeys; // User's API keys for unlimited decisions
 }): Promise<TradeDecision> {
   // Evaluate indicator if configured
   let indicatorSection = "";
@@ -1326,10 +1334,10 @@ Provide your trading decision as JSON:`;
 
   let content: string | null = null;
   const modelChain = getConfiguredModelChain();
-  const hasOpenAiKey = Boolean(process.env.OPENAI_API_KEY?.trim() || process.env.OPENAI_API_BASE_URL?.trim());
+  const hasOpenAiKey = Boolean(params.agentApiKeys?.openai || process.env.OPENAI_API_KEY?.trim() || process.env.OPENAI_API_BASE_URL?.trim());
   const hasGeminiKey = Boolean(getGeminiApiKey());
   const hasNvidiaKey = Boolean(getNvidiaApiKey());
-  const hasAnthropicKey = Boolean(getAnthropicApiKey());
+  const hasAnthropicKey = Boolean(params.agentApiKeys?.anthropic || getAnthropicApiKey());
   let lastError: unknown = null;
 
   for (const route of modelChain) {
@@ -1339,7 +1347,7 @@ Provide your trading decision as JSON:`;
     if (route.provider === "anthropic" && !hasAnthropicKey) continue;
 
     try {
-      const result = await callModelRoute(route, SYSTEM_PROMPT, userPrompt);
+      const result = await callModelRoute(route, SYSTEM_PROMPT, userPrompt, params.agentApiKeys);
       const candidate = (result.content || "").trim();
       if (!candidate) throw new Error(`${route.provider}:${route.model} returned empty content`);
       content = candidate;

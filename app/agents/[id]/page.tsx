@@ -206,6 +206,11 @@ export default function AgentDetailPage() {
   const [editMaxTradesPerDay, setEditMaxTradesPerDay] = useState(10);
   const [editStatus, setEditStatus] = useState<"active" | "paused" | "stopped">("active");
 
+  // AI API Key (for unlimited decisions beyond free tier daily limit)
+  const [editAiApiKeyProvider, setEditAiApiKeyProvider] = useState<"anthropic" | "openai">("anthropic");
+  const [editAiApiKeyValue, setEditAiApiKeyValue] = useState("");
+  const [editAiApiKeyRemove, setEditAiApiKeyRemove] = useState(false);
+
   // Indicator settings
   const [indicatorEnabled, setIndicatorEnabled] = useState(false);
   const [indicatorTemplate, setIndicatorTemplate] = useState<string>("adaptive-rsi-divergence");
@@ -408,6 +413,10 @@ export default function AgentDetailPage() {
       setEditAggressiveness(agent.autonomy?.aggressiveness ?? 50);
       setEditMaxTradesPerDay(agent.autonomy?.maxTradesPerDay ?? 10);
       setEditStatus(agent.status);
+      // AI API Key
+      setEditAiApiKeyProvider((agent.aiApiKey?.provider as "anthropic" | "openai") ?? "anthropic");
+      setEditAiApiKeyValue("");
+      setEditAiApiKeyRemove(false);
       // Indicator settings
       if (agent.indicator) {
         setIndicatorEnabled(agent.indicator.enabled);
@@ -704,26 +713,33 @@ export default function AgentDetailPage() {
         parameters: indicatorTemplate === "custom" ? {} : template.parameters,
       } : undefined;
       
+      const patchBody: Record<string, unknown> = {
+        name: editName,
+        description: editDescription,
+        markets: editMarkets,
+        maxLeverage: editMaxLeverage,
+        riskLevel: editRiskLevel,
+        stopLossPercent: editStopLoss,
+        status: editStatus,
+        autonomy: {
+          mode: editAutonomyMode,
+          aggressiveness: editAggressiveness,
+          minConfidence,
+          maxTradesPerDay: editMaxTradesPerDay,
+          approvalTimeoutMs: agent?.autonomy?.approvalTimeoutMs ?? 300000,
+        },
+        indicator: indicatorConfig,
+      };
+      if (editAiApiKeyRemove) {
+        patchBody.aiApiKey = null;
+      } else if (editAiApiKeyValue.trim()) {
+        patchBody.aiApiKey = { provider: editAiApiKeyProvider, value: editAiApiKeyValue.trim() };
+      }
+
       const res = await fetch(`/api/agents/${agentId}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          name: editName,
-          description: editDescription,
-          markets: editMarkets,
-          maxLeverage: editMaxLeverage,
-          riskLevel: editRiskLevel,
-          stopLossPercent: editStopLoss,
-          status: editStatus,
-          autonomy: {
-            mode: editAutonomyMode,
-            aggressiveness: editAggressiveness,
-            minConfidence,
-            maxTradesPerDay: editMaxTradesPerDay,
-            approvalTimeoutMs: agent?.autonomy?.approvalTimeoutMs ?? 300000,
-          },
-          indicator: indicatorConfig,
-        }),
+        body: JSON.stringify(patchBody),
       });
       
       if (!res.ok) {
@@ -731,6 +747,8 @@ export default function AgentDetailPage() {
       }
       
       setSettingsStatus({ type: "success", message: "Settings saved successfully!" });
+      setEditAiApiKeyValue("");
+      setEditAiApiKeyRemove(false);
       await fetchAgent();
     } catch (e) {
       console.error("Save settings error:", e);
@@ -2164,6 +2182,70 @@ export default function AgentDetailPage() {
                       <span>100</span>
                     </div>
                   </div>
+                </div>
+              </div>
+
+              {/* AI API Key */}
+              <div className="card rounded-2xl p-6">
+                <h3 className="font-semibold text-sm uppercase tracking-wider text-muted mb-2">AI API Key</h3>
+                <p className="text-xs text-dim mb-4">
+                  New agents get limited free Agentic decisions. Add your Anthropic or OpenAI API key or lock up more than 100M $HCLAW for more trading outcomes.
+                </p>
+                <div className="space-y-4">
+                  {agent?.aiApiKey && !editAiApiKeyRemove && (
+                    <div className="flex items-center gap-2 p-3 rounded-xl bg-success/10 border border-success/20">
+                      <span className="text-success text-sm font-medium">
+                        Configured ({agent.aiApiKey.provider === "anthropic" ? "Anthropic" : "OpenAI"})
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => setEditAiApiKeyRemove(true)}
+                        className="text-xs text-danger hover:underline ml-auto"
+                      >
+                        Remove
+                      </button>
+                    </div>
+                  )}
+                  {(!agent?.aiApiKey || editAiApiKeyRemove || editAiApiKeyValue) && (
+                    <>
+                      <div>
+                        <label className="block text-xs font-medium text-dim uppercase tracking-wider mb-2">Provider</label>
+                        <select
+                          value={editAiApiKeyProvider}
+                          onChange={(e) => setEditAiApiKeyProvider(e.target.value as "anthropic" | "openai")}
+                          className="input w-full px-4 py-3"
+                        >
+                          <option value="anthropic">Anthropic (Claude)</option>
+                          <option value="openai">OpenAI (GPT)</option>
+                        </select>
+                      </div>
+                      <div>
+                        <label className="block text-xs font-medium text-dim uppercase tracking-wider mb-2">
+                          API Key {agent?.aiApiKey && editAiApiKeyRemove ? "(clearing on save)" : ""}
+                        </label>
+                        <input
+                          type="password"
+                          value={editAiApiKeyValue}
+                          onChange={(e) => setEditAiApiKeyValue(e.target.value)}
+                          className="input w-full px-4 py-3 font-mono text-sm"
+                          placeholder={
+                            agent?.aiApiKey && !editAiApiKeyRemove
+                              ? "Enter new key to replace"
+                              : "sk-... (stored encrypted, never shared)"
+                          }
+                        />
+                      </div>
+                      {editAiApiKeyRemove && (
+                        <button
+                          type="button"
+                          onClick={() => setEditAiApiKeyRemove(false)}
+                          className="text-xs text-muted hover:text-foreground"
+                        >
+                          Cancel remove
+                        </button>
+                      )}
+                    </>
+                  )}
                 </div>
               </div>
 

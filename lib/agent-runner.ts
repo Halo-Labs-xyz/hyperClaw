@@ -569,7 +569,49 @@ async function executeTickInternal(agentId: string): Promise<TradeLog> {
       }
     }
 
-    // 4. Ask AI for trade decision (with indicator, strategy, and Supermemory context)
+    // 4. Budget check (skip if agent has own API key)
+    const hasAgentOwnKey = Boolean(agent.aiApiKey?.encryptedKey && agent.aiApiKey?.provider);
+    let agentApiKeys: { anthropic?: string; openai?: string } | undefined;
+    if (hasAgentOwnKey) {
+      try {
+        const { decrypt } = await import("./account-manager");
+        const key = decrypt(agent.aiApiKey!.encryptedKey);
+        if (agent.aiApiKey!.provider === "anthropic") agentApiKeys = { anthropic: key };
+        else agentApiKeys = { openai: key };
+      } catch (e) {
+        console.warn(`[Agent ${agentId}] Failed to decrypt API key, using platform budget`);
+      }
+    }
+
+    if (!hasAgentOwnKey || !agentApiKeys) {
+      const { checkAgentBudget } = await import("./ai-budget");
+      const budget = await checkAgentBudget(agentId);
+      if (!budget.allowed) {
+        const holdLog: TradeLog = {
+          id: randomBytes(8).toString("hex"),
+          agentId,
+          timestamp: Date.now(),
+          decision: {
+            action: "hold",
+            asset: agent.markets[0] || "BTC",
+            size: 0,
+            leverage: 1,
+            confidence: 0,
+            reasoning: budget.reason ?? "AI budget exceeded.",
+          },
+          executed: false,
+        };
+        await appendTradeLog(holdLog);
+        if (state) {
+          state.lastTickAt = holdLog.timestamp;
+          state.nextTickAt = Date.now() + state.intervalMs;
+          state.tickCount++;
+        }
+        return holdLog;
+      }
+    }
+
+    // 5. Ask AI for trade decision (with indicator, strategy, and Supermemory context)
     let decision = await getTradeDecision({
       markets,
       currentPositions: positions,
@@ -583,6 +625,7 @@ async function executeTickInternal(agentId: string): Promise<TradeLog> {
       agentName: agent.name,
       agentStrategy: agent.description,
       agentId,
+      agentApiKeys,
     });
 
     const minConfidence = AGENT_NEVER_SKIP_TRADES
@@ -629,7 +672,17 @@ async function executeTickInternal(agentId: string): Promise<TradeLog> {
       };
     }
 
-    // 5. Execute full order pipeline
+    // 6. Record AI cost when using platform key (not agent's own)
+    if (!hasAgentOwnKey) {
+      try {
+        const { recordAgentDecisionCost } = await import("./ai-budget");
+        await recordAgentDecisionCost(agentId);
+      } catch (e) {
+        console.warn(`[Agent ${agentId}] Failed to record AI cost:`, e);
+      }
+    }
+
+    // 7. Execute full order pipeline
     let executed = false;
     let executionResult: TradeLog["executionResult"] = undefined;
 

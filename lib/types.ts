@@ -99,6 +99,8 @@ export interface Agent {
   depositorCount: number;
   // Pending approvals (for semi-autonomous mode)
   pendingApproval?: PendingTradeApproval;
+  // User API key for unlimited AI decisions (encrypted)
+  aiApiKey?: { provider: "anthropic" | "openai"; encryptedKey: string };
 }
 
 export interface PendingTradeApproval {

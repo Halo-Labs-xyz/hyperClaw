@@ -38,6 +38,8 @@ interface AgentRow {
   vault_tvl_usd: number;
   depositor_count: number;
   pending_approval: unknown | null;
+  ai_api_key_provider?: string | null;
+  ai_api_key_encrypted?: string | null;
 }
 
 interface TradeRow {
@@ -260,6 +262,13 @@ function toAgent(row: AgentRow): Agent {
     vaultTvlUsd: row.vault_tvl_usd,
     depositorCount: row.depositor_count,
     pendingApproval: (row.pending_approval ?? undefined) as Agent["pendingApproval"],
+    aiApiKey:
+      row.ai_api_key_provider && row.ai_api_key_encrypted
+        ? {
+            provider: row.ai_api_key_provider as "anthropic" | "openai",
+            encryptedKey: row.ai_api_key_encrypted,
+          }
+        : undefined,
   };
 }
 
@@ -287,6 +296,8 @@ function toAgentRow(agent: Agent): AgentRow {
     vault_tvl_usd: agent.vaultTvlUsd,
     depositor_count: agent.depositorCount,
     pending_approval: agent.pendingApproval ?? null,
+    ai_api_key_provider: agent.aiApiKey?.provider ?? null,
+    ai_api_key_encrypted: agent.aiApiKey?.encryptedKey ?? null,
   };
 }
 
@@ -401,6 +412,10 @@ export async function sbUpdateAgent(id: string, updates: Partial<Agent>): Promis
   if (updates.depositorCount !== undefined) patch.depositor_count = updates.depositorCount;
   if (Object.prototype.hasOwnProperty.call(updates, "pendingApproval")) {
     patch.pending_approval = updates.pendingApproval ?? null;
+  }
+  if (updates.aiApiKey !== undefined) {
+    patch.ai_api_key_provider = updates.aiApiKey?.provider ?? null;
+    patch.ai_api_key_encrypted = updates.aiApiKey?.encryptedKey ?? null;
   }
 
   const rows = await supabaseRequest<AgentRow[]>({

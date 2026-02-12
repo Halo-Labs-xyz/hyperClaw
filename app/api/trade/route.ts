@@ -52,8 +52,8 @@ export async function POST(request: Request) {
 
     // Resolve exchange client: agent wallet or operator
     let exchange = undefined;
-    let agentAddress: `0x${string}` | undefined = undefined;
-    let agentPrivateKey = undefined;
+    let _agentAddress: `0x${string}` | undefined = undefined;
+    let _agentPrivateKey = undefined;
     let usePKP = false;
     
     if (body.agentId) {
@@ -65,7 +65,7 @@ export async function POST(request: Request) {
         );
       }
 
-      agentAddress = account.address;
+      _agentAddress = account.address;
       usePKP = await isPKPAccount(body.agentId);
 
       if (!usePKP) {
@@ -76,7 +76,7 @@ export async function POST(request: Request) {
             { status: 400 }
           );
         }
-        agentPrivateKey = pk;
+        _agentPrivateKey = pk;
         exchange = getExchangeClientForAgent(pk);
       }
     }

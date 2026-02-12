@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { getAgent, updateAgent, getTradeLogsForAgent } from "@/lib/store";
-import { getAccountForAgent } from "@/lib/account-manager";
+import { getAccountForAgent, encrypt } from "@/lib/account-manager";
 import { getTotalDepositedUsd } from "@/lib/deposit-relay";
 import { stopAgent } from "@/lib/agent-runner";
 import { handleStatusChange, getLifecycleState } from "@/lib/agent-lifecycle";
@@ -29,6 +29,15 @@ function getAgentDeploymentNetwork(agent: { autonomy?: { deploymentNetwork?: str
   const tagged = parseNetwork(agent.autonomy?.deploymentNetwork);
   // Legacy agents without a tag are treated as testnet to avoid leaking old test data into mainnet views.
   return tagged ?? "testnet";
+}
+
+/** Strip encrypted key from agent before returning to client. */
+function sanitizeAgentForResponse<T extends { aiApiKey?: { provider: string; encryptedKey?: string } }>(agent: T): T {
+  if (!agent?.aiApiKey) return agent;
+  return {
+    ...agent,
+    aiApiKey: { provider: agent.aiApiKey.provider },
+  } as T;
 }
 
 function isOwnedByViewer(
@@ -130,7 +139,11 @@ export async function GET(
     }
     const lifecycle = getLifecycleState(params.id);
 
-    return NextResponse.json({ agent: resolvedAgent, trades, lifecycle });
+    return NextResponse.json({
+      agent: sanitizeAgentForResponse(resolvedAgent),
+      trades,
+      lifecycle,
+    });
   } catch (error) {
     console.error("Get agent error:", error);
     return NextResponse.json(
@@ -151,17 +164,36 @@ export async function PATCH(
       return NextResponse.json({ error: "Agent not found" }, { status: 404 });
     }
 
-    const body = await request.json();
-    const agent = await updateAgent(params.id, body);
+    const body = await request.json() as Record<string, unknown>;
+
+    // Process aiApiKey: encrypt raw value before storing, or clear when null
+    const updates = { ...body } as Record<string, unknown>;
+    if (Object.prototype.hasOwnProperty.call(body, "aiApiKey")) {
+      const raw = body.aiApiKey as { provider?: string; value?: string } | null | undefined;
+      if (raw && typeof raw === "object" && raw.provider && raw.value) {
+        const provider = raw.provider === "openai" ? "openai" : "anthropic";
+        try {
+          updates.aiApiKey = { provider, encryptedKey: encrypt(raw.value.trim()) };
+        } catch (e) {
+          console.error(`[Agent ${params.id}] Failed to encrypt AI API key:`, e);
+          return NextResponse.json({ error: "Failed to save API key" }, { status: 500 });
+        }
+      } else {
+        updates.aiApiKey = undefined;
+      }
+    }
+
+    const agent = await updateAgent(params.id, updates);
     if (!agent) {
       return NextResponse.json({ error: "Agent not found" }, { status: 404 });
     }
 
     // If status changed, trigger lifecycle management
-    if (body.status && body.status !== currentAgent.status) {
-      console.log(`[Agent ${params.id}] Status changed: ${currentAgent.status} -> ${body.status}`);
+    const newStatus = body.status as "active" | "paused" | "stopped" | undefined;
+    if (newStatus && ["active", "paused", "stopped"].includes(newStatus) && newStatus !== currentAgent.status) {
+      console.log(`[Agent ${params.id}] Status changed: ${currentAgent.status} -> ${newStatus}`);
       try {
-        await handleStatusChange(params.id, body.status);
+        await handleStatusChange(params.id, newStatus);
       } catch (lifecycleError) {
         console.error(`[Agent ${params.id}] Lifecycle change failed:`, lifecycleError);
         // Don't fail the update if lifecycle fails
@@ -169,7 +201,10 @@ export async function PATCH(
     }
 
     const lifecycle = getLifecycleState(params.id);
-    return NextResponse.json({ agent, lifecycle });
+    return NextResponse.json({
+      agent: sanitizeAgentForResponse(agent),
+      lifecycle,
+    });
   } catch (error) {
     console.error("Update agent error:", error);
     return NextResponse.json(
