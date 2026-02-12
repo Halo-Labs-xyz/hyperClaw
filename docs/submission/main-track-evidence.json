@@ -16,7 +16,7 @@
     "network": "mainnet",
     "chainId": 143,
     "contracts": {
-      "vault": "0x11C095FD374CCf908Bee6F9eb7CA266d94132Dbf",
+      "vault": "0x2D63f4BBC5ec39EAca0F8b8bF88bbD1813c12DBF",
       "hclawLock": "0x4aD49fDfDe2103e6Af7858639c82FDf585Fd33C6",
       "hclawPolicy": "0xb7f9bFf88ceA67dC4741Ef641724859d1caaA654",
       "hclawRewards": "0xcBA4ac3a4A343944Ce4c1856AF2329cfb11B7fa3",
