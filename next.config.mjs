@@ -27,8 +27,8 @@ export default withSerwist({
   images: {
     domains: [
       "imagedelivery.net",
-      "testnet.monadexplorer.com",
-      "explorer.monad.xyz",
+      "testnet.monadvision.com",
+      "monadvision.com",
       "api.nadapp.net",
     ],
   },
