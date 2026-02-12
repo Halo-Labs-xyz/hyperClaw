@@ -22,9 +22,9 @@ const args = process.argv.slice(2);
 
 function parseArgs() {
   const options = {
-    agentId: null as string | null,
+    agentId: null,
     all: false,
-    endpoint: process.env.AGENT_PUBLIC_URL || null as string | null,
+    endpoint: process.env.AGENT_PUBLIC_URL || null,
   };
 
   for (let i = 0; i < args.length; i++) {

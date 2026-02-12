@@ -3,7 +3,14 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import { useParams } from "next/navigation";
 import { useAccount, useBalance, useWriteContract, useReadContract, useWaitForTransactionReceipt, useSwitchChain, usePublicClient } from "wagmi";
-import { parseEther, parseUnits, formatEther, type Address } from "viem";
+import {
+  BaseError,
+  ContractFunctionRevertedError,
+  formatEther,
+  parseEther,
+  parseUnits,
+  type Address,
+} from "viem";
 import Link from "next/link";
 import { usePrivy } from "@privy-io/react-auth";
 import { NetworkToggle } from "@/app/components/NetworkToggle";
@@ -35,6 +42,23 @@ type TxUiPhase =
 function shortenTxHash(hash: string): string {
   if (!hash) return hash;
   return `${hash.slice(0, 10)}...${hash.slice(-8)}`;
+}
+
+function formatContractError(error: unknown): string {
+  if (error instanceof BaseError) {
+    const reverted = error.walk((e) => e instanceof ContractFunctionRevertedError);
+    if (reverted instanceof ContractFunctionRevertedError) {
+      if (typeof reverted.reason === "string" && reverted.reason.length > 0) {
+        return reverted.reason;
+      }
+      if (reverted.data?.errorName) {
+        return reverted.data.errorName;
+      }
+    }
+    if (error.shortMessage) return error.shortMessage;
+  }
+  if (error instanceof Error) return error.message;
+  return String(error);
 }
 
 function ReasoningCell({ reasoning }: { reasoning?: string }) {
@@ -137,6 +161,7 @@ export default function AgentDetailPage() {
   const [depositToken, setDepositToken] = useState<MonadToken>(MONAD_TOKENS[0]);
   const [depositAmount, setDepositAmount] = useState("");
   const [depositing, setDepositing] = useState(false);
+  const [bridgeFunding, setBridgeFunding] = useState(false);
   const [depositTxHash, setDepositTxHash] = useState<`0x${string}` | undefined>();
   const [depositStatus, setDepositStatus] = useState<string>("");
   const [depositPhase, setDepositPhase] = useState<TxUiPhase>("idle");
@@ -216,6 +241,13 @@ export default function AgentDetailPage() {
   const isMonBelowMinDeposit =
     depositToken.symbol === "MON" &&
     (!Number.isFinite(parsedDepositAmount) || parsedDepositAmount < MIN_MON_DEPOSIT);
+  const canUseEmergencyBridgeFund =
+    process.env.NEXT_PUBLIC_ENABLE_EMERGENCY_BRIDGE_FUND === "true" &&
+    isOwner &&
+    depositToken.symbol === "MON" &&
+    !!depositAmount &&
+    Number.isFinite(parsedDepositAmount) &&
+    parsedDepositAmount > 0;
 
   // Settings state
   const [saving, setSaving] = useState(false);
@@ -252,12 +284,20 @@ export default function AgentDetailPage() {
   const { switchChainAsync } = useSwitchChain();
 
   // Watch for deposit tx confirmation
-  const { isSuccess: depositConfirmed } = useWaitForTransactionReceipt({
+  const {
+    isSuccess: depositConfirmed,
+    isError: depositConfirmError,
+    error: depositConfirmErrorDetail,
+  } = useWaitForTransactionReceipt({
     hash: depositTxHash,
   });
 
   // Watch for withdraw tx confirmation
-  const { isSuccess: withdrawConfirmed } = useWaitForTransactionReceipt({
+  const {
+    isSuccess: withdrawConfirmed,
+    isError: withdrawConfirmError,
+    error: withdrawConfirmErrorDetail,
+  } = useWaitForTransactionReceipt({
     hash: withdrawTxHash,
   });
 
@@ -563,6 +603,15 @@ export default function AgentDetailPage() {
   }, [activeNetwork, depositConfirmed, depositTxHash, fetchAgent, fetchCapPreview]);
 
   useEffect(() => {
+    if (!depositConfirmError || !depositTxHash) return;
+    const reason = formatContractError(depositConfirmErrorDetail);
+    setDepositPhase("error");
+    setDepositStatus(`Deposit transaction reverted: ${reason}`);
+    setDepositing(false);
+    setDepositTxHash(undefined);
+  }, [depositConfirmError, depositConfirmErrorDetail, depositTxHash]);
+
+  useEffect(() => {
     if (withdrawConfirmed && withdrawTxHash) {
       setWithdrawPhase("syncing");
       setWithdrawStatus("Withdrawal confirmed on-chain. Syncing relay status...");
@@ -606,6 +655,15 @@ export default function AgentDetailPage() {
         });
     }
   }, [activeNetwork, withdrawConfirmed, withdrawTxHash, fetchAgent, fetchCapPreview]);
+
+  useEffect(() => {
+    if (!withdrawConfirmError || !withdrawTxHash) return;
+    const reason = formatContractError(withdrawConfirmErrorDetail);
+    setWithdrawPhase("error");
+    setWithdrawStatus(`Withdrawal transaction reverted: ${reason}`);
+    setWithdrawing(false);
+    setWithdrawTxHash(undefined);
+  }, [withdrawConfirmError, withdrawConfirmErrorDetail, withdrawTxHash]);
 
   useEffect(() => {
     if (tab === "chat") {
@@ -652,6 +710,23 @@ export default function AgentDetailPage() {
       await switchChainAsync({ chainId: vaultChainId });
 
       if (depositToken.symbol === "MON") {
+        try {
+          await publicClient?.simulateContract({
+            address: vaultAddress!,
+            abi: VAULT_ABI,
+            functionName: "depositMON",
+            args: [agentIdBytes],
+            account: address,
+            value: parseEther(depositAmount),
+          });
+        } catch (simErr) {
+          const msg = formatContractError(simErr);
+          setDepositPhase("error");
+          setDepositStatus(`Deposit would revert: ${msg}`);
+          setDepositing(false);
+          return;
+        }
+
         setDepositPhase("signing");
         setDepositStatus("Check wallet and sign MON deposit transaction...");
         const hash = await writeContractAsync({
@@ -681,6 +756,22 @@ export default function AgentDetailPage() {
         setDepositTxNetwork(activeNetwork);
         setSubmittedDepositApproveTxHash(approveHash);
 
+        try {
+          await publicClient?.simulateContract({
+            address: vaultAddress!,
+            abi: VAULT_ABI,
+            functionName: "depositERC20",
+            args: [agentIdBytes, depositToken.address, amountWei],
+            account: address,
+          });
+        } catch (simErr) {
+          const msg = formatContractError(simErr);
+          setDepositPhase("error");
+          setDepositStatus(`Deposit would revert: ${msg}`);
+          setDepositing(false);
+          return;
+        }
+
         setDepositPhase("signing");
         setDepositStatus(`Approval submitted. Check wallet and sign ${depositToken.symbol} deposit...`);
         const hash = await writeContractAsync({
@@ -702,6 +793,48 @@ export default function AgentDetailPage() {
         e instanceof Error ? e.message : "Deposit failed. Check wallet and try again."
       );
       setDepositing(false);
+    }
+  };
+
+  const handleEmergencyBridgeFund = async () => {
+    if (!canUseEmergencyBridgeFund || !address) return;
+    setBridgeFunding(true);
+    setDepositPhase("syncing");
+    setDepositStatus("Submitting emergency Unit bridge funding...");
+
+    try {
+      const res = await fetch(`/api/agents/${agentId}/bridge-fund`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-owner-wallet-address": address.toLowerCase(),
+          ...(user?.id ? { "x-owner-privy-id": user.id } : {}),
+        },
+        body: JSON.stringify({ monAmount: depositAmount }),
+      });
+      const data = await res.json();
+      if (!res.ok || !data?.success) {
+        setDepositPhase("error");
+        setDepositStatus(
+          data?.error ||
+            data?.bridgeNote ||
+            "Emergency bridge funding failed."
+        );
+        return;
+      }
+
+      setDepositPhase("confirmed");
+      setDepositStatus(
+        `Emergency bridge submitted via ${data.bridgeProvider}. ` +
+          `Tx ${data.bridgeTxHash ? shortenTxHash(data.bridgeTxHash) : "pending"}`
+      );
+      fetchAgent();
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      setDepositPhase("error");
+      setDepositStatus(`Emergency bridge funding failed: ${msg.slice(0, 160)}`);
+    } finally {
+      setBridgeFunding(false);
     }
   };
 
@@ -1932,24 +2065,35 @@ export default function AgentDetailPage() {
 
                 {/* Deposit Button */}
                 {isConnected ? (
-                  <button
-                    onClick={handleDeposit}
-                    disabled={depositing || !depositAmount || parseFloat(depositAmount) <= 0 || isMonBelowMinDeposit}
-                    className="btn-primary w-full py-3.5 text-sm"
-                  >
-                    {depositing ? (
-                      <span className="flex items-center justify-center gap-2">
-                        <span className="w-4 h-4 border-2 border-background/30 border-t-background rounded-full animate-spin" />
-                        {depositPhase === "signing"
-                          ? "Awaiting Wallet Signature..."
-                          : depositPhase === "confirming"
-                          ? "Waiting For Confirmation..."
-                          : depositPhase === "syncing"
-                          ? "Syncing Relay..."
-                          : "Depositing..."}
-                      </span>
-                    ) : `Deposit ${depositToken.symbol}`}
-                  </button>
+                  <div className="space-y-2">
+                    <button
+                      onClick={handleDeposit}
+                      disabled={depositing || !depositAmount || parseFloat(depositAmount) <= 0 || isMonBelowMinDeposit}
+                      className="btn-primary w-full py-3.5 text-sm"
+                    >
+                      {depositing ? (
+                        <span className="flex items-center justify-center gap-2">
+                          <span className="w-4 h-4 border-2 border-background/30 border-t-background rounded-full animate-spin" />
+                          {depositPhase === "signing"
+                            ? "Awaiting Wallet Signature..."
+                            : depositPhase === "confirming"
+                            ? "Waiting For Confirmation..."
+                            : depositPhase === "syncing"
+                            ? "Syncing Relay..."
+                            : "Depositing..."}
+                        </span>
+                      ) : `Deposit ${depositToken.symbol}`}
+                    </button>
+                    {canUseEmergencyBridgeFund && (
+                      <button
+                        onClick={handleEmergencyBridgeFund}
+                        disabled={bridgeFunding || depositing}
+                        className="w-full py-2.5 text-xs rounded-xl border border-warning/30 text-warning hover:bg-warning/10 transition-colors disabled:opacity-60"
+                      >
+                        {bridgeFunding ? "Submitting Emergency Bridge..." : "Emergency Bridge Fund (Bypass Vault)"}
+                      </button>
+                    )}
+                  </div>
                 ) : (
                   <div className="text-center text-muted text-sm py-4 bg-surface rounded-xl border border-card-border">
                     Connect wallet to deposit

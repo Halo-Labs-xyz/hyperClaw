@@ -90,6 +90,26 @@ function formatOneLineError(error: unknown): string {
   return String(error);
 }
 
+function classifyReadProbeFailure(reason: string): "soft" | "hard" {
+  const msg = reason.toLowerCase();
+  if (
+    msg.includes("reverted") ||
+    msg.includes("execution reverted") ||
+    msg.includes("out of gas")
+  ) {
+    return "soft";
+  }
+  if (
+    msg.includes("returned no data") ||
+    msg.includes("function does not exist") ||
+    msg.includes("function selector was not recognized") ||
+    msg.includes("abi")
+  ) {
+    return "hard";
+  }
+  return "hard";
+}
+
 async function getLockCompatibility(
   network: MonadNetwork | undefined,
   address: Address
@@ -136,7 +156,12 @@ async function getLockCompatibility(
     lockCompatCache.set(cacheKey, { value, expiresAt: Date.now() + LOCK_COMPAT_CACHE_TTL_MS });
     return value;
   } catch (error) {
-    const value = { deployed: true, compatible: false, reason: formatOneLineError(error) };
+    const reason = formatOneLineError(error);
+    const compatibilityClass = classifyReadProbeFailure(reason);
+    const value =
+      compatibilityClass === "soft"
+        ? { deployed: true, compatible: true, reason }
+        : { deployed: true, compatible: false, reason };
     lockCompatCache.set(cacheKey, { value, expiresAt: Date.now() + LOCK_COMPAT_CACHE_TTL_MS });
     return value;
   }
