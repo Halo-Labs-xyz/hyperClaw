@@ -28,7 +28,7 @@ import type { Agent } from "./types";
 // Configuration
 // ============================================
 
-const DEFAULT_TICK_INTERVAL = parseInt(process.env.AGENT_TICK_INTERVAL || "60000"); // 1 minute
+const DEFAULT_TICK_INTERVAL = parseInt(process.env.AGENT_TICK_INTERVAL || "7200000"); // 2 hours (testing holistic decisions, saves API/memory costs)
 const AIP_MODE: DeploymentMode = (process.env.AIP_MODE as DeploymentMode) || "POLLING";
 const AIP_ENDPOINT = process.env.AGENT_PUBLIC_URL || process.env.VERCEL_URL 
   ? `https://${process.env.VERCEL_URL}/api/unibase`

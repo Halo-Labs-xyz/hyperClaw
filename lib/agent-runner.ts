@@ -66,18 +66,25 @@ const AGENT_GLOBAL_TICK_CONCURRENCY = Math.max(
   parseInt(process.env.AGENT_GLOBAL_TICK_CONCURRENCY || "1", 10)
 );
 const AGENT_AI_HOT_HOURS_UTC_RAW = process.env.AGENT_AI_HOT_HOURS_UTC || "12-21";
+/** Default 2h: temporary throttle for testing holistic decisions, saves API/memory/Anthropic costs */
+const AGENT_TICK_INTERVAL_DEFAULT_MS = 2 * 60 * 60 * 1000; // 2 hours
 const AGENT_AI_HOT_HOURS_DECISION_MIN_INTERVAL_MS = Math.max(
   15_000,
   parseInt(
     process.env.AGENT_AI_HOT_HOURS_DECISION_MIN_INTERVAL_MS ||
       process.env.AGENT_TICK_INTERVAL ||
-      "60000",
+      String(AGENT_TICK_INTERVAL_DEFAULT_MS),
     10
   )
 );
 const AGENT_AI_OFF_HOURS_DECISION_MIN_INTERVAL_MS = Math.max(
   60_000,
-  parseInt(process.env.AGENT_AI_OFF_HOURS_DECISION_MIN_INTERVAL_MS || "1800000", 10)
+  parseInt(
+    process.env.AGENT_AI_OFF_HOURS_DECISION_MIN_INTERVAL_MS ||
+      process.env.AGENT_TICK_INTERVAL ||
+      String(AGENT_TICK_INTERVAL_DEFAULT_MS),
+    10
+  )
 );
 const AGENT_AI_THROTTLE_LOG_INTERVAL_MS = Math.max(
   60_000,
@@ -312,7 +319,7 @@ export async function startAgent(
   if (!agent) throw new Error(`Agent ${agentId} not found`);
   const skipAdaptiveBackoff = TESTNET_FORCE_CONTINUOUS_EXECUTION && isTestnetAgent(agent);
 
-  const tickInterval = intervalMs ?? parseInt(process.env.AGENT_TICK_INTERVAL || "60000");
+  const tickInterval = intervalMs ?? parseInt(process.env.AGENT_TICK_INTERVAL || String(AGENT_TICK_INTERVAL_DEFAULT_MS));
 
   const state: AgentRunnerState = {
     agentId,

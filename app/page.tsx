@@ -77,10 +77,14 @@ export default function Dashboard() {
         const data = await res.json();
         if (cancelled) return;
         if (data?.state) {
-          setHclawState(data.state);
+          // Merge user-specific fields into existing state so we never lose marketCap / base data
+          setHclawState((prev) =>
+            prev ? { ...prev, ...data.state } : (data.state as HclawState)
+          );
         }
+        // When API returns configured:false or error, do NOT clear – keep existing flywheel data
       } catch {
-        // non-critical
+        // non-critical – never clear hclawState on fetch failure
       }
     }
 
@@ -511,7 +515,7 @@ export default function Dashboard() {
                   </div>
                 )}
               </div>
-              {hclawState ? (
+              {hclawState && typeof hclawState.marketCap === "number" ? (
                 <div>
                   <div className="grid grid-cols-2 md:grid-cols-3 gap-3 mb-4">
                     <div className="p-3 rounded-xl bg-surface border border-card-border">
@@ -528,7 +532,7 @@ export default function Dashboard() {
                     </div>
                     <div className="p-3 rounded-xl bg-surface border border-card-border">
                       <div className="text-[10px] text-dim uppercase tracking-wider mb-1">Boosted Cap</div>
-                      <div className="text-sm font-semibold mono-nums">${(hclawState.boostedCapUsd ?? hclawState.maxDepositPerVault).toLocaleString()}</div>
+                      <div className="text-sm font-semibold mono-nums">${(hclawState.boostedCapUsd ?? hclawState.maxDepositPerVault ?? 0).toLocaleString()}</div>
                     </div>
                     <div className="p-3 rounded-xl bg-surface border border-card-border">
                       <div className="text-[10px] text-dim uppercase tracking-wider mb-1">Weekly Points</div>
@@ -543,16 +547,16 @@ export default function Dashboard() {
                   </div>
                   <div className="flex justify-between text-sm mb-3">
                     <span className="text-accent font-medium">
-                      {hclawState.currentTier.name} Tier
+                      {hclawState.currentTier?.name ?? "Hatchling"} Tier
                     </span>
                     <span className="text-muted mono-nums">
-                      Max: ${hclawState.maxDepositPerVault.toLocaleString()}/vault
+                      Max: ${(hclawState.maxDepositPerVault ?? 0).toLocaleString()}/vault
                     </span>
                   </div>
                   <div className="progress-bar">
                     <div
                       className="progress-bar-fill"
-                      style={{ width: `${hclawState.progressToNextTier}%` }}
+                      style={{ width: `${hclawState.progressToNextTier ?? 0}%` }}
                     />
                   </div>
                   {hclawState.nextTier && (
