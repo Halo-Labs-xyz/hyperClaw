@@ -206,6 +206,7 @@ export async function POST(request: Request) {
               totalPnl: state.totalPnl,
               realizedPnl: state.realizedPnl,
               totalUnrealizedPnl: state.totalUnrealizedPnl,
+              openPositions: state.positions.length,
               network: isTestnet() ? "testnet" : "mainnet",
             });
           }
@@ -234,6 +235,7 @@ export async function POST(request: Request) {
             accountValue: "0",
             availableBalance: "0",
             marginUsed: "0",
+            openPositions: 0,
             stale: true,
             network: isTestnet() ? "testnet" : "mainnet",
           });

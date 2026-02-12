@@ -5,17 +5,61 @@ import { getUserPointsSummary } from "@/lib/hclaw-points";
 import { getClaimableSummary } from "@/lib/hclaw-rewards";
 import { getAddressIfSet, getHclawAddressIfSet } from "@/lib/env";
 
+/**
+ * Official nad.fun v3 Lens ABI – sourced from
+ * https://github.com/Naddotfun/contract-v3-abi/blob/main/ILens.json
+ *
+ * The Lens is the single read interface that auto-detects bonding-curve
+ * vs graduated-DEX tokens.  There is NO `getCurveState` in v3.
+ */
 const LENS_ABI = [
   {
-    inputs: [{ name: "token", type: "address" }],
-    name: "getCurveState",
+    inputs: [
+      { name: "_token", type: "address" },
+      { name: "_amountIn", type: "uint256" },
+      { name: "_isBuy", type: "bool" },
+    ],
+    name: "getAmountOut",
     outputs: [
-      { name: "virtualMon", type: "uint256" },
-      { name: "virtualToken", type: "uint256" },
-      { name: "realMon", type: "uint256" },
-      { name: "realToken", type: "uint256" },
-      { name: "totalSupply", type: "uint256" },
-      { name: "isGraduated", type: "bool" },
+      { name: "router", type: "address" },
+      { name: "amountOut", type: "uint256" },
+    ],
+    stateMutability: "view",
+    type: "function",
+  },
+  {
+    inputs: [{ name: "_token", type: "address" }],
+    name: "isGraduated",
+    outputs: [{ name: "isGraduated", type: "bool" }],
+    stateMutability: "view",
+    type: "function",
+  },
+  {
+    inputs: [{ name: "_token", type: "address" }],
+    name: "getProgress",
+    outputs: [{ name: "progress", type: "uint256" }],
+    stateMutability: "view",
+    type: "function",
+  },
+] as const;
+
+/**
+ * BondingCurve `curves(token)` – direct reserve read from
+ * https://github.com/Naddotfun/contract-v3-abi/blob/main/IBondingCurve.json
+ */
+const BONDING_CURVE_ABI = [
+  {
+    inputs: [{ name: "token", type: "address" }],
+    name: "curves",
+    outputs: [
+      { name: "realMonReserve", type: "uint256" },
+      { name: "realTokenReserve", type: "uint256" },
+      { name: "virtualMonReserve", type: "uint256" },
+      { name: "virtualTokenReserve", type: "uint256" },
+      { name: "k", type: "uint256" },
+      { name: "targetTokenAmount", type: "uint256" },
+      { name: "initVirtualMonReserve", type: "uint256" },
+      { name: "initVirtualTokenReserve", type: "uint256" },
     ],
     stateMutability: "view",
     type: "function",
@@ -249,38 +293,74 @@ export async function getHclawState(
     let priceUsd = 0;
     let marketCapUsd = 0;
 
-    // Try nad.fun curve lens first.
+    // Strategy: use the v3 Lens getAmountOut (works for both bonding curve
+    // and graduated DEX tokens).  Fall back to direct BondingCurve.curves()
+    // read, then DEX-pair reserve read.
+    const ONE_MON = BigInt("1000000000000000000"); // 1e18
+
     try {
-      const curveState = await client.readContract({
+      // Step 1: Try Lens getAmountOut – "If I buy with 1 MON, how many tokens?"
+      const [, amountOut] = await client.readContract({
         address: config.lens,
         abi: LENS_ABI,
-        functionName: "getCurveState",
-        args: [tokenAddress],
+        functionName: "getAmountOut",
+        args: [tokenAddress, ONE_MON, true],
       });
-      const [virtualMon, virtualToken, , , totalSupply] = curveState;
-      if (virtualToken > BigInt(0) && totalSupply > BigInt(0)) {
-        const priceMon = Number(formatEther(virtualMon)) / Number(formatEther(virtualToken));
-        const supply = Number(formatEther(totalSupply));
-        priceUsd = priceMon * monPriceUsd;
-        marketCapUsd = priceMon * supply * monPriceUsd;
+
+      if (amountOut > BigInt(0)) {
+        // price per token in MON = 1 / (amountOut / 1e18) = 1e18 / amountOut
+        const tokenQtyPerMon = Number(formatEther(amountOut));
+        const pricePerTokenMon = 1 / tokenQtyPerMon;
+        priceUsd = pricePerTokenMon * monPriceUsd;
+
+        // Read total supply for market cap
+        const supplyRaw = await client.readContract({
+          address: tokenAddress,
+          abi: ERC20_METADATA_ABI,
+          functionName: "totalSupply",
+        });
+        const supply = Number(formatEther(supplyRaw as bigint));
+        marketCapUsd = supply * priceUsd;
       }
     } catch {
-      // If lens read is unavailable, derive price from live DEX reserves.
+      // Step 2: Lens failed – try reading BondingCurve.curves() directly
       try {
-        const dex = await getDexDerivedMarketState({
-          client,
-          tokenAddress,
-          network,
-          monPriceUsd,
-        });
-        if (dex) {
-          priceUsd = dex.priceUsd;
-          marketCapUsd = dex.marketCapUsd;
-        } else {
-          console.warn("[HCLAW] No readable nad.fun curve/DEX price state; using cap/rebate fallback state");
+        const curveAddress = NADFUN_CONFIG[network]?.curve;
+        if (curveAddress) {
+          const curveData = await client.readContract({
+            address: curveAddress as Address,
+            abi: BONDING_CURVE_ABI,
+            functionName: "curves",
+            args: [tokenAddress],
+          });
+          const virtualMonReserve = curveData[2];
+          const virtualTokenReserve = curveData[3];
+          if (virtualTokenReserve > BigInt(0)) {
+            const priceMon = Number(formatEther(virtualMonReserve)) / Number(formatEther(virtualTokenReserve));
+            priceUsd = priceMon * monPriceUsd;
+
+            const supplyRaw = await client.readContract({
+              address: tokenAddress,
+              abi: ERC20_METADATA_ABI,
+              functionName: "totalSupply",
+            });
+            const supply = Number(formatEther(supplyRaw as bigint));
+            marketCapUsd = supply * priceUsd;
+          }
         }
       } catch {
-        console.warn("[HCLAW] Curve/DEX price fetch unavailable; using cap/rebate fallback state");
+        // Step 3: BondingCurve read failed – try DEX pair reserves
+        try {
+          const dex = await getDexDerivedMarketState({ client, tokenAddress, network, monPriceUsd });
+          if (dex) {
+            priceUsd = dex.priceUsd;
+            marketCapUsd = dex.marketCapUsd;
+          } else {
+            console.warn("[HCLAW] All price sources unavailable; using tier/rebate fallback state");
+          }
+        } catch {
+          console.warn("[HCLAW] All price sources unavailable; using tier/rebate fallback state");
+        }
       }
     }
 

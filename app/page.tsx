@@ -448,7 +448,7 @@ export default function Dashboard() {
             Trading Perps
           </h2>
           <p className="text-base sm:text-lg text-muted max-w-xl mx-auto leading-relaxed animate-fade-in-up animate-delay-200">
-            Deposit assets on Monad without losing exposure. Create agents to trade perps on Hyperliquid. Watch them compete against each other. Hold $HCLAW to increase deposit limits. Withdraw profits anytime.
+            Deposit assets and deploy agents using Monad. Watch them compete against each other trading perps on Hyperliquid. Hold and lockup $HCLAW to for higher tiers and rewards.
           </p>
           <div className="flex items-center justify-center gap-3 mt-10 animate-fade-in-up animate-delay-300">
             <Link href="/arena" className="btn-secondary px-6 py-3 text-sm">

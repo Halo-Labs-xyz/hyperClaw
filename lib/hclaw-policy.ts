@@ -85,6 +85,28 @@ async function readPolicyFromChain(user: Address, network?: MonadNetwork): Promi
 
   const client = getPublicClient(network);
 
+  // Pre-check: does the policy contract have code deployed?
+  try {
+    const code = await client.getCode({ address: policyAddress });
+    if (!code || code === "0x" || code.length <= 2) {
+      // No contract at this address – fall back silently
+      const baseCapUsd = await readBaseCapFallback(network);
+      const boostedCapUsd = (baseCapUsd * lockState.boostBps) / 10_000;
+      const fallbackValue: PolicyRead = {
+        baseCapUsd,
+        boostedCapUsd,
+        boostBps: lockState.boostBps,
+        rebateBps: lockState.rebateBps,
+        tier: lockState.tier,
+        power: lockState.power,
+      };
+      policyCache.set(cacheKey, { value: fallbackValue, expiresAt: Date.now() + POLICY_CACHE_TTL_MS });
+      return fallbackValue;
+    }
+  } catch {
+    // getCode failed – continue to try the actual call anyway
+  }
+
   try {
     const [baseCapRaw, userCapRaw, rebateBpsRaw, boostBpsRaw, tierRaw, powerRaw] = await Promise.all([
       client.readContract({
@@ -136,7 +158,8 @@ async function readPolicyFromChain(user: Address, network?: MonadNetwork): Promi
     policyCache.set(cacheKey, { value, expiresAt: Date.now() + POLICY_CACHE_TTL_MS });
     return value;
   } catch (error) {
-    console.warn("[HCLAW] policy read fallback:", error);
+    const msg = error instanceof Error ? error.message.split("\n")[0] : String(error);
+    console.warn(`[HCLAW] policy read fallback: ${msg}`);
     const baseCapUsd = await readBaseCapFallback(network);
     const tier = lockState.tier;
     const boostBps = tierToBoostBps(tier);
@@ -197,6 +220,11 @@ export async function getBaseCapUsd(network?: MonadNetwork): Promise<number> {
 
   try {
     const client = getPublicClient(network);
+
+    // Pre-check contract existence
+    const code = await client.getCode({ address: policyAddress });
+    if (!code || code === "0x" || code.length <= 2) return readBaseCapFallback(network);
+
     const baseCapRaw = (await client.readContract({
       address: policyAddress,
       abi: HCLAW_POLICY_ABI,

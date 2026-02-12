@@ -73,6 +73,17 @@ export async function getUserLockState(user: Address, network?: MonadNetwork): P
 
   const client = getPublicClient(network);
 
+  // Pre-check: does the lock contract have code deployed?
+  try {
+    const code = await client.getCode({ address: lockAddress });
+    if (!code || code === "0x" || code.length <= 2) {
+      // No contract deployed at this address – return empty without noisy logs
+      return getEmptyLockState(user);
+    }
+  } catch {
+    return getEmptyLockState(user);
+  }
+
   try {
     const [tierRaw, powerRaw, lockIdsRaw] = await Promise.all([
       client.readContract({
@@ -106,7 +117,8 @@ export async function getUserLockState(user: Address, network?: MonadNetwork): P
       lockIds: lockIdsRaw.map((id) => id.toString()),
     };
   } catch (error) {
-    console.warn("[HCLAW] getUserLockState fallback:", error);
+    const msg = error instanceof Error ? error.message.split("\n")[0] : String(error);
+    console.warn(`[HCLAW] getUserLockState fallback for ${user.slice(0, 10)}…: ${msg}`);
     return getEmptyLockState(user);
   }
 }
