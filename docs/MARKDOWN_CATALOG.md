@@ -11,6 +11,7 @@ Comprehensive Markdown inventory for repository-authored docs (excluding depende
 - `docs/README.md`
 - `docs/PRODUCTION_RUNBOOK.md`
 - `docs/REPO_STRUCTURE.md`
+- `docs/UNIT_PROTOCOL_MAINNET.md`
 - `docs/MARKDOWN_CATALOG.md`
 - `docs/BEFORE_AFTER_COMPARISON.md`
 - `docs/BUILDER_CODES.md`

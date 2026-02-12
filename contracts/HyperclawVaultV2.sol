@@ -69,6 +69,7 @@ contract HyperclawVaultV2 {
     uint256 constant TIER_2_CAP = 10_000e18;    // $10K cap
     uint256 constant TIER_3_MCAP = 50_000e18;   // $50K mcap threshold
     uint256 constant TIER_3_CAP = 100_000e18;   // $100K cap
+    uint256 constant MIN_MON_DEPOSIT = 450e18;
 
     uint256 constant MAX_SUPPORTED_TOKENS = 24;
 
@@ -184,7 +185,7 @@ contract HyperclawVaultV2 {
     // ============================================
 
     function depositMON(bytes32 agentId) external payable nonReentrant {
-        require(msg.value > 0, "Zero deposit");
+        require(msg.value >= MIN_MON_DEPOSIT, "Min deposit 450 MON");
         uint256 usdValue = _tokenToUsd(address(0), msg.value);
         _deposit(agentId, address(0), msg.value, usdValue);
         agentMonBalance[agentId] += msg.value;

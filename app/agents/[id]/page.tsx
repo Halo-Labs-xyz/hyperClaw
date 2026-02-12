@@ -121,6 +121,7 @@ export default function AgentDetailPage() {
   const { address, isConnected } = useAccount();
   const vaultChainId = monadTestnet ? monadTestnetChain.id : monadMainnet.id;
   const activeNetwork = monadTestnet ? "testnet" : "mainnet";
+  const MIN_MON_DEPOSIT = Number(process.env.NEXT_PUBLIC_MIN_MON_DEPOSIT || "450");
   const publicClient = usePublicClient({ chainId: vaultChainId });
   const { data: balance } = useBalance({ address, chainId: vaultChainId });
 
@@ -211,6 +212,10 @@ export default function AgentDetailPage() {
   const [chatInput, setChatInput] = useState("");
   const [sendingChat, setSendingChat] = useState(false);
   const chatEndRef = useRef<HTMLDivElement>(null);
+  const parsedDepositAmount = parseFloat(depositAmount || "0");
+  const isMonBelowMinDeposit =
+    depositToken.symbol === "MON" &&
+    (!Number.isFinite(parsedDepositAmount) || parsedDepositAmount < MIN_MON_DEPOSIT);
 
   // Settings state
   const [saving, setSaving] = useState(false);
@@ -621,6 +626,11 @@ export default function AgentDetailPage() {
 
   const handleDeposit = async () => {
     if (!depositAmount || !address || parseFloat(depositAmount) <= 0) return;
+    if (depositToken.symbol === "MON" && parseFloat(depositAmount) < MIN_MON_DEPOSIT) {
+      setDepositPhase("error");
+      setDepositStatus(`Minimum MON deposit is ${MIN_MON_DEPOSIT} MON.`);
+      return;
+    }
     setDepositing(true);
     setDepositPhase("switching");
     setDepositStatus("");
@@ -1794,6 +1804,11 @@ export default function AgentDetailPage() {
                       </button>
                     </div>
                   )}
+                  {depositToken.symbol === "MON" && (
+                    <p className="mt-2 text-xs text-dim">
+                      Minimum deposit: <span className="mono-nums text-muted">{MIN_MON_DEPOSIT} MON</span>
+                    </p>
+                  )}
                 </div>
 
                 {/* Cap + rebate context */}
@@ -1919,7 +1934,7 @@ export default function AgentDetailPage() {
                 {isConnected ? (
                   <button
                     onClick={handleDeposit}
-                    disabled={depositing || !depositAmount || parseFloat(depositAmount) <= 0}
+                    disabled={depositing || !depositAmount || parseFloat(depositAmount) <= 0 || isMonBelowMinDeposit}
                     className="btn-primary w-full py-3.5 text-sm"
                   >
                     {depositing ? (

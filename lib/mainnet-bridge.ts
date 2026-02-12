@@ -27,6 +27,23 @@ interface HyperunitAddressResponse {
   data?: { address?: string };
 }
 
+interface HyperunitOperationAddress {
+  sourceCoinType?: string;
+  destinationChain?: string;
+  address?: string;
+}
+
+interface HyperunitOperation {
+  operationId?: string;
+  sourceTxHash?: string;
+  state?: string;
+}
+
+interface HyperunitOperationsResponse {
+  addresses?: HyperunitOperationAddress[];
+  operations?: HyperunitOperation[];
+}
+
 interface DeBridgeCreateTxResponse {
   estimation?: Record<string, unknown>;
   tx?: {
@@ -55,6 +72,8 @@ const HYPERUNIT_DEPOSIT_ASSET =
   (process.env.HYPERUNIT_DEPOSIT_ASSET || "mon").toLowerCase();
 const HYPERUNIT_WITHDRAW_ASSET =
   (process.env.HYPERUNIT_WITHDRAW_ASSET || "usdc").toLowerCase();
+const HYPERUNIT_API_KEY = process.env.HYPERUNIT_API_KEY?.trim() || "";
+const HYPERUNIT_BEARER_TOKEN = process.env.HYPERUNIT_BEARER_TOKEN?.trim() || "";
 
 const DEBRIDGE_API_URL =
   (process.env.DEBRIDGE_API_URL || "https://dln.debridge.finance").replace(/\/$/, "");
@@ -100,6 +119,13 @@ function pickHyperunitAddress(payload: HyperunitAddressResponse): Address | null
   const nestedResult = parseAddress(payload.result?.address);
   if (nestedResult) return nestedResult;
   return parseAddress(payload.data?.address);
+}
+
+function getHyperunitHeaders(): Record<string, string> {
+  const headers: Record<string, string> = {};
+  if (HYPERUNIT_API_KEY) headers["x-api-key"] = HYPERUNIT_API_KEY;
+  if (HYPERUNIT_BEARER_TOKEN) headers.Authorization = `Bearer ${HYPERUNIT_BEARER_TOKEN}`;
+  return headers;
 }
 
 function hasDebridgeConfig(): boolean {
@@ -165,12 +191,48 @@ async function getHyperunitDestinationAddress(params: {
 }): Promise<Address> {
   const { sourceChain, destinationChain, asset, destinationAddress } = params;
   const url = `${HYPERUNIT_API_URL}/gen/${sourceChain}/${destinationChain}/${asset}/${destinationAddress}`;
-  const payload = (await fetchJson(url, { method: "GET" }, 10_000)) as HyperunitAddressResponse;
+  const payload = (await fetchJson(
+    url,
+    {
+      method: "GET",
+      headers: getHyperunitHeaders(),
+    },
+    10_000
+  )) as HyperunitAddressResponse;
   const addr = pickHyperunitAddress(payload);
   if (!addr) {
     throw new Error("Hyperunit did not return a protocol address");
   }
   return addr;
+}
+
+async function getHyperunitOperations(destinationAddress: Address): Promise<HyperunitOperationsResponse> {
+  const url = `${HYPERUNIT_API_URL}/operations/${destinationAddress}`;
+  return (await fetchJson(
+    url,
+    {
+      method: "GET",
+      headers: getHyperunitHeaders(),
+    },
+    10_000
+  )) as HyperunitOperationsResponse;
+}
+
+async function getKnownHyperunitProtocolAddress(
+  destinationAddress: Address,
+  destinationChain: string
+): Promise<Address | null> {
+  const payload = await getHyperunitOperations(destinationAddress);
+  const targetChain = destinationChain.toLowerCase();
+
+  for (const item of payload.addresses || []) {
+    const addr = parseAddress(item.address);
+    if (!addr) continue;
+    const itemDstChain = (item.destinationChain || "").toLowerCase();
+    if (itemDstChain === targetChain) return addr;
+  }
+
+  return null;
 }
 
 async function sendMonadNative(to: Address, valueWei: bigint): Promise<Hex> {
@@ -311,12 +373,19 @@ export async function bridgeDepositToHyperliquidAgent(params: {
   const sourceIsStableErc20 = !sourceIsNative && isStableRelayToken(sourceToken);
 
   const tryHyperunit = async (): Promise<BridgeExecution> => {
-    const protocolAddress = await getHyperunitDestinationAddress({
-      sourceChain: HYPERUNIT_MONAD_CHAIN,
-      destinationChain: HYPERUNIT_HYPERLIQUID_CHAIN,
-      asset: HYPERUNIT_DEPOSIT_ASSET,
-      destinationAddress: hlAddress,
-    });
+    let protocolAddress: Address;
+    try {
+      protocolAddress = await getHyperunitDestinationAddress({
+        sourceChain: HYPERUNIT_MONAD_CHAIN,
+        destinationChain: HYPERUNIT_HYPERLIQUID_CHAIN,
+        asset: HYPERUNIT_DEPOSIT_ASSET,
+        destinationAddress: hlAddress,
+      });
+    } catch (error) {
+      const known = await getKnownHyperunitProtocolAddress(hlAddress, HYPERUNIT_HYPERLIQUID_CHAIN);
+      if (!known) throw error;
+      protocolAddress = known;
+    }
 
     if (!sourceIsNative) {
       return {
@@ -329,11 +398,26 @@ export async function bridgeDepositToHyperliquidAgent(params: {
     }
 
     const relayTxHash = await sendMonadNative(protocolAddress, sourceAmountRaw);
+    let operationId: string | undefined;
+    let operationState: string | undefined;
+    try {
+      const ops = await getHyperunitOperations(hlAddress);
+      const match = (ops.operations || []).find((op) =>
+        typeof op.sourceTxHash === "string" &&
+        op.sourceTxHash.toLowerCase().includes(relayTxHash.toLowerCase())
+      );
+      operationId = match?.operationId;
+      operationState = match?.state;
+    } catch {
+      // Keep successful relay submission even if operations endpoint is unavailable.
+    }
     return {
       provider: "hyperunit",
       status: "submitted",
       destinationAddress: protocolAddress,
       relayTxHash,
+      bridgeOrderId: operationId,
+      note: operationState ? `Hyperunit operation state: ${operationState}` : undefined,
     };
   };
 
@@ -438,18 +522,22 @@ export async function bridgeDepositToHyperliquidAgent(params: {
     try {
       const deb = await tryDebridge();
       if (deb.status === "submitted") return deb;
+      const status: BridgeStatus = deb.status === "failed" ? "failed" : "pending";
+      const provider: BridgeExecution["provider"] =
+        deb.status === "failed" ? "none" : "hyperunit";
       return {
         ...deb,
-        status: "failed",
+        provider,
+        status,
         note: `Hyperunit error: ${msg.slice(0, 140)}; ${deb.note || "deBridge pending"}`,
       };
     } catch (debErr) {
       const debMsg = debErr instanceof Error ? debErr.message : String(debErr);
       return {
-        provider: "none",
-        status: "failed",
+        provider: "hyperunit",
+        status: "pending",
         destinationAddress: hlAddress,
-        note: `Hyperunit error: ${msg.slice(0, 140)}; deBridge error: ${debMsg.slice(0, 140)}`,
+        note: `Hyperunit error: ${msg.slice(0, 140)}; deBridge error: ${debMsg.slice(0, 140)}; retrying`,
       };
     }
   }

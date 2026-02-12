@@ -1,4 +1,4 @@
-import { createPublicClient, formatEther, http, type Address, zeroAddress } from "viem";
+import { createPublicClient, formatEther, http, type Address } from "viem";
 import { getHclawLockAddressIfSet } from "@/lib/env";
 import { isMonadTestnet } from "@/lib/network";
 import type { HclawLockPosition, HclawLockState, HclawLockTier } from "@/lib/types";
@@ -7,6 +7,7 @@ import { HCLAW_LOCK_ABI } from "@/lib/vault";
 export const HCLAW_LOCK_DURATIONS = [30, 90, 180] as const;
 export type MonadNetwork = "mainnet" | "testnet";
 const LOCK_COMPAT_CACHE_TTL_MS = 60_000;
+const LOCK_READ_PROBE_USER = "0x000000000000000000000000000000000000dEaD" as Address;
 const lockCompatCache = new Map<
   string,
   {
@@ -108,19 +109,26 @@ async function getLockCompatibility(
       return value;
     }
 
-    // Verify this is the expected lock implementation by probing read-only views.
+    // Verify core read-only surface used by policy and lock actions.
+    // Some deployed contracts may not expose lock-id enumeration.
     await Promise.all([
       client.readContract({
         address,
         abi: HCLAW_LOCK_ABI,
         functionName: "getUserTier",
-        args: [zeroAddress],
+        args: [LOCK_READ_PROBE_USER],
+      }),
+      client.readContract({
+        address,
+        abi: HCLAW_LOCK_ABI,
+        functionName: "getUserPower",
+        args: [LOCK_READ_PROBE_USER],
       }),
       client.readContract({
         address,
         abi: HCLAW_LOCK_ABI,
         functionName: "getUserLockIds",
-        args: [zeroAddress],
+        args: [LOCK_READ_PROBE_USER],
       }),
     ]);
 
@@ -156,7 +164,7 @@ export async function getUserLockState(user: Address, network?: MonadNetwork): P
   const client = getPublicClient(network);
 
   try {
-    const [tierRaw, powerRaw, lockIdsRaw] = await Promise.all([
+    const [tierRaw, powerRaw] = await Promise.all([
       client.readContract({
         address: lockAddress,
         abi: HCLAW_LOCK_ABI,
@@ -169,13 +177,20 @@ export async function getUserLockState(user: Address, network?: MonadNetwork): P
         functionName: "getUserPower",
         args: [user],
       }) as Promise<bigint>,
-      client.readContract({
+    ]);
+
+    let lockIdsRaw: bigint[] = [];
+    try {
+      lockIdsRaw = (await client.readContract({
         address: lockAddress,
         abi: HCLAW_LOCK_ABI,
         functionName: "getUserLockIds",
         args: [user],
-      }) as Promise<bigint[]>,
-    ]);
+      })) as bigint[];
+    } catch (error) {
+      const msg = formatOneLineError(error);
+      console.warn(`[HCLAW] getUserLockIds unavailable for ${user.slice(0, 10)}…: ${msg}`);
+    }
 
     const positionsRaw = await Promise.all(
       lockIdsRaw.map(async (id) => {
