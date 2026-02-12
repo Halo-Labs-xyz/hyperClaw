@@ -3,6 +3,7 @@ import { type Address, parseEther } from "viem";
 import {
   buildLockWriteRequest,
   durationToTier,
+  getLockContractStatus,
   getUserLockState,
   previewPower,
   tierToBoostBps,
@@ -56,8 +57,11 @@ export async function GET(request: Request) {
       (getNetworkState().monadTestnet ? "testnet" : "mainnet");
 
     if (!user) {
+      const contract = await getLockContractStatus(network);
       return NextResponse.json({
         configured: false,
+        network,
+        contract,
         durations: [30, 90, 180],
         labels: {
           30: "Locked HCLAW (30d)",
@@ -68,10 +72,12 @@ export async function GET(request: Request) {
     }
 
     const lock = await getUserLockState(user, network);
+    const contract = await getLockContractStatus(network);
 
     return NextResponse.json({
       configured: true,
       network,
+      contract,
       lock,
     });
   } catch (error) {

@@ -32,9 +32,23 @@ interface HclawPageData {
     tier: number;
     power: number;
     lockIds: string[];
+    positions: Array<{
+      lockId: string;
+      amount: number;
+      startTs: number;
+      endTs: number;
+      durationDays: number;
+      multiplierBps: number;
+      unlocked: boolean;
+      remainingMs: number;
+    }>;
+  };
+  lockContract?: {
+    address: string | null;
+    deployed: boolean;
   };
   points?: {
-    epoch: { epochId: string; endTs: number };
+    epoch: { epochId: string; startTs: number; endTs: number; status: "open" | "closing" | "closed" };
     points: {
       lockPoints: number;
       lpPoints: number;
@@ -73,6 +87,22 @@ interface HclawPageData {
 
 type MonadNetwork = "mainnet" | "testnet";
 
+function getExplorerTxUrl(network: MonadNetwork, txHash: string): string {
+  if (network === "testnet") {
+    return `https://testnet.monadexplorer.com/tx/${txHash}`;
+  }
+  return `https://explorer.monad.xyz/tx/${txHash}`;
+}
+
+function formatMs(ms: number): string {
+  if (ms <= 0) return "ended";
+  const totalMinutes = Math.floor(ms / (60 * 1000));
+  const days = Math.floor(totalMinutes / (60 * 24));
+  const hours = Math.floor((totalMinutes % (60 * 24)) / 60);
+  const minutes = totalMinutes % 60;
+  return `${days}d ${hours}h ${minutes}m`;
+}
+
 export default function HclawHubPage() {
   const { address, isConnected } = useAccount();
   const { monadTestnet } = useNetwork();
@@ -100,6 +130,9 @@ export default function HclawHubPage() {
   const [lockStatus, setLockStatus] = useState("");
   const [locking, setLocking] = useState(false);
   const [lockTxHash, setLockTxHash] = useState<`0x${string}` | undefined>();
+  const [submittedApproveTxHash, setSubmittedApproveTxHash] = useState<`0x${string}` | undefined>();
+  const [submittedLockTxHash, setSubmittedLockTxHash] = useState<`0x${string}` | undefined>();
+  const [submittedTxNetwork, setSubmittedTxNetwork] = useState<MonadNetwork | null>(null);
 
   const { switchChainAsync } = useSwitchChain();
   const { writeContractAsync } = useWriteContract();
@@ -147,11 +180,11 @@ export default function HclawHubPage() {
       const q = `?${query.toString()}`;
 
       const [stateRes, lockRes, pointsRes, rewardsRes, treasuryRes] = await Promise.all([
-        fetch(`/api/hclaw/state${q}`),
-        fetch(`/api/hclaw/lock${q}`),
-        fetch(`/api/hclaw/points${q}`),
-        fetch(`/api/hclaw/rewards${q}`),
-        fetch(`/api/hclaw/treasury`),
+        fetch(`/api/hclaw/state${q}`, { cache: "no-store" }),
+        fetch(`/api/hclaw/lock${q}`, { cache: "no-store" }),
+        fetch(`/api/hclaw/points${q}`, { cache: "no-store" }),
+        fetch(`/api/hclaw/rewards${q}`, { cache: "no-store" }),
+        fetch(`/api/hclaw/treasury`, { cache: "no-store" }),
       ]);
 
       const [stateJson, lockJson, pointsJson, rewardsJson, treasuryJson] = await Promise.all([
@@ -165,6 +198,7 @@ export default function HclawHubPage() {
       setData({
         state: stateJson?.state,
         lock: lockJson?.lock,
+        lockContract: lockJson?.contract,
         points: pointsJson?.summary,
         rewards: rewardsJson,
         treasury: treasuryJson,
@@ -183,11 +217,14 @@ export default function HclawHubPage() {
   useEffect(() => {
     if (!lockConfirmed || !lockTxHash) return;
 
-    setLockStatus(`Lock confirmed: ${lockTxHash.slice(0, 10)}...`);
+    setLockStatus(`Lock confirmed on ${activeNetwork}: ${lockTxHash}`);
+    setSubmittedLockTxHash(lockTxHash);
+    setSubmittedTxNetwork(activeNetwork);
     setLocking(false);
     setLockTxHash(undefined);
     void Promise.all([loadHubData(), refetchHclawBalance(), refetchHclawAllowance()]);
   }, [
+    activeNetwork,
     lockConfirmed,
     lockTxHash,
     loadHubData,
@@ -250,7 +287,9 @@ export default function HclawHubPage() {
           functionName: "approve",
           args: [hclawLockAddress, amountWei],
         });
-        setLockStatus(`Approval submitted: ${approveHash.slice(0, 10)}...`);
+        setSubmittedApproveTxHash(approveHash);
+        setSubmittedTxNetwork(activeNetwork);
+        setLockStatus(`Approval submitted on ${activeNetwork}: ${approveHash}`);
       }
 
       setLockStatus(`Submitting ${amount} HCLAW lock for ${previewDuration} days...`);
@@ -262,8 +301,9 @@ export default function HclawHubPage() {
         args: [amountWei, previewDuration],
       });
 
+      setSubmittedTxNetwork(activeNetwork);
       setLockTxHash(hash);
-      setLockStatus("Lock transaction submitted. Waiting for confirmation...");
+      setLockStatus(`Lock transaction submitted on ${activeNetwork}: ${hash}. Waiting for confirmation...`);
     } catch (error) {
       setLocking(false);
       setLockStatus(error instanceof Error ? error.message : "Failed to lock HCLAW.");
@@ -309,6 +349,33 @@ export default function HclawHubPage() {
     const minutes = Math.floor((remainingMs % (60 * 60 * 1000)) / (60 * 1000));
     return `${hours}h ${minutes}m`;
   }, [data.points?.epoch?.endTs]);
+
+  const epochStartLabel = useMemo(() => {
+    const startTs = data.points?.epoch?.startTs;
+    if (!startTs) return "--";
+    return new Date(startTs).toLocaleString();
+  }, [data.points?.epoch?.startTs]);
+
+  const epochEndLabel = useMemo(() => {
+    const endTs = data.points?.epoch?.endTs;
+    if (!endTs) return "--";
+    return new Date(endTs).toLocaleString();
+  }, [data.points?.epoch?.endTs]);
+
+  const lockEpochRelations = useMemo(() => {
+    const epoch = data.points?.epoch;
+    const positions = data.lock?.positions ?? [];
+    if (!epoch || positions.length === 0) return [];
+    const epochMs = Math.max(1, epoch.endTs - epoch.startTs);
+    const now = Date.now();
+    return positions
+      .filter((p) => !p.unlocked && p.endTs > now)
+      .map((p) => ({
+        ...p,
+        remainingMs: Math.max(0, p.endTs - now),
+        epochsUntilUnlock: Math.max(1, Math.ceil((p.endTs - now) / epochMs)),
+      }));
+  }, [data.lock?.positions, data.points?.epoch]);
 
   return (
     <div className="min-h-screen page-bg relative overflow-hidden">
@@ -372,6 +439,12 @@ export default function HclawHubPage() {
                   <div>Wallet HCLAW: {hclawBalance.toFixed(4)}</div>
                   <div>Current lock tier: {Number(data.lock?.tier ?? 0)}</div>
                   <div>Active locks: {data.lock?.lockIds?.length ?? 0}</div>
+                  <div>
+                    Lock contract:{" "}
+                    {data.lockContract?.address ? (
+                      data.lockContract?.deployed ? "deployed" : "missing code on selected network"
+                    ) : "not configured"}
+                  </div>
                 </div>
 
                 <div className="flex flex-wrap gap-2">
@@ -384,6 +457,12 @@ export default function HclawHubPage() {
                     className="px-4 py-2 text-sm rounded-xl bg-accent/10 border border-accent/25 text-accent disabled:opacity-50"
                   >
                     {locking ? "Locking..." : "Lock HCLAW"}
+                  </button>
+                  <button
+                    onClick={() => void loadHubData()}
+                    className="px-4 py-2 text-sm rounded-xl bg-surface border border-card-border text-muted"
+                  >
+                    Refresh
                   </button>
                 </div>
 
@@ -399,10 +478,44 @@ export default function HclawHubPage() {
                 {lockStatus && (
                   <p className="text-xs mt-3 text-muted break-all">{lockStatus}</p>
                 )}
+
+                {(submittedApproveTxHash || submittedLockTxHash) && submittedTxNetwork && (
+                  <div className="mt-3 p-3 rounded-xl bg-surface border border-card-border text-xs space-y-2">
+                    {submittedApproveTxHash && (
+                      <div className="break-all">
+                        Approve tx:{" "}
+                        <a
+                          className="text-accent underline"
+                          href={getExplorerTxUrl(submittedTxNetwork, submittedApproveTxHash)}
+                          target="_blank"
+                          rel="noreferrer"
+                        >
+                          {submittedApproveTxHash}
+                        </a>
+                      </div>
+                    )}
+                    {submittedLockTxHash && (
+                      <div className="break-all">
+                        Lock tx:{" "}
+                        <a
+                          className="text-accent underline"
+                          href={getExplorerTxUrl(submittedTxNetwork, submittedLockTxHash)}
+                          target="_blank"
+                          rel="noreferrer"
+                        >
+                          {submittedLockTxHash}
+                        </a>
+                      </div>
+                    )}
+                  </div>
+                )}
               </div>
 
               <div className="card rounded-2xl p-5">
                 <h2 className="text-sm font-semibold mb-3">Points + Epoch</h2>
+                <div className="text-xs text-dim mb-1">Epoch id: {data.points?.epoch?.epochId ?? "--"}</div>
+                <div className="text-xs text-dim mb-1">Epoch start: {epochStartLabel}</div>
+                <div className="text-xs text-dim mb-1">Epoch end: {epochEndLabel}</div>
                 <div className="text-xs text-dim mb-2">Current epoch ends in {epochCountdown}</div>
                 <div className="grid grid-cols-2 gap-2 text-xs">
                   <Metric label="Lock" value={Number(data.points?.points?.lockPoints ?? 0).toFixed(2)} />
@@ -411,6 +524,22 @@ export default function HclawHubPage() {
                   <Metric label="Quest" value={Number(data.points?.points?.questPoints ?? 0).toFixed(2)} />
                 </div>
                 <div className="mt-3 text-sm font-semibold">Total: {Number(data.points?.points?.totalPoints ?? 0).toFixed(2)}</div>
+
+                {lockEpochRelations.length > 0 && (
+                  <div className="mt-3 p-3 rounded-xl bg-surface border border-card-border text-xs space-y-1">
+                    {lockEpochRelations.map((lock) => (
+                      <div key={lock.lockId} className="flex flex-col">
+                        <span>
+                          Lock #{lock.lockId}: {lock.amount.toFixed(4)} HCLAW, ends{" "}
+                          {new Date(lock.endTs).toLocaleString()}
+                        </span>
+                        <span className="text-dim">
+                          Remaining: {formatMs(lock.remainingMs)} | Epochs until unlock: {lock.epochsUntilUnlock}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                )}
               </div>
 
               <div className="card rounded-2xl p-5">

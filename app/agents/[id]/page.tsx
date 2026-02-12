@@ -1484,7 +1484,7 @@ export default function AgentDetailPage() {
                       <CopyAddressButton address={hlBalance?.address ?? agent?.hlAddress ?? ""} />
                     </>
                   ) : (
-                    <span className="text-dim text-sm">No wallet — deposit MON in the Deposit tab to provision one.</span>
+                    <span className="text-dim text-sm">No wallet — deposit MON or a stablecoin in the Deposit tab to provision one.</span>
                   )}
                 </div>
               </div>
@@ -1583,7 +1583,7 @@ export default function AgentDetailPage() {
                 {/* Token Selector */}
                 <div className="mb-5">
                   <label className="block text-xs font-medium text-muted uppercase tracking-wider mb-2.5">Token</label>
-                  <div className="grid grid-cols-3 gap-2">
+                  <div className="grid grid-cols-2 gap-2">
                     {MONAD_TOKENS.map((token) => (
                       <button
                         key={token.symbol}
@@ -1824,7 +1824,7 @@ export default function AgentDetailPage() {
                       </>
                     ) : (
                       <p className="text-xs text-dim">
-                        No HL wallet yet. Deposit MON to auto-provision + fund 1:1.
+                        No HL wallet yet. Deposit MON or a stablecoin to auto-provision + fund.
                       </p>
                     )}
                   </div>

@@ -231,6 +231,17 @@ export interface HclawState {
 
 export type HclawLockTier = 0 | 1 | 2 | 3;
 
+export interface HclawLockPosition {
+  lockId: string;
+  amount: number;
+  startTs: number;
+  endTs: number;
+  durationDays: number;
+  multiplierBps: number;
+  unlocked: boolean;
+  remainingMs: number;
+}
+
 export interface HclawLockState {
   user: Address;
   tier: HclawLockTier;
@@ -238,6 +249,7 @@ export interface HclawLockState {
   boostBps: number;
   rebateBps: number;
   lockIds: string[];
+  positions: HclawLockPosition[];
 }
 
 export interface HclawCapContext {
@@ -364,12 +376,6 @@ export const MONAD_TOKENS: MonadToken[] = [
     address: "0x0000000000000000000000000000000000000000",
     symbol: "MON",
     name: "Monad",
-    decimals: 18,
-  },
-  {
-    address: "0x3bd359C1119dA7Da1D913D1C4D2B7c461115433A",
-    symbol: "WMON",
-    name: "Wrapped MON",
     decimals: 18,
   },
   {

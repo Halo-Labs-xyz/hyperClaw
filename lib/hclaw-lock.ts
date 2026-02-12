@@ -1,7 +1,7 @@
 import { createPublicClient, formatEther, http, type Address } from "viem";
 import { getHclawLockAddressIfSet } from "@/lib/env";
 import { isMonadTestnet } from "@/lib/network";
-import type { HclawLockState, HclawLockTier } from "@/lib/types";
+import type { HclawLockPosition, HclawLockState, HclawLockTier } from "@/lib/types";
 import { HCLAW_LOCK_ABI } from "@/lib/vault";
 
 export const HCLAW_LOCK_DURATIONS = [30, 90, 180] as const;
@@ -72,7 +72,24 @@ export function getEmptyLockState(user: Address): HclawLockState {
     boostBps: 10_000,
     rebateBps: 0,
     lockIds: [],
+    positions: [],
   };
+}
+
+export async function getLockContractStatus(network?: MonadNetwork): Promise<{
+  address: Address | null;
+  deployed: boolean;
+}> {
+  const address = getHclawLockAddressIfSet();
+  if (!address) return { address: null, deployed: false };
+
+  try {
+    const client = getPublicClient(network);
+    const code = await client.getCode({ address });
+    return { address, deployed: Boolean(code && code !== "0x" && code.length > 2) };
+  } catch {
+    return { address, deployed: false };
+  }
 }
 
 export async function getUserLockState(user: Address, network?: MonadNetwork): Promise<HclawLockState> {
@@ -114,7 +131,37 @@ export async function getUserLockState(user: Address, network?: MonadNetwork): P
       }) as Promise<bigint[]>,
     ]);
 
+    const positionsRaw = await Promise.all(
+      lockIdsRaw.map(async (id) => {
+        try {
+          const row = (await client.readContract({
+            address: lockAddress,
+            abi: HCLAW_LOCK_ABI,
+            functionName: "locks",
+            args: [id],
+          })) as readonly [bigint, Address, bigint, bigint, bigint, number, number, boolean];
+
+          const endTsMs = Number(row[4]) * 1000;
+          return {
+            lockId: row[0].toString(),
+            amount: Number(formatEther(row[2])),
+            startTs: Number(row[3]) * 1000,
+            endTs: endTsMs,
+            durationDays: Number(row[5]),
+            multiplierBps: Number(row[6]),
+            unlocked: Boolean(row[7]),
+            remainingMs: Math.max(0, endTsMs - Date.now()),
+          } satisfies HclawLockPosition;
+        } catch {
+          return null;
+        }
+      })
+    );
+
     const tier = Math.max(0, Math.min(3, Number(tierRaw))) as HclawLockTier;
+    const positions = positionsRaw
+      .filter((p): p is HclawLockPosition => Boolean(p))
+      .sort((a, b) => a.endTs - b.endTs);
 
     return {
       user,
@@ -123,6 +170,7 @@ export async function getUserLockState(user: Address, network?: MonadNetwork): P
       boostBps: tierToBoostBps(tier),
       rebateBps: tierToRebateBps(tier),
       lockIds: lockIdsRaw.map((id) => id.toString()),
+      positions,
     };
   } catch (error) {
     const msg = error instanceof Error ? error.message.split("\n")[0] : String(error);

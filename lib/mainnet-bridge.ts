@@ -111,6 +111,17 @@ function hasDebridgeConfig(): boolean {
   );
 }
 
+function isStableRelayToken(token: Address): boolean {
+  const allowlist = new Set(
+    (process.env.RELAY_STABLE_TOKENS || "")
+      .split(",")
+      .map((t) => t.trim().toLowerCase())
+      .filter(Boolean)
+  );
+  if (allowlist.size === 0) return false;
+  return allowlist.has(token.toLowerCase());
+}
+
 function extractLikelyTxHash(value: unknown): Hex | undefined {
   const seen = new Set<unknown>();
   const walk = (node: unknown): Hex | undefined => {
@@ -297,6 +308,7 @@ export async function bridgeDepositToHyperliquidAgent(params: {
   }
 
   const sourceIsNative = sourceToken.toLowerCase() === "0x0000000000000000000000000000000000000000";
+  const sourceIsStableErc20 = !sourceIsNative && isStableRelayToken(sourceToken);
 
   const tryHyperunit = async (): Promise<BridgeExecution> => {
     const protocolAddress = await getHyperunitDestinationAddress({
@@ -352,6 +364,21 @@ export async function bridgeDepositToHyperliquidAgent(params: {
       recipientAddress: hlAddress,
     });
   };
+
+  // Stablecoin ERC20 deposits are always routed via deBridge.
+  if (sourceIsStableErc20) {
+    try {
+      return await tryDebridge();
+    } catch (error) {
+      const errMsg = error instanceof Error ? error.message : String(error);
+      return {
+        provider: "debridge",
+        status: "failed",
+        destinationAddress: hlAddress,
+        note: `deBridge stablecoin route failed: ${errMsg.slice(0, 140)}`,
+      };
+    }
+  }
 
   if (MAINNET_BRIDGE_PREFER_DEBRIDGE) {
     try {

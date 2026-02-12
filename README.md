@@ -107,7 +107,7 @@ Each agent is an independent trading entity with:
 ### Vault System
 
 - Share-based accounting on-chain via `HyperclawVault.sol`
-- Multi-token deposits (native MON, WMON, USDT)
+- Multi-token deposits (native MON + stablecoins like USDC/USDT)
 - Deposit caps scale with `$HCLAW` market cap:
 
 | Tier      | Market Cap Threshold | Max Deposit per User |

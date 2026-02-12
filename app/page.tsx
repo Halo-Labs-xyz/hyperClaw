@@ -628,7 +628,7 @@ export default function Dashboard() {
             <StepCard
               step="01"
               title="Deposit Monad Assets"
-              description="Connect wallet. Deposit MON, WMON, or USDT into an agent vault on Monad."
+              description="Connect wallet. Deposit MON or stablecoins into an agent vault on Monad."
               accent="green"
             />
             <StepCard
