@@ -36,7 +36,7 @@ import type { Agent, OrderSide, PlaceOrderParams } from "@/lib/types";
 import { executeOrderWithPKP } from "@/lib/lit-signing";
 import { handleMcpRequest } from "@/lib/mcp-server";
 import { getTelegramPrivyLink, linkTelegramPrivy } from "@/lib/telegram-privy-link";
-import { isIronClawConfigured, sendToIronClaw } from "@/lib/ironclaw";
+import { isIronClawConfigured, sendToIronClaw, ironClawHealth } from "@/lib/ironclaw";
 import { ensureRuntimeBootstrap } from "@/lib/runtime-bootstrap";
 
 const TELEGRAM_API = "https://api.telegram.org/bot";
@@ -44,7 +44,7 @@ const MAX_TELEGRAM_MESSAGE = 3900;
 const COMMAND_SYNC_INTERVAL_MS = 6 * 60 * 60 * 1000;
 
 const TELEGRAM_BOT_COMMANDS: Array<{ command: string; description: string }> = [
-  { command: "start", description: "Initialize chat and scope" },
+  { command: "start", description: "Initialize chat and link Privy identity" },
   { command: "help", description: "Show full command surface" },
   { command: "arena", description: "Live standings and leaderboard view" },
   { command: "agents", description: "List scoped agents" },
@@ -66,6 +66,7 @@ const TELEGRAM_BOT_COMMANDS: Array<{ command: string; description: string }> = [
   { command: "resume", description: "Resume one agent" },
   { command: "link", description: "Link Telegram user to Privy user" },
   { command: "ask", description: "Ask IronClaw in this scope" },
+  { command: "test", description: "Test NEAR AI auth via IronClaw" },
 ];
 
 const QUICK_COMMAND_ROWS: string[][] = [
@@ -312,6 +313,9 @@ async function handleMessageText(ctx: CommandContext, text: string): Promise<voi
     case "ask":
       await handleAsk(ctx, cmd.rawArgs);
       break;
+    case "test":
+      await handleTestAuth(ctx);
+      break;
     default:
       await sendHtmlMessage(
         ctx.chatId,
@@ -351,6 +355,7 @@ async function handleStart(ctx: CommandContext, args: string[]): Promise<void> {
     }
   }
 
+  const existingLink = ctx.userId ? await getTelegramPrivyLink(ctx.userId) : null;
   const scoped = await getScopedAgents(ctx);
   const message = [
     "<b>Hyperclaw Telegram Terminal Online</b>",
@@ -358,6 +363,12 @@ async function handleStart(ctx: CommandContext, args: string[]): Promise<void> {
     `Chat ID: <code>${escapeHtml(ctx.chatId)}</code>`,
     `Telegram User ID: <code>${escapeHtml(ctx.userId ?? "unknown")}</code>`,
     linkLine,
+    existingLink?.privyUserId
+      ? `Current Privy link: <code>${escapeHtml(existingLink.privyUserId)}</code>`
+      : "<b>Action required:</b> link your Privy user id before using commands.",
+    "1) Open Hyperclaw PWA and hover your wallet address (top-right).",
+    "2) Copy <b>Copy TG Cmd</b> (or copy the Privy ID directly).",
+    "3) Paste command here: <code>/link &lt;privy_user_id&gt;</code>",
     `Agent scope: <code>${scoped.scopeType}</code> (${scoped.agents.length} agents)`,
     "",
     "Use <code>/help</code> or tap commands below.",
@@ -393,10 +404,11 @@ async function handleHelp(chatId: string): Promise<void> {
     "/resume <agent>",
     "/link <privy_user_id>",
     "/ask <prompt>",
+    "/test",
     "</pre>",
     "",
     "<b>Examples</b>",
-    "<pre>/arena\n/status alpha\n/exposure\n/trade alpha long BTC 0.01 5\n/close alpha BTC\n/market ETH\n/ask summarize risk right now</pre>",
+    "<pre>/arena\n/status alpha\n/exposure\n/trade alpha long BTC 0.01 5\n/close alpha BTC\n/market ETH\n/ask summarize risk right now\n/test</pre>",
   ].join("\n");
 
   await sendHtmlMessage(chatId, help, { replyMarkup: quickCommandKeyboard() });
@@ -1203,6 +1215,55 @@ async function handleHealth(ctx: CommandContext): Promise<void> {
   );
 }
 
+async function handleTestAuth(ctx: CommandContext): Promise<void> {
+  if (!isIronClawConfigured()) {
+    await sendHtmlMessage(ctx.chatId, "IronClaw webhook is not configured.");
+    return;
+  }
+
+  const out: string[] = ["<b>NEAR AI / IronClaw Auth Test</b>", ""];
+
+  try {
+    const health = await ironClawHealth();
+    if (!health.ok) {
+      out.push("❌ Health: IronClaw endpoint unreachable.");
+      await sendHtmlMessage(ctx.chatId, out.join("\n"));
+      return;
+    }
+    out.push(`✓ Health: ${health.status ?? "ok"}`);
+  } catch (e) {
+    out.push(`❌ Health: ${escapeHtml(e instanceof Error ? e.message : String(e))}`);
+    await sendHtmlMessage(ctx.chatId, out.join("\n"));
+    return;
+  }
+
+  out.push("Testing LLM (NEAR AI session)...");
+
+  try {
+    const result = await sendToIronClaw({
+      content: "Reply with exactly: OK",
+      thread_id: `telegram:test:${ctx.chatId}`,
+      wait_for_response: true,
+    });
+
+    if (result?.response) {
+      const ok = /^\s*OK\s*$/i.test(result.response.trim());
+      out.push(ok ? "✓ NEAR AI auth: OK" : `✓ Response: ${escapeHtml(truncate(result.response, 120))}`);
+    } else {
+      out.push("❌ No response from IronClaw (check NEARAI_SESSION_TOKEN).");
+    }
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    out.push(`❌ NEAR AI auth failed: ${escapeHtml(msg)}`);
+    if (msg.toLowerCase().includes("nearai") || msg.toLowerCase().includes("auth") || msg.toLowerCase().includes("session")) {
+      out.push("");
+      out.push("Tip: Set NEARAI_SESSION_TOKEN in IronClaw env or mount a valid session file.");
+    }
+  }
+
+  await sendHtmlMessage(ctx.chatId, out.join("\n"));
+}
+
 async function handleAsk(ctx: CommandContext, prompt: string): Promise<void> {
   const content = prompt.trim();
   if (!content) {
@@ -1225,14 +1286,27 @@ async function handleAsk(ctx: CommandContext, prompt: string): Promise<void> {
     .filter(Boolean)
     .join("\n");
 
-  const result = await sendToIronClaw({
-    content: scopedPrompt,
-    thread_id: `telegram:${ctx.chatId}`,
-    wait_for_response: true,
-  });
+  let result;
+  try {
+    result = await sendToIronClaw({
+      content: scopedPrompt,
+      thread_id: `telegram:${ctx.chatId}`,
+      wait_for_response: true,
+    });
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    await sendHtmlMessage(
+      ctx.chatId,
+      `<b>IronClaw error</b>\n\n${escapeHtml(msg)}\n\nTry <code>/test</code> to diagnose NEAR AI auth.`
+    );
+    return;
+  }
 
   if (!result?.response) {
-    await sendHtmlMessage(ctx.chatId, "No response from IronClaw.");
+    await sendHtmlMessage(
+      ctx.chatId,
+      "No response from IronClaw. Try <code>/test</code> to check NEAR AI auth."
+    );
     return;
   }
 

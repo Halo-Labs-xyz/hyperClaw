@@ -277,7 +277,7 @@ export default function Dashboard() {
 
   const handleCopyTelegramLink = useCallback(() => {
     if (!privyId) return;
-    void copyText(`link ${privyId}`, "telegram");
+    void copyText(`/link ${privyId}`, "telegram");
   }, [copyText, privyId]);
 
   const handleDisconnect = useCallback(async () => {
