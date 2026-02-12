@@ -21,8 +21,8 @@ export default function ProvidersRuntime({
       createConfig({
         chains: [monadMainnet, monadTestnet],
         transports: {
-          [monadMainnet.id]: http("https://rpc.monad.xyz"),
-          [monadTestnet.id]: http("https://testnet-rpc.monad.xyz"),
+          [monadMainnet.id]: http(monadMainnet.rpcUrls.default.http[0]),
+          [monadTestnet.id]: http(monadTestnet.rpcUrls.default.http[0]),
         },
       }),
     []

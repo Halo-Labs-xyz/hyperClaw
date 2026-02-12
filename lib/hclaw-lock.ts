@@ -8,10 +8,18 @@ export const HCLAW_LOCK_DURATIONS = [30, 90, 180] as const;
 export type MonadNetwork = "mainnet" | "testnet";
 
 function getMonadRpcUrl(network?: MonadNetwork): string {
+  const mainnetRpc =
+    process.env.MONAD_MAINNET_RPC_URL ||
+    process.env.NEXT_PUBLIC_MONAD_MAINNET_RPC_URL ||
+    "https://rpc.monad.xyz";
+  const testnetRpc =
+    process.env.MONAD_TESTNET_RPC_URL ||
+    process.env.NEXT_PUBLIC_MONAD_TESTNET_RPC_URL ||
+    "https://testnet-rpc.monad.xyz";
   if (network) {
-    return network === "testnet" ? "https://testnet-rpc.monad.xyz" : "https://rpc.monad.xyz";
+    return network === "testnet" ? testnetRpc : mainnetRpc;
   }
-  return isMonadTestnet() ? "https://testnet-rpc.monad.xyz" : "https://rpc.monad.xyz";
+  return isMonadTestnet() ? testnetRpc : mainnetRpc;
 }
 
 function getMonadChain(network?: MonadNetwork) {

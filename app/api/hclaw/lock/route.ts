@@ -8,6 +8,7 @@ import {
   tierToBoostBps,
   tierToRebateBps,
 } from "@/lib/hclaw-lock";
+import { getNetworkState } from "@/lib/network";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -25,10 +26,34 @@ function parseDuration(value: unknown): 30 | 90 | 180 | null {
   return null;
 }
 
+function parseNetwork(value: unknown): "mainnet" | "testnet" | null {
+  if (value === "mainnet" || value === "testnet") return value;
+  return null;
+}
+
+function serializeArg(arg: unknown): unknown {
+  if (typeof arg === "bigint") return arg.toString();
+  if (Array.isArray(arg)) return arg.map((item) => serializeArg(item));
+  return arg;
+}
+
+function serializeTxRequest(
+  tx: ReturnType<typeof buildLockWriteRequest>
+) {
+  if (!tx) return null;
+  return {
+    ...tx,
+    args: tx.args.map((arg) => serializeArg(arg)),
+  };
+}
+
 export async function GET(request: Request) {
   try {
     const { searchParams } = new URL(request.url);
     const user = parseUser(searchParams.get("user"));
+    const network =
+      parseNetwork(searchParams.get("network")) ??
+      (getNetworkState().monadTestnet ? "testnet" : "mainnet");
 
     if (!user) {
       return NextResponse.json({
@@ -42,10 +67,11 @@ export async function GET(request: Request) {
       });
     }
 
-    const lock = await getUserLockState(user);
+    const lock = await getUserLockState(user, network);
 
     return NextResponse.json({
       configured: true,
+      network,
       lock,
     });
   } catch (error) {
@@ -61,6 +87,9 @@ export async function POST(request: Request) {
   try {
     const body = await request.json();
     const action = typeof body?.action === "string" ? body.action : "preview";
+    const network =
+      parseNetwork(body?.network) ??
+      (getNetworkState().monadTestnet ? "testnet" : "mainnet");
 
     if (action === "preview") {
       const amount = Number(body?.amount ?? 0);
@@ -82,6 +111,7 @@ export async function POST(request: Request) {
           boostBps: tierToBoostBps(tier),
           rebateBps: tierToRebateBps(tier),
         },
+        network,
       });
     }
 
@@ -102,7 +132,7 @@ export async function POST(request: Request) {
           amountWei: parseEther(String(amount)),
           durationDays,
         });
-        return NextResponse.json({ tx: req });
+        return NextResponse.json({ network, tx: serializeTxRequest(req) });
       }
 
       if (txAction === "extendLock") {
@@ -119,7 +149,7 @@ export async function POST(request: Request) {
           lockId,
           durationDays,
         });
-        return NextResponse.json({ tx: req });
+        return NextResponse.json({ network, tx: serializeTxRequest(req) });
       }
 
       if (txAction === "increaseLock") {
@@ -136,7 +166,7 @@ export async function POST(request: Request) {
           lockId,
           amountWei: parseEther(String(amount)),
         });
-        return NextResponse.json({ tx: req });
+        return NextResponse.json({ network, tx: serializeTxRequest(req) });
       }
 
       if (txAction === "unlock") {
@@ -148,7 +178,7 @@ export async function POST(request: Request) {
         }
 
         const req = buildLockWriteRequest({ action: "unlock", lockId });
-        return NextResponse.json({ tx: req });
+        return NextResponse.json({ network, tx: serializeTxRequest(req) });
       }
 
       return NextResponse.json({ error: "Unsupported txAction" }, { status: 400 });

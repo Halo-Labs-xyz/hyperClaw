@@ -107,6 +107,12 @@ if (!hlTestnet) {
 }
 
 if (!monadTestnet) {
+  if (!process.env.MONAD_MAINNET_RPC_URL && !process.env.NEXT_PUBLIC_MONAD_MAINNET_RPC_URL) {
+    warnings.push(
+      "MONAD_MAINNET_RPC_URL (or NEXT_PUBLIC_MONAD_MAINNET_RPC_URL) is not set; default public RPC may rate-limit production traffic"
+    );
+  }
+
   const stables = (process.env.RELAY_STABLE_TOKENS || "")
     .split(",")
     .map((v) => v.trim())

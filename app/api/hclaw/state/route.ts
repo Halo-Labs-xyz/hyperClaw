@@ -5,6 +5,7 @@ import { getUserCapContext } from "@/lib/hclaw-policy";
 import { getUserLockState } from "@/lib/hclaw-lock";
 import { getUserPointsSummary } from "@/lib/hclaw-points";
 import { getClaimableSummary } from "@/lib/hclaw-rewards";
+import { getNetworkState } from "@/lib/network";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -30,7 +31,7 @@ export async function GET(request: Request) {
     const { searchParams } = new URL(request.url);
     const user = parseUser(searchParams.get("user"));
     const agentId = searchParams.get("agentId") ?? undefined;
-    const defaultNetwork = process.env.NEXT_PUBLIC_MONAD_TESTNET === "true" ? "testnet" : "mainnet";
+    const defaultNetwork = getNetworkState().monadTestnet ? "testnet" : "mainnet";
     const network = parseNetwork(searchParams.get("network")) ?? defaultNetwork;
 
     const state = await getHclawState(network, {

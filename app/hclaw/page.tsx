@@ -1,9 +1,20 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
+import { parseUnits, formatUnits, type Address } from "viem";
+import {
+  useAccount,
+  useReadContract,
+  useSwitchChain,
+  useWaitForTransactionReceipt,
+  useWriteContract,
+} from "wagmi";
 import { TelegramChatButton } from "@/app/components/TelegramChatButton";
-import { useAccount } from "wagmi";
+import { NetworkToggle } from "@/app/components/NetworkToggle";
+import { useNetwork } from "@/app/components/NetworkContext";
+import { monadMainnet, monadTestnet as monadTestnetChain } from "@/lib/chains";
+import { ERC20_ABI, HCLAW_LOCK_ABI } from "@/lib/vault";
 
 interface HclawPageData {
   state?: {
@@ -60,8 +71,17 @@ interface HclawPageData {
   };
 }
 
+type MonadNetwork = "mainnet" | "testnet";
+
 export default function HclawHubPage() {
   const { address, isConnected } = useAccount();
+  const { monadTestnet } = useNetwork();
+  const activeNetwork: MonadNetwork = monadTestnet ? "testnet" : "mainnet";
+  const activeChainId = monadTestnet ? monadTestnetChain.id : monadMainnet.id;
+
+  const hclawTokenAddress = process.env.NEXT_PUBLIC_HCLAW_TOKEN_ADDRESS as Address | undefined;
+  const hclawLockAddress = process.env.NEXT_PUBLIC_HCLAW_LOCK_ADDRESS as Address | undefined;
+
   const [loading, setLoading] = useState(true);
   const [data, setData] = useState<HclawPageData>({});
   const [claiming, setClaiming] = useState(false);
@@ -77,54 +97,103 @@ export default function HclawHubPage() {
       }
     | null
   >(null);
+  const [lockStatus, setLockStatus] = useState("");
+  const [locking, setLocking] = useState(false);
+  const [lockTxHash, setLockTxHash] = useState<`0x${string}` | undefined>();
+
+  const { switchChainAsync } = useSwitchChain();
+  const { writeContractAsync } = useWriteContract();
+  const { isSuccess: lockConfirmed } = useWaitForTransactionReceipt({ hash: lockTxHash });
+
+  const {
+    data: hclawBalanceRaw,
+    refetch: refetchHclawBalance,
+  } = useReadContract({
+    chainId: activeChainId,
+    address: hclawTokenAddress,
+    abi: ERC20_ABI,
+    functionName: "balanceOf",
+    args: hclawTokenAddress && address ? [address] : undefined,
+    query: { enabled: Boolean(hclawTokenAddress && address) },
+  });
+
+  const {
+    data: hclawAllowanceRaw,
+    refetch: refetchHclawAllowance,
+  } = useReadContract({
+    chainId: activeChainId,
+    address: hclawTokenAddress,
+    abi: ERC20_ABI,
+    functionName: "allowance",
+    args:
+      hclawTokenAddress && address && hclawLockAddress
+        ? [address, hclawLockAddress]
+        : undefined,
+    query: { enabled: Boolean(hclawTokenAddress && address && hclawLockAddress) },
+  });
+
+  const hclawBalance = useMemo(() => {
+    const raw = (hclawBalanceRaw as bigint | undefined) ?? BigInt(0);
+    return Number(formatUnits(raw, 18));
+  }, [hclawBalanceRaw]);
+
+  const loadHubData = useCallback(async () => {
+    setLoading(true);
+    try {
+      const query = new URLSearchParams({ network: activeNetwork });
+      if (address) {
+        query.set("user", address);
+      }
+      const q = `?${query.toString()}`;
+
+      const [stateRes, lockRes, pointsRes, rewardsRes, treasuryRes] = await Promise.all([
+        fetch(`/api/hclaw/state${q}`),
+        fetch(`/api/hclaw/lock${q}`),
+        fetch(`/api/hclaw/points${q}`),
+        fetch(`/api/hclaw/rewards${q}`),
+        fetch(`/api/hclaw/treasury`),
+      ]);
+
+      const [stateJson, lockJson, pointsJson, rewardsJson, treasuryJson] = await Promise.all([
+        stateRes.json(),
+        lockRes.json(),
+        pointsRes.json(),
+        rewardsRes.json(),
+        treasuryRes.json(),
+      ]);
+
+      setData({
+        state: stateJson?.state,
+        lock: lockJson?.lock,
+        points: pointsJson?.summary,
+        rewards: rewardsJson,
+        treasury: treasuryJson,
+      });
+    } catch {
+      setData({});
+    } finally {
+      setLoading(false);
+    }
+  }, [activeNetwork, address]);
 
   useEffect(() => {
-    let cancelled = false;
+    void loadHubData();
+  }, [loadHubData]);
 
-    async function load() {
-      setLoading(true);
-      try {
-        const userParam = address ? `?user=${address}` : "";
+  useEffect(() => {
+    if (!lockConfirmed || !lockTxHash) return;
 
-        const [stateRes, lockRes, pointsRes, rewardsRes, treasuryRes] = await Promise.all([
-          fetch(`/api/hclaw/state${userParam}`),
-          fetch(`/api/hclaw/lock${userParam}`),
-          fetch(`/api/hclaw/points${userParam}`),
-          fetch(`/api/hclaw/rewards${userParam}`),
-          fetch(`/api/hclaw/treasury`),
-        ]);
-
-        const [stateJson, lockJson, pointsJson, rewardsJson, treasuryJson] = await Promise.all([
-          stateRes.json(),
-          lockRes.json(),
-          pointsRes.json(),
-          rewardsRes.json(),
-          treasuryRes.json(),
-        ]);
-
-        if (cancelled) return;
-
-        setData({
-          state: stateJson?.state,
-          lock: lockJson?.lock,
-          points: pointsJson?.summary,
-          rewards: rewardsJson,
-          treasury: treasuryJson,
-        });
-      } catch {
-        if (!cancelled) {
-          setData({});
-        }
-      } finally {
-        if (!cancelled) setLoading(false);
-      }
-    }
-
-    load();
-    return () => {
-      cancelled = true;
-    };
-  }, [address]);
+    setLockStatus(`Lock confirmed: ${lockTxHash.slice(0, 10)}...`);
+    setLocking(false);
+    setLockTxHash(undefined);
+    void Promise.all([loadHubData(), refetchHclawBalance(), refetchHclawAllowance()]);
+  }, [
+    lockConfirmed,
+    lockTxHash,
+    loadHubData,
+    refetchHclawAllowance,
+    refetchHclawBalance,
+  ]);
 
   async function handlePreview() {
     try {
@@ -135,12 +204,69 @@ export default function HclawHubPage() {
           action: "preview",
           amount: Number(previewAmount),
           durationDays: previewDuration,
+          network: activeNetwork,
         }),
       });
       const body = await res.json();
       setLockPreview(body?.preview ?? null);
     } catch {
       setLockPreview(null);
+    }
+  }
+
+  async function handleLock() {
+    if (!isConnected || !address) return;
+
+    const amount = Number(previewAmount);
+    if (!Number.isFinite(amount) || amount <= 0) {
+      setLockStatus("Enter a valid HCLAW amount.");
+      return;
+    }
+
+    if (!hclawTokenAddress || !hclawLockAddress) {
+      setLockStatus("Set NEXT_PUBLIC_HCLAW_TOKEN_ADDRESS and NEXT_PUBLIC_HCLAW_LOCK_ADDRESS.");
+      return;
+    }
+
+    try {
+      await switchChainAsync({ chainId: activeChainId });
+    } catch {
+      // User may already be on the target chain.
+    }
+
+    setLocking(true);
+    setLockStatus("");
+
+    try {
+      const amountWei = parseUnits(String(amount), 18);
+      const allowance = (hclawAllowanceRaw as bigint | undefined) ?? BigInt(0);
+
+      if (allowance < amountWei) {
+        setLockStatus("Approving HCLAW spend for lock contract...");
+        const approveHash = await writeContractAsync({
+          chainId: activeChainId,
+          address: hclawTokenAddress,
+          abi: ERC20_ABI,
+          functionName: "approve",
+          args: [hclawLockAddress, amountWei],
+        });
+        setLockStatus(`Approval submitted: ${approveHash.slice(0, 10)}...`);
+      }
+
+      setLockStatus(`Submitting ${amount} HCLAW lock for ${previewDuration} days...`);
+      const hash = await writeContractAsync({
+        chainId: activeChainId,
+        address: hclawLockAddress,
+        abi: HCLAW_LOCK_ABI,
+        functionName: "lock",
+        args: [amountWei, previewDuration],
+      });
+
+      setLockTxHash(hash);
+      setLockStatus("Lock transaction submitted. Waiting for confirmation...");
+    } catch (error) {
+      setLocking(false);
+      setLockStatus(error instanceof Error ? error.message : "Failed to lock HCLAW.");
     }
   }
 
@@ -164,6 +290,7 @@ export default function HclawHubPage() {
       const body = await res.json();
       if (res.ok && body?.success) {
         setClaimStatus(`Claimed epoch ${target.epochId}.`);
+        void loadHubData();
       } else {
         setClaimStatus(body?.error || "Claim failed.");
       }
@@ -193,8 +320,12 @@ export default function HclawHubPage() {
           <div className="flex items-center gap-3">
             <Link href="/" className="text-sm text-muted hover:text-foreground">Back</Link>
             <h1 className="text-lg font-semibold gradient-title">HCLAW Hub</h1>
+            <span className="text-[10px] px-2 py-1 rounded-lg bg-surface border border-card-border text-dim uppercase tracking-wider">
+              {activeNetwork}
+            </span>
           </div>
           <div className="flex items-center gap-2">
+            <NetworkToggle />
             <TelegramChatButton />
             <span className="text-xs text-dim">
               {isConnected && address ? `${address.slice(0, 6)}...${address.slice(-4)}` : "Connect wallet"}
@@ -236,7 +367,26 @@ export default function HclawHubPage() {
                     <option value={180}>180d</option>
                   </select>
                 </div>
-                <button onClick={handlePreview} className="btn-primary px-4 py-2 text-sm">Preview Lock</button>
+
+                <div className="text-xs text-dim mb-3 space-y-1">
+                  <div>Wallet HCLAW: {hclawBalance.toFixed(4)}</div>
+                  <div>Current lock tier: {Number(data.lock?.tier ?? 0)}</div>
+                  <div>Active locks: {data.lock?.lockIds?.length ?? 0}</div>
+                </div>
+
+                <div className="flex flex-wrap gap-2">
+                  <button onClick={handlePreview} className="btn-primary px-4 py-2 text-sm">
+                    Preview Lock
+                  </button>
+                  <button
+                    onClick={handleLock}
+                    disabled={!isConnected || locking}
+                    className="px-4 py-2 text-sm rounded-xl bg-accent/10 border border-accent/25 text-accent disabled:opacity-50"
+                  >
+                    {locking ? "Locking..." : "Lock HCLAW"}
+                  </button>
+                </div>
+
                 {lockPreview && (
                   <div className="mt-3 p-3 rounded-xl bg-surface border border-card-border text-xs space-y-1">
                     <div>Tier: {lockPreview.tier}</div>
@@ -245,9 +395,10 @@ export default function HclawHubPage() {
                     <div>Rebate: {(lockPreview.rebateBps / 100).toFixed(2)}%</div>
                   </div>
                 )}
-                <p className="text-xs text-dim mt-3">
-                  Lock transactions are prepared via `/api/hclaw/lock` and signed from wallet clients.
-                </p>
+
+                {lockStatus && (
+                  <p className="text-xs mt-3 text-muted break-all">{lockStatus}</p>
+                )}
               </div>
 
               <div className="card rounded-2xl p-5">

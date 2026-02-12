@@ -236,8 +236,12 @@ function getNadfunConfig(network: "mainnet" | "testnet") {
     getAddress(NADFUN_CONFIG[network].lens);
   const rpcUrl =
     network === "mainnet"
-      ? process.env.MONAD_MAINNET_RPC_URL || "https://rpc.monad.xyz"
-      : process.env.MONAD_TESTNET_RPC_URL || "https://testnet-rpc.monad.xyz";
+      ? process.env.MONAD_MAINNET_RPC_URL ||
+        process.env.NEXT_PUBLIC_MONAD_MAINNET_RPC_URL ||
+        "https://rpc.monad.xyz"
+      : process.env.MONAD_TESTNET_RPC_URL ||
+        process.env.NEXT_PUBLIC_MONAD_TESTNET_RPC_URL ||
+        "https://testnet-rpc.monad.xyz";
 
   if (network === "mainnet") {
     return {
