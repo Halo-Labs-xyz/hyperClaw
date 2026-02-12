@@ -88,6 +88,25 @@ function getMonadRpcUrl(): string {
   return process.env.MONAD_MAINNET_RPC_URL || monadMainnet.rpcUrls.default.http[0];
 }
 
+async function sendMonadNative(to: Address, value: bigint): Promise<Hex> {
+  const relayPk = getRelayMonadPrivateKey();
+  if (!relayPk) {
+    throw new Error("Relay private key is missing; cannot send native MON");
+  }
+  const account = privateKeyToAccount(relayPk);
+  const wallet = createWalletClient({
+    account,
+    chain: monadMainnet,
+    transport: http(getMonadRpcUrl()),
+  });
+  return wallet.sendTransaction({
+    account,
+    chain: monadMainnet,
+    to,
+    value,
+  });
+}
+
 async function fetchJson(url: string, init?: RequestInit, timeoutMs: number = 12_000): Promise<any> {
   const res = await fetch(url, {
     ...init,
@@ -235,26 +254,92 @@ async function getKnownHyperunitProtocolAddress(
   return null;
 }
 
-async function sendMonadNative(to: Address, valueWei: bigint): Promise<Hex> {
-  const privateKey = getRelayMonadPrivateKey();
-  if (!privateKey) {
-    throw new Error("RELAY_MONAD_PRIVATE_KEY or MONAD_PRIVATE_KEY is required for bridge execution");
+export async function resolveHyperunitWithdrawalProtocolAddress(
+  monadAddress: Address
+): Promise<Address> {
+  try {
+    return await getHyperunitDestinationAddress({
+      sourceChain: HYPERUNIT_HYPERLIQUID_CHAIN,
+      destinationChain: HYPERUNIT_MONAD_CHAIN,
+      asset: HYPERUNIT_WITHDRAW_ASSET,
+      destinationAddress: monadAddress,
+    });
+  } catch (error) {
+    const known = await getKnownHyperunitProtocolAddress(monadAddress, HYPERUNIT_MONAD_CHAIN);
+    if (known) return known;
+    throw error;
+  }
+}
+
+export async function resolveHyperunitDepositProtocolAddress(
+  hlAddress: Address
+): Promise<Address> {
+  try {
+    return await getHyperunitDestinationAddress({
+      sourceChain: HYPERUNIT_MONAD_CHAIN,
+      destinationChain: HYPERUNIT_HYPERLIQUID_CHAIN,
+      asset: HYPERUNIT_DEPOSIT_ASSET,
+      destinationAddress: hlAddress,
+    });
+  } catch (error) {
+    const known = await getKnownHyperunitProtocolAddress(hlAddress, HYPERUNIT_HYPERLIQUID_CHAIN);
+    if (known) return known;
+    throw error;
+  }
+}
+
+// MAINNET_BRIDGE_ENABLED=true but deBridge fallback envs are missing; Hyperunit-only mode will be used
+// If deBridge fallback envs are present, use deBridge for deposits.
+
+/**
+
+
+async function tryResolveDebridgeProtocolAddress(params: {
+  sourceChain: string;
+  destinationChain: string;
+  asset: string;
+  destinationAddress: Address;
+}): Promise<Address | null> {
+  if (!hasDebridgeConfig()) {
+    return null;
   }
 
-  const account = privateKeyToAccount(privateKey);
-  const wallet = createWalletClient({
-    account,
-    chain: monadMainnet,
-    transport: http(getMonadRpcUrl()),
+  const query = new URLSearchParams({
+    srcChainId: String(params.sourceChain),
+    dstChainId: String(params.destinationChain),
+    srcChainTokenIn: String(params.asset),
+    dstChainTokenOut: String(params.asset),
+    srcChainTokenInAmount: "0",
+    srcChainOrderAuthorityAddress: params.destinationAddress,
+    srcChainRefundAddress: params.destinationAddress,
+    dstChainOrderAuthorityAddress: params.destinationAddress,
+    dstChainRecipientAddress: params.destinationAddress,
+    prependOperatingExpense: process.env.DEBRIDGE_PREPEND_OPERATING_EXPENSE || "true",
+    slippage: process.env.DEBRIDGE_SLIPPAGE || "1",
   });
 
-  return await wallet.sendTransaction({
-    account,
-    to,
-    value: valueWei,
-    chain: monadMainnet,
-  });
-}
+  if (process.env.DEBRIDGE_AFFILIATE_FEE_PERCENT) {
+    query.set("affiliateFeePercent", process.env.DEBRIDGE_AFFILIATE_FEE_PERCENT);
+  }
+
+  const headers: Record<string, string> = {};
+  if (process.env.DEBRIDGE_API_KEY) {
+    headers["x-api-key"] = process.env.DEBRIDGE_API_KEY;
+  }
+
+  const url = `${DEBRIDGE_API_URL}/v1.0/dln/order/create-tx?${query.toString()}`;
+  const resp = await fetchJson(url, { method: "GET", headers }, 12_000);
+  // Type must be Address (a hex string), not an object.
+  const protocolAddress = resp.tx?.to;
+  if (typeof protocolAddress !== "string" || !protocolAddress.startsWith("0x")) {
+    // Ensure the value returned is of type Address (`0x${string}`).
+    if (typeof protocolAddress !== "string" || !protocolAddress.startsWith("0x")) {
+      throw new Error("Invalid protocol address from deBridge response");
+    }
+    // Safely assert type for returning
+    return protocolAddress as Address;
+  }
+} */
 
 async function createDeBridgeOrderTx(params: {
   srcAmountRaw: string;

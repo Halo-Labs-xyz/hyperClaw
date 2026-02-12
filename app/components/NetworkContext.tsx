@@ -8,7 +8,7 @@ import {
   useCallback,
   type ReactNode,
 } from "react";
-import { useSwitchChain } from "wagmi";
+import { useAccount, useChainId, useSwitchChain } from "wagmi";
 import { monadTestnet, monadMainnet } from "@/lib/chains";
 
 interface NetworkContextValue {
@@ -18,10 +18,13 @@ interface NetworkContextValue {
   /** Toggle both Monad + HL together */
   toggleNetwork: () => Promise<void>;
   /** Set specific network flags */
-  setNetwork: (update: {
-    monadTestnet?: boolean;
-    hlTestnet?: boolean;
-  }) => Promise<void>;
+  setNetwork: (
+    update: {
+      monadTestnet?: boolean;
+      hlTestnet?: boolean;
+    },
+    options?: { syncWalletChain?: boolean }
+  ) => Promise<void>;
 }
 
 const NetworkContext = createContext<NetworkContextValue>({
@@ -40,6 +43,8 @@ export function NetworkProvider({ children }: { children: ReactNode }) {
   const [monadTest, setMonadTest] = useState(true);
   const [hlTest, setHlTest] = useState(true);
   const [switching, setSwitching] = useState(false);
+  const { isConnected } = useAccount();
+  const chainId = useChainId();
   const { switchChainAsync } = useSwitchChain();
   const persistNetworkState = useCallback(
     (next: { monadTestnet: boolean; hlTestnet: boolean }) => {
@@ -90,7 +95,11 @@ export function NetworkProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const setNetwork = useCallback(
-    async (update: { monadTestnet?: boolean; hlTestnet?: boolean }) => {
+    async (
+      update: { monadTestnet?: boolean; hlTestnet?: boolean },
+      options?: { syncWalletChain?: boolean }
+    ) => {
+      const syncWalletChain = options?.syncWalletChain ?? true;
       const previous = {
         monadTestnet: monadTest,
         hlTestnet: hlTest,
@@ -138,13 +147,15 @@ export function NetworkProvider({ children }: { children: ReactNode }) {
         setHlTest(previous.hlTestnet);
         persistNetworkState(previous);
       } finally {
-        const targetChainId = resolved.monadTestnet
-          ? monadTestnet.id
-          : monadMainnet.id;
-        try {
-          await switchChainAsync({ chainId: targetChainId });
-        } catch {
-          // User may reject or already on chain
+        if (syncWalletChain) {
+          const targetChainId = resolved.monadTestnet
+            ? monadTestnet.id
+            : monadMainnet.id;
+          try {
+            await switchChainAsync({ chainId: targetChainId });
+          } catch {
+            // User may reject or already on chain
+          }
         }
         setSwitching(false);
       }
@@ -156,6 +167,27 @@ export function NetworkProvider({ children }: { children: ReactNode }) {
     const newTestnet = !monadTest;
     await setNetwork({ monadTestnet: newTestnet, hlTestnet: newTestnet });
   }, [monadTest, setNetwork]);
+
+  // Keep runtime network in sync with the connected wallet chain.
+  useEffect(() => {
+    if (!isConnected) return;
+    if (switching) return;
+
+    if (chainId === monadMainnet.id && (monadTest || hlTest)) {
+      void setNetwork(
+        { monadTestnet: false, hlTestnet: false },
+        { syncWalletChain: false }
+      );
+      return;
+    }
+
+    if (chainId === monadTestnet.id && (!monadTest || !hlTest)) {
+      void setNetwork(
+        { monadTestnet: true, hlTestnet: true },
+        { syncWalletChain: false }
+      );
+    }
+  }, [chainId, hlTest, isConnected, monadTest, setNetwork, switching]);
 
   return (
     <NetworkContext.Provider

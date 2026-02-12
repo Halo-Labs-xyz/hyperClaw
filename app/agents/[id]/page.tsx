@@ -2,7 +2,16 @@
 
 import { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import { useParams } from "next/navigation";
-import { useAccount, useBalance, useWriteContract, useReadContract, useWaitForTransactionReceipt, useSwitchChain, usePublicClient } from "wagmi";
+import {
+  useAccount,
+  useBalance,
+  usePublicClient,
+  useReadContract,
+  useSendTransaction,
+  useSwitchChain,
+  useWaitForTransactionReceipt,
+  useWriteContract,
+} from "wagmi";
 import {
   BaseError,
   ContractFunctionRevertedError,
@@ -162,6 +171,7 @@ export default function AgentDetailPage() {
   const [depositAmount, setDepositAmount] = useState("");
   const [depositing, setDepositing] = useState(false);
   const [bridgeFunding, setBridgeFunding] = useState(false);
+  const [directUnitFunding, setDirectUnitFunding] = useState(false);
   const [depositTxHash, setDepositTxHash] = useState<`0x${string}` | undefined>();
   const [depositStatus, setDepositStatus] = useState<string>("");
   const [depositPhase, setDepositPhase] = useState<TxUiPhase>("idle");
@@ -248,6 +258,13 @@ export default function AgentDetailPage() {
     !!depositAmount &&
     Number.isFinite(parsedDepositAmount) &&
     parsedDepositAmount > 0;
+  const canUseDirectUnitDeposit =
+    process.env.NEXT_PUBLIC_ENABLE_DIRECT_UNIT_DEPOSIT === "true" &&
+    isOwner &&
+    depositToken.symbol === "MON" &&
+    !!depositAmount &&
+    Number.isFinite(parsedDepositAmount) &&
+    parsedDepositAmount > 0;
 
   // Settings state
   const [saving, setSaving] = useState(false);
@@ -281,6 +298,7 @@ export default function AgentDetailPage() {
   const [indicatorCustomDescription, setIndicatorCustomDescription] = useState("");
 
   const { writeContractAsync } = useWriteContract();
+  const { sendTransactionAsync } = useSendTransaction();
   const { switchChainAsync } = useSwitchChain();
 
   // Watch for deposit tx confirmation
@@ -835,6 +853,55 @@ export default function AgentDetailPage() {
       setDepositStatus(`Emergency bridge funding failed: ${msg.slice(0, 160)}`);
     } finally {
       setBridgeFunding(false);
+    }
+  };
+
+  const handleDirectUnitDeposit = async () => {
+    if (!canUseDirectUnitDeposit || !address) return;
+    setDirectUnitFunding(true);
+    setDepositPhase("switching");
+    setDepositStatus("Resolving Unit deposit address...");
+
+    try {
+      const addrRes = await fetch(`/api/agents/${agentId}/unit-deposit-address`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-owner-wallet-address": address.toLowerCase(),
+          ...(user?.id ? { "x-owner-privy-id": user.id } : {}),
+        },
+      });
+      const addrData = await addrRes.json();
+      if (!addrRes.ok || !addrData?.unitDepositAddress) {
+        setDepositPhase("error");
+        setDepositStatus(addrData?.error || "Failed to resolve Unit deposit address");
+        return;
+      }
+
+      await switchChainAsync({ chainId: vaultChainId });
+      setDepositPhase("signing");
+      setDepositStatus("Check wallet and sign direct Unit deposit transaction...");
+
+      const txHash = await sendTransactionAsync({
+        to: addrData.unitDepositAddress as Address,
+        value: parseEther(depositAmount),
+        chainId: vaultChainId,
+      });
+
+      setDepositPhase("confirmed");
+      setDepositStatus(
+        `Direct Unit deposit submitted: ${shortenTxHash(txHash)}. ` +
+          "Track settlement in Hyperunit operations."
+      );
+      setDepositTxNetwork(activeNetwork);
+      setSubmittedDepositTxHash(txHash);
+      fetchAgent();
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      setDepositPhase("error");
+      setDepositStatus(`Direct Unit deposit failed: ${msg.slice(0, 180)}`);
+    } finally {
+      setDirectUnitFunding(false);
     }
   };
 
@@ -2091,6 +2158,15 @@ export default function AgentDetailPage() {
                         className="w-full py-2.5 text-xs rounded-xl border border-warning/30 text-warning hover:bg-warning/10 transition-colors disabled:opacity-60"
                       >
                         {bridgeFunding ? "Submitting Emergency Bridge..." : "Emergency Bridge Fund (Bypass Vault)"}
+                      </button>
+                    )}
+                    {canUseDirectUnitDeposit && (
+                      <button
+                        onClick={handleDirectUnitDeposit}
+                        disabled={directUnitFunding || depositing || bridgeFunding}
+                        className="w-full py-2.5 text-xs rounded-xl border border-accent/30 text-accent hover:bg-accent/10 transition-colors disabled:opacity-60"
+                      >
+                        {directUnitFunding ? "Awaiting Signature..." : "Direct Unit Deposit (Sign Wallet Tx)"}
                       </button>
                     )}
                   </div>

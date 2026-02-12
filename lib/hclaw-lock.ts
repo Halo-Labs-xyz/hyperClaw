@@ -1,4 +1,4 @@
-import { createPublicClient, formatEther, http, type Address } from "viem";
+import { createPublicClient, encodeFunctionData, formatEther, http, type Address } from "viem";
 import { getHclawLockAddressIfSet } from "@/lib/env";
 import { isMonadTestnet } from "@/lib/network";
 import type { HclawLockPosition, HclawLockState, HclawLockTier } from "@/lib/types";
@@ -110,6 +110,34 @@ function classifyReadProbeFailure(reason: string): "soft" | "hard" {
   return "hard";
 }
 
+function classifyLockProbeFailure(reason: string): "soft" | "hard" {
+  const msg = reason.toLowerCase();
+  if (
+    msg.includes("transferfrom failed") ||
+    msg.includes("insufficient") ||
+    msg.includes("allowance") ||
+    msg.includes("balance") ||
+    msg.includes("already unlocked") ||
+    msg.includes("not lock owner") ||
+    msg.includes("still locked") ||
+    msg.includes("lock expired") ||
+    msg.includes("duration") ||
+    msg.includes("invalid") ||
+    msg.includes("reverted")
+  ) {
+    return "soft";
+  }
+  if (
+    msg.includes("returned no data") ||
+    msg.includes("function does not exist") ||
+    msg.includes("function selector was not recognized") ||
+    msg.includes("abi")
+  ) {
+    return "hard";
+  }
+  return "hard";
+}
+
 async function getLockCompatibility(
   network: MonadNetwork | undefined,
   address: Address
@@ -151,6 +179,27 @@ async function getLockCompatibility(
         args: [LOCK_READ_PROBE_USER],
       }),
     ]);
+
+    // Probe lock() selector existence and argument shape.
+    // Expected result for probe user is a soft revert from token/validation logic.
+    try {
+      await client.call({
+        account: LOCK_READ_PROBE_USER,
+        to: address,
+        data: encodeFunctionData({
+          abi: HCLAW_LOCK_ABI,
+          functionName: "lock",
+          args: [BigInt(1), 30],
+        }),
+      });
+    } catch (lockProbeError) {
+      const reason = formatOneLineError(lockProbeError);
+      if (classifyLockProbeFailure(reason) === "hard") {
+        const value = { deployed: true, compatible: false, reason: `lock() probe failed: ${reason}` };
+        lockCompatCache.set(cacheKey, { value, expiresAt: Date.now() + LOCK_COMPAT_CACHE_TTL_MS });
+        return value;
+      }
+    }
 
     const value = { deployed: true, compatible: true };
     lockCompatCache.set(cacheKey, { value, expiresAt: Date.now() + LOCK_COMPAT_CACHE_TTL_MS });
