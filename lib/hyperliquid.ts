@@ -1145,6 +1145,45 @@ export async function sendUsdToAgent(
 }
 
 /**
+ * Send USDC from an agent wallet to a destination address.
+ * Supports both traditional key-based wallets and PKP wallets.
+ */
+export async function sendUsdFromAgent(
+  agentId: string,
+  destination: Address,
+  amount: number
+): Promise<unknown> {
+  const { getAccountForAgent, getPrivateKeyForAgent } = await import("./account-manager");
+  const account = await getAccountForAgent(agentId);
+  if (!account) {
+    throw new Error(`No wallet found for agent ${agentId}`);
+  }
+
+  if (account.type === "readonly") {
+    throw new Error(`Agent ${agentId} wallet is readonly and cannot sign transfers`);
+  }
+
+  if (account.type === "pkp") {
+    const exchange = await getExchangeClientForPKP(agentId);
+    return await exchange.usdSend({
+      destination,
+      amount: amount.toString(),
+    });
+  }
+
+  const privateKey = await getPrivateKeyForAgent(agentId);
+  if (!privateKey) {
+    throw new Error(`No private key available for agent ${agentId}`);
+  }
+
+  const exchange = getExchangeClientForAgent(privateKey);
+  return await exchange.usdSend({
+    destination,
+    amount: amount.toString(),
+  });
+}
+
+/**
  * Generate a brand new Hyperliquid wallet for an agent.
  * Returns the private key and derived address.
  *

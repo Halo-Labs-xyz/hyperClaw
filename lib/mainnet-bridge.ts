@@ -1,0 +1,473 @@
+import {
+  createWalletClient,
+  http,
+  isAddress,
+  type Address,
+  type Hex,
+} from "viem";
+import { privateKeyToAccount } from "viem/accounts";
+import { monadMainnet } from "./chains";
+import { sendUsdFromAgent } from "./hyperliquid";
+
+export type BridgeStatus = "submitted" | "pending" | "failed";
+
+export interface BridgeExecution {
+  provider: "hyperunit" | "debridge" | "none";
+  status: BridgeStatus;
+  destinationAddress?: Address;
+  relayTxHash?: Hex;
+  bridgeOrderId?: string;
+  note?: string;
+  quote?: Record<string, unknown> | null;
+}
+
+interface HyperunitAddressResponse {
+  address?: string;
+  result?: { address?: string };
+  data?: { address?: string };
+}
+
+interface DeBridgeCreateTxResponse {
+  estimation?: Record<string, unknown>;
+  tx?: {
+    to?: string;
+    data?: string;
+    value?: string;
+  };
+  order?: {
+    orderId?: string;
+    id?: string;
+  };
+  orderId?: string;
+}
+
+const MAINNET_BRIDGE_ENABLED = process.env.MAINNET_BRIDGE_ENABLED === "true";
+const MAINNET_BRIDGE_PREFER_DEBRIDGE =
+  process.env.MAINNET_BRIDGE_PREFER_DEBRIDGE === "true";
+
+const HYPERUNIT_API_URL =
+  (process.env.HYPERUNIT_API_URL || "https://api.hyperunit.xyz").replace(/\/$/, "");
+const HYPERUNIT_MONAD_CHAIN =
+  (process.env.HYPERUNIT_MONAD_CHAIN || "monad").toLowerCase();
+const HYPERUNIT_HYPERLIQUID_CHAIN =
+  (process.env.HYPERUNIT_HYPERLIQUID_CHAIN || "hyperliquid").toLowerCase();
+const HYPERUNIT_DEPOSIT_ASSET =
+  (process.env.HYPERUNIT_DEPOSIT_ASSET || "mon").toLowerCase();
+const HYPERUNIT_WITHDRAW_ASSET =
+  (process.env.HYPERUNIT_WITHDRAW_ASSET || "usdc").toLowerCase();
+
+const DEBRIDGE_API_URL =
+  (process.env.DEBRIDGE_API_URL || "https://dln.debridge.finance").replace(/\/$/, "");
+
+function getRelayMonadPrivateKey(): `0x${string}` | null {
+  const raw = process.env.RELAY_MONAD_PRIVATE_KEY || process.env.MONAD_PRIVATE_KEY;
+  if (!raw || !/^0x[a-fA-F0-9]{64}$/.test(raw.trim())) return null;
+  return raw.trim() as `0x${string}`;
+}
+
+function getMonadRpcUrl(): string {
+  return process.env.MONAD_MAINNET_RPC_URL || monadMainnet.rpcUrls.default.http[0];
+}
+
+async function fetchJson(url: string, init?: RequestInit, timeoutMs: number = 12_000): Promise<any> {
+  const res = await fetch(url, {
+    ...init,
+    signal: AbortSignal.timeout(timeoutMs),
+    headers: {
+      "Content-Type": "application/json",
+      ...(init?.headers || {}),
+    },
+  });
+
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(`HTTP ${res.status}: ${text.slice(0, 240)}`);
+  }
+
+  const text = await res.text();
+  if (!text.trim()) return {};
+  return JSON.parse(text);
+}
+
+function parseAddress(value: unknown): Address | null {
+  if (typeof value !== "string") return null;
+  return isAddress(value) ? (value as Address) : null;
+}
+
+function pickHyperunitAddress(payload: HyperunitAddressResponse): Address | null {
+  const direct = parseAddress(payload.address);
+  if (direct) return direct;
+  const nestedResult = parseAddress(payload.result?.address);
+  if (nestedResult) return nestedResult;
+  return parseAddress(payload.data?.address);
+}
+
+function hasDebridgeConfig(): boolean {
+  return Boolean(
+    process.env.DEBRIDGE_MONAD_CHAIN_ID &&
+      process.env.DEBRIDGE_HYPERLIQUID_CHAIN_ID &&
+      process.env.DEBRIDGE_MONAD_TOKEN_IN &&
+      process.env.DEBRIDGE_HYPERLIQUID_TOKEN_OUT
+  );
+}
+
+function extractLikelyTxHash(value: unknown): Hex | undefined {
+  const seen = new Set<unknown>();
+  const walk = (node: unknown): Hex | undefined => {
+    if (!node || seen.has(node)) return undefined;
+    if (typeof node === "string") {
+      const match = node.match(/0x[a-fA-F0-9]{64}/);
+      if (match) return match[0] as Hex;
+      return undefined;
+    }
+    if (typeof node !== "object") return undefined;
+
+    seen.add(node);
+    if (Array.isArray(node)) {
+      for (const item of node) {
+        const found = walk(item);
+        if (found) return found;
+      }
+      return undefined;
+    }
+
+    const rec = node as Record<string, unknown>;
+    for (const [k, v] of Object.entries(rec)) {
+      if (k.toLowerCase().includes("hash") && typeof v === "string") {
+        const match = v.match(/0x[a-fA-F0-9]{64}/);
+        if (match) return match[0] as Hex;
+      }
+      const found = walk(v);
+      if (found) return found;
+    }
+    return undefined;
+  };
+
+  return walk(value);
+}
+
+async function getHyperunitDestinationAddress(params: {
+  sourceChain: string;
+  destinationChain: string;
+  asset: string;
+  destinationAddress: Address;
+}): Promise<Address> {
+  const { sourceChain, destinationChain, asset, destinationAddress } = params;
+  const url = `${HYPERUNIT_API_URL}/gen/${sourceChain}/${destinationChain}/${asset}/${destinationAddress}`;
+  const payload = (await fetchJson(url, { method: "GET" }, 10_000)) as HyperunitAddressResponse;
+  const addr = pickHyperunitAddress(payload);
+  if (!addr) {
+    throw new Error("Hyperunit did not return a protocol address");
+  }
+  return addr;
+}
+
+async function sendMonadNative(to: Address, valueWei: bigint): Promise<Hex> {
+  const privateKey = getRelayMonadPrivateKey();
+  if (!privateKey) {
+    throw new Error("RELAY_MONAD_PRIVATE_KEY or MONAD_PRIVATE_KEY is required for bridge execution");
+  }
+
+  const account = privateKeyToAccount(privateKey);
+  const wallet = createWalletClient({
+    account,
+    chain: monadMainnet,
+    transport: http(getMonadRpcUrl()),
+  });
+
+  return await wallet.sendTransaction({
+    account,
+    to,
+    value: valueWei,
+    chain: monadMainnet,
+  });
+}
+
+async function createDeBridgeOrderTx(params: {
+  srcAmountRaw: string;
+  senderAddress: Address;
+  recipientAddress: Address;
+}): Promise<DeBridgeCreateTxResponse> {
+  if (!hasDebridgeConfig()) {
+    throw new Error("deBridge env config is incomplete");
+  }
+
+  const query = new URLSearchParams({
+    srcChainId: String(process.env.DEBRIDGE_MONAD_CHAIN_ID),
+    dstChainId: String(process.env.DEBRIDGE_HYPERLIQUID_CHAIN_ID),
+    srcChainTokenIn: String(process.env.DEBRIDGE_MONAD_TOKEN_IN),
+    dstChainTokenOut: String(process.env.DEBRIDGE_HYPERLIQUID_TOKEN_OUT),
+    srcChainTokenInAmount: params.srcAmountRaw,
+    srcChainOrderAuthorityAddress: params.senderAddress,
+    srcChainRefundAddress: params.senderAddress,
+    dstChainOrderAuthorityAddress: params.recipientAddress,
+    dstChainRecipientAddress: params.recipientAddress,
+    prependOperatingExpense: process.env.DEBRIDGE_PREPEND_OPERATING_EXPENSE || "true",
+    slippage: process.env.DEBRIDGE_SLIPPAGE || "1",
+  });
+
+  if (process.env.DEBRIDGE_AFFILIATE_FEE_PERCENT) {
+    query.set("affiliateFeePercent", process.env.DEBRIDGE_AFFILIATE_FEE_PERCENT);
+  }
+
+  const headers: Record<string, string> = {};
+  if (process.env.DEBRIDGE_API_KEY) {
+    headers["x-api-key"] = process.env.DEBRIDGE_API_KEY;
+  }
+
+  const url = `${DEBRIDGE_API_URL}/v1.0/dln/order/create-tx?${query.toString()}`;
+  return (await fetchJson(url, { method: "GET", headers }, 12_000)) as DeBridgeCreateTxResponse;
+}
+
+async function tryExecuteDebridge(params: {
+  srcAmountRaw: string;
+  senderAddress: Address;
+  recipientAddress: Address;
+}): Promise<BridgeExecution> {
+  const resp = await createDeBridgeOrderTx(params);
+  const tx = resp.tx;
+  const quote = resp.estimation || null;
+  const orderId = resp.order?.orderId || resp.order?.id || resp.orderId;
+
+  if (!tx?.to || !tx?.data) {
+    return {
+      provider: "debridge",
+      status: "pending",
+      bridgeOrderId: orderId,
+      note: "deBridge returned no executable tx payload",
+      quote,
+    };
+  }
+
+  const relayPk = getRelayMonadPrivateKey();
+  if (!relayPk) {
+    return {
+      provider: "debridge",
+      status: "pending",
+      bridgeOrderId: orderId,
+      note: "Relay private key is missing for deBridge execution",
+      quote,
+    };
+  }
+
+  const account = privateKeyToAccount(relayPk);
+  const wallet = createWalletClient({
+    account,
+    chain: monadMainnet,
+    transport: http(getMonadRpcUrl()),
+  });
+
+  const txHash = await wallet.sendTransaction({
+    account,
+    chain: monadMainnet,
+    to: tx.to as Address,
+    data: tx.data as Hex,
+    value: BigInt(tx.value || "0"),
+  });
+
+  return {
+    provider: "debridge",
+    status: "submitted",
+    destinationAddress: params.recipientAddress,
+    relayTxHash: txHash,
+    bridgeOrderId: orderId,
+    quote,
+  };
+}
+
+export function isMainnetBridgeEnabled(): boolean {
+  return MAINNET_BRIDGE_ENABLED;
+}
+
+export async function bridgeDepositToHyperliquidAgent(params: {
+  hlAddress: Address;
+  sourceToken: Address;
+  sourceAmountRaw: bigint;
+  sourceAmountRawLabel: string;
+}): Promise<BridgeExecution> {
+  const { hlAddress, sourceToken, sourceAmountRaw, sourceAmountRawLabel } = params;
+
+  if (!MAINNET_BRIDGE_ENABLED) {
+    return {
+      provider: "none",
+      status: "pending",
+      destinationAddress: hlAddress,
+      note: "Mainnet bridge is disabled",
+    };
+  }
+
+  const sourceIsNative = sourceToken.toLowerCase() === "0x0000000000000000000000000000000000000000";
+
+  const tryHyperunit = async (): Promise<BridgeExecution> => {
+    const protocolAddress = await getHyperunitDestinationAddress({
+      sourceChain: HYPERUNIT_MONAD_CHAIN,
+      destinationChain: HYPERUNIT_HYPERLIQUID_CHAIN,
+      asset: HYPERUNIT_DEPOSIT_ASSET,
+      destinationAddress: hlAddress,
+    });
+
+    if (!sourceIsNative) {
+      return {
+        provider: "hyperunit",
+        status: "pending",
+        destinationAddress: protocolAddress,
+        note:
+          "Hyperunit relay executor currently supports MON native deposits only; ERC20 deposit queued for deBridge fallback",
+      };
+    }
+
+    const relayTxHash = await sendMonadNative(protocolAddress, sourceAmountRaw);
+    return {
+      provider: "hyperunit",
+      status: "submitted",
+      destinationAddress: protocolAddress,
+      relayTxHash,
+    };
+  };
+
+  const tryDebridge = async (): Promise<BridgeExecution> => {
+    if (!hasDebridgeConfig()) {
+      return {
+        provider: "debridge",
+        status: "pending",
+        destinationAddress: hlAddress,
+        note: "deBridge is not configured",
+      };
+    }
+
+    const relayPk = getRelayMonadPrivateKey();
+    if (!relayPk) {
+      return {
+        provider: "debridge",
+        status: "pending",
+        destinationAddress: hlAddress,
+        note: "Relay private key is missing",
+      };
+    }
+
+    const senderAddress = privateKeyToAccount(relayPk).address;
+    return await tryExecuteDebridge({
+      srcAmountRaw: sourceAmountRawLabel,
+      senderAddress,
+      recipientAddress: hlAddress,
+    });
+  };
+
+  if (MAINNET_BRIDGE_PREFER_DEBRIDGE) {
+    try {
+      const deb = await tryDebridge();
+      if (deb.status === "submitted") return deb;
+    } catch (error) {
+      const errMsg = error instanceof Error ? error.message : String(error);
+      console.warn(`[Bridge] deBridge deposit path failed: ${errMsg.slice(0, 160)}`);
+    }
+  }
+
+  try {
+    const hyperunit = await tryHyperunit();
+    if (hyperunit.status === "submitted") {
+      if (hasDebridgeConfig()) {
+        try {
+          const relayPk = getRelayMonadPrivateKey();
+          if (relayPk) {
+            const senderAddress = privateKeyToAccount(relayPk).address;
+            const quote = await createDeBridgeOrderTx({
+              srcAmountRaw: sourceAmountRawLabel,
+              senderAddress,
+              recipientAddress: hlAddress,
+            });
+            hyperunit.quote = quote.estimation || null;
+            hyperunit.bridgeOrderId = quote.order?.orderId || quote.order?.id || quote.orderId;
+          }
+        } catch {
+          // Keep Hyperunit success even if deBridge quote fails.
+        }
+      }
+      return hyperunit;
+    }
+
+    try {
+      const deb = await tryDebridge();
+      if (deb.status === "submitted") return deb;
+      if (hyperunit.status === "pending") {
+        return {
+          ...hyperunit,
+          quote: deb.quote || hyperunit.quote || null,
+          bridgeOrderId: deb.bridgeOrderId || hyperunit.bridgeOrderId,
+          note: `${hyperunit.note || "Hyperunit pending"}; ${deb.note || "deBridge pending"}`,
+        };
+      }
+      return deb;
+    } catch (fallbackErr) {
+      const fallbackMsg = fallbackErr instanceof Error ? fallbackErr.message : String(fallbackErr);
+      return {
+        ...hyperunit,
+        status: "failed",
+        note: `${hyperunit.note || "Hyperunit failed"}; deBridge error: ${fallbackMsg.slice(0, 140)}`,
+      };
+    }
+  } catch (error) {
+    const msg = error instanceof Error ? error.message : String(error);
+    try {
+      const deb = await tryDebridge();
+      if (deb.status === "submitted") return deb;
+      return {
+        ...deb,
+        status: "failed",
+        note: `Hyperunit error: ${msg.slice(0, 140)}; ${deb.note || "deBridge pending"}`,
+      };
+    } catch (debErr) {
+      const debMsg = debErr instanceof Error ? debErr.message : String(debErr);
+      return {
+        provider: "none",
+        status: "failed",
+        destinationAddress: hlAddress,
+        note: `Hyperunit error: ${msg.slice(0, 140)}; deBridge error: ${debMsg.slice(0, 140)}`,
+      };
+    }
+  }
+}
+
+export async function bridgeWithdrawalToMonadUser(params: {
+  agentId: string;
+  userAddress: Address;
+  usdAmount: number;
+}): Promise<BridgeExecution> {
+  const { agentId, userAddress, usdAmount } = params;
+
+  if (!MAINNET_BRIDGE_ENABLED) {
+    return {
+      provider: "none",
+      status: "pending",
+      destinationAddress: userAddress,
+      note: "Mainnet bridge is disabled",
+    };
+  }
+
+  try {
+    const protocolAddress = await getHyperunitDestinationAddress({
+      sourceChain: HYPERUNIT_HYPERLIQUID_CHAIN,
+      destinationChain: HYPERUNIT_MONAD_CHAIN,
+      asset: HYPERUNIT_WITHDRAW_ASSET,
+      destinationAddress: userAddress,
+    });
+
+    const result = await sendUsdFromAgent(agentId, protocolAddress, usdAmount);
+    const txHash = extractLikelyTxHash(result);
+
+    return {
+      provider: "hyperunit",
+      status: "submitted",
+      destinationAddress: protocolAddress,
+      relayTxHash: txHash,
+    };
+  } catch (error) {
+    const msg = error instanceof Error ? error.message : String(error);
+    return {
+      provider: "hyperunit",
+      status: "failed",
+      destinationAddress: userAddress,
+      note: `Withdrawal bridge failed: ${msg.slice(0, 160)}`,
+    };
+  }
+}

@@ -87,6 +87,28 @@ const AGENT_MIN_ORDER_NOTIONAL_USD = Math.max(
   1,
   parseFloat(process.env.AGENT_MIN_ORDER_NOTIONAL_USD || "10")
 );
+const TESTNET_FORCE_CONTINUOUS_EXECUTION =
+  process.env.TESTNET_FORCE_CONTINUOUS_EXECUTION !== "false";
+const TESTNET_MIN_CONFIDENCE_OVERRIDE = (() => {
+  const parsed = parseFloat(process.env.TESTNET_MIN_CONFIDENCE_OVERRIDE || "0");
+  if (!Number.isFinite(parsed)) return 0;
+  return Math.max(0, Math.min(1, parsed));
+})();
+const TESTNET_MIN_ORDER_NOTIONAL_USD = (() => {
+  const parsed = parseFloat(process.env.TESTNET_MIN_ORDER_NOTIONAL_USD || "1");
+  if (!Number.isFinite(parsed)) return 1;
+  return Math.max(0, parsed);
+})();
+
+function getAgentDeploymentNetwork(agent: {
+  autonomy?: { deploymentNetwork?: string };
+}): "testnet" | "mainnet" {
+  return agent.autonomy?.deploymentNetwork === "mainnet" ? "mainnet" : "testnet";
+}
+
+function isTestnetAgent(agent: { autonomy?: { deploymentNetwork?: string } }): boolean {
+  return getAgentDeploymentNetwork(agent) === "testnet";
+}
 
 function getRiskMaxSizeFraction(riskLevel: "conservative" | "moderate" | "aggressive"): number {
   switch (riskLevel) {
@@ -286,6 +308,7 @@ export async function startAgent(
 
   const agent = await getAgent(agentId);
   if (!agent) throw new Error(`Agent ${agentId} not found`);
+  const skipAdaptiveBackoff = TESTNET_FORCE_CONTINUOUS_EXECUTION && isTestnetAgent(agent);
 
   const tickInterval = intervalMs ?? parseInt(process.env.AGENT_TICK_INTERVAL || "60000");
 
@@ -315,7 +338,7 @@ export async function startAgent(
   const interval = setInterval(() => {
     const failures = consecutiveFailures.get(agentId) || 0;
     // Adaptive backoff: if many consecutive failures, skip some ticks
-    if (failures >= 3) {
+    if (!skipAdaptiveBackoff && failures >= 3) {
       const skipChance = Math.min(0.8, failures * 0.15);
       if (Math.random() < skipChance) {
         console.log(`[Agent ${agentId}] Skipping tick due to ${failures} consecutive failures (backoff)`);
@@ -365,6 +388,8 @@ export async function executeTick(agentId: string): Promise<TradeLog> {
 async function executeTickInternal(agentId: string): Promise<TradeLog> {
   const agent = await getAgent(agentId);
   if (!agent) throw new Error(`Agent ${agentId} not found`);
+  const testnetContinuousExecution =
+    TESTNET_FORCE_CONTINUOUS_EXECUTION && isTestnetAgent(agent);
 
   const state = runnerStates.get(agentId);
 
@@ -397,7 +422,14 @@ async function executeTickInternal(agentId: string): Promise<TradeLog> {
   }
 
   const ex = agentExchange ?? undefined;
-  const cadence = evaluateDecisionCadence(agentId, Date.now());
+  const cadence = testnetContinuousExecution
+    ? {
+        shouldThrottle: false,
+        reason: "",
+        nextEligibleAtMs: Date.now(),
+        shouldPersistThrottleLog: false,
+      }
+    : evaluateDecisionCadence(agentId, Date.now());
   if (cadence.shouldThrottle) {
     const holdLog: TradeLog = {
       id: randomBytes(8).toString("hex"),
@@ -551,7 +583,9 @@ async function executeTickInternal(agentId: string): Promise<TradeLog> {
       agentStrategy: agent.description, // The agent's description IS its strategy
     });
 
-    const minConfidence = getConfiguredMinConfidence(agent);
+    const minConfidence = testnetContinuousExecution
+      ? Math.min(getConfiguredMinConfidence(agent), TESTNET_MIN_CONFIDENCE_OVERRIDE)
+      : getConfiguredMinConfidence(agent);
     const allowedMarkets = new Set(agent.markets.map((m) => m.toUpperCase()));
     const maxSizeByRisk = getRiskMaxSizeFraction(agent.riskLevel);
     const hasPositionForAsset = (asset: string) =>
@@ -633,11 +667,15 @@ async function executeTickInternal(agentId: string): Promise<TradeLog> {
 
         console.log(`[Agent ${agentId}] Order calculation: capital=$${capitalToUse}, price=$${price}, size=${orderSize}`);
 
+        const minOrderNotionalUsd = testnetContinuousExecution
+          ? TESTNET_MIN_ORDER_NOTIONAL_USD
+          : AGENT_MIN_ORDER_NOTIONAL_USD;
+
         if (!isFinite(orderSize) || isNaN(orderSize) || orderSize <= 0) {
           console.warn(`[Agent ${agentId}] SKIPPING: Invalid order size: ${orderSize} (capital=${capitalToUse}, price=${price})`);
-        } else if (decision.action !== "close" && capitalToUse < AGENT_MIN_ORDER_NOTIONAL_USD) {
+        } else if (decision.action !== "close" && capitalToUse < minOrderNotionalUsd) {
           console.warn(
-            `[Agent ${agentId}] SKIPPING: Notional $${capitalToUse.toFixed(2)} below minimum $${AGENT_MIN_ORDER_NOTIONAL_USD.toFixed(2)}`
+            `[Agent ${agentId}] SKIPPING: Notional $${capitalToUse.toFixed(2)} below minimum $${minOrderNotionalUsd.toFixed(2)}`
           );
         } else {
           console.log(`[Agent ${agentId}] Order size valid: ${orderSize}`);

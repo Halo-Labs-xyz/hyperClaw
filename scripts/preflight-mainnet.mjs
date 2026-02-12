@@ -32,6 +32,10 @@ function isAddress(value) {
   return /^0x[a-fA-F0-9]{40}$/.test(value);
 }
 
+function isPrivateKey(value) {
+  return /^0x[a-fA-F0-9]{64}$/.test(value);
+}
+
 const errors = [];
 const warnings = [];
 
@@ -112,6 +116,37 @@ if (!monadTestnet) {
     const invalid = stables.filter((t) => !isAddress(t));
     if (invalid.length > 0) {
       errors.push(`RELAY_STABLE_TOKENS has invalid addresses: ${invalid.join(", ")}`);
+    }
+  }
+
+  const bridgeEnabled = parseBoolEnv("MAINNET_BRIDGE_ENABLED", false);
+  if (bridgeEnabled) {
+    const hyperunitUrl = requireEnv("HYPERUNIT_API_URL", errors);
+    if (hyperunitUrl && !/^https?:\/\//.test(hyperunitUrl)) {
+      errors.push("HYPERUNIT_API_URL must be a valid http(s) URL");
+    }
+
+    const relayKey = process.env.RELAY_MONAD_PRIVATE_KEY || process.env.MONAD_PRIVATE_KEY || "";
+    if (!relayKey || !isPrivateKey(relayKey.trim())) {
+      errors.push(
+        "Bridge mode requires RELAY_MONAD_PRIVATE_KEY (or MONAD_PRIVATE_KEY) as a valid 0x private key"
+      );
+    }
+
+    const hasDebridge =
+      !!process.env.DEBRIDGE_MONAD_CHAIN_ID ||
+      !!process.env.DEBRIDGE_HYPERLIQUID_CHAIN_ID ||
+      !!process.env.DEBRIDGE_MONAD_TOKEN_IN ||
+      !!process.env.DEBRIDGE_HYPERLIQUID_TOKEN_OUT;
+    if (hasDebridge) {
+      requireEnv("DEBRIDGE_MONAD_CHAIN_ID", errors);
+      requireEnv("DEBRIDGE_HYPERLIQUID_CHAIN_ID", errors);
+      requireEnv("DEBRIDGE_MONAD_TOKEN_IN", errors);
+      requireEnv("DEBRIDGE_HYPERLIQUID_TOKEN_OUT", errors);
+    } else {
+      warnings.push(
+        "MAINNET_BRIDGE_ENABLED=true but deBridge fallback envs are missing; Hyperunit-only mode will be used"
+      );
     }
   }
 }

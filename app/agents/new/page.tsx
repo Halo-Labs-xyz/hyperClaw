@@ -7,6 +7,7 @@ import { usePrivy } from "@privy-io/react-auth";
 import { NetworkToggle } from "@/app/components/NetworkToggle";
 import { useNetwork } from "@/app/components/NetworkContext";
 import { HyperclawIcon } from "@/app/components/HyperclawIcon";
+import { TelegramChatButton } from "@/app/components/TelegramChatButton";
 import type { AutonomyMode } from "@/lib/types";
 import type { PerpMarketInfo, SpotMarketInfo } from "@/lib/hyperliquid";
 
@@ -286,6 +287,7 @@ export default function CreateAgentPage() {
             <span className="text-foreground font-medium">Create</span>
           </div>
           <div className="flex items-center gap-2 sm:gap-3">
+            <TelegramChatButton />
             <NetworkToggle />
           </div>
         </div>
@@ -741,7 +743,7 @@ export default function CreateAgentPage() {
                 className="input w-full px-4 py-3.5"
               />
               <p className="text-[11px] text-dim mt-2">
-                Message <span className="text-accent">@HyperclawBot</span> on Telegram with /start to get your Chat ID. The agent will send trade notifications, edge explanations, and approval requests here.
+                Message <span className="text-accent">@hypermonCLI_bot</span> on Telegram with /start to get your Chat ID. The agent will send trade notifications, edge explanations, and approval requests here.
               </p>
             </div>
           </div>

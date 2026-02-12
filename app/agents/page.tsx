@@ -8,6 +8,7 @@ import { NetworkToggle } from "@/app/components/NetworkToggle";
 import { useNetwork } from "@/app/components/NetworkContext";
 import { HyperclawLogo } from "@/app/components/HyperclawLogo";
 import { HyperclawIcon } from "@/app/components/HyperclawIcon";
+import { TelegramChatButton } from "@/app/components/TelegramChatButton";
 import { AgentAvatar } from "@/app/components/AgentAvatar";
 
 type ExploreAgent = {
@@ -17,6 +18,7 @@ type ExploreAgent = {
   status: "active" | "paused" | "stopped";
   markets: string[];
   riskLevel: "conservative" | "moderate" | "aggressive";
+  vaultTvlUsd: number;
 };
 
 function formatMarkets(markets: string[]): string {
@@ -123,6 +125,7 @@ export default function AgentsPage() {
             </Link>
           </div>
           <div className="flex items-center gap-2 sm:gap-3">
+            <TelegramChatButton />
             <NetworkToggle />
             <Link href="/agents/new" className="btn-primary px-4 py-2 text-sm">
               + Create Agent
@@ -213,9 +216,10 @@ export default function AgentsPage() {
                       {agent.status === "active" ? <span className="w-1.5 h-1.5 rounded-full bg-current pulse-live" /> : null}
                       {agent.status}
                     </span>
-                    <span className={`font-medium capitalize ${riskClass(agent.riskLevel)}`}>
-                      {agent.riskLevel}
-                    </span>
+                    <div className="text-right">
+                      <div className={`font-medium capitalize ${riskClass(agent.riskLevel)}`}>{agent.riskLevel}</div>
+                      <div className="text-dim mono-nums">TVL ${agent.vaultTvlUsd.toLocaleString()}</div>
+                    </div>
                   </div>
                 </div>
               </Link>

@@ -6,6 +6,7 @@ import { NetworkToggle } from "@/app/components/NetworkToggle";
 import { useNetwork } from "@/app/components/NetworkContext";
 import { HyperclawLogo } from "@/app/components/HyperclawLogo";
 import { HyperclawIcon } from "@/app/components/HyperclawIcon";
+import { TelegramChatButton } from "@/app/components/TelegramChatButton";
 import { AgentAvatar } from "@/app/components/AgentAvatar";
 import type { Agent } from "@/lib/types";
 
@@ -244,6 +245,7 @@ export default function ArenaPage() {
             </div>
           </div>
           <div className="flex items-center gap-2 sm:gap-3">
+            <TelegramChatButton />
             <NetworkToggle />
             <Link href="/agents" className="btn-secondary px-4 py-2 text-sm">
               Browse Agents

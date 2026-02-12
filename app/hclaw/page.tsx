@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
+import { TelegramChatButton } from "@/app/components/TelegramChatButton";
 import { useAccount } from "wagmi";
 
 interface HclawPageData {
@@ -193,9 +194,12 @@ export default function HclawHubPage() {
             <Link href="/" className="text-sm text-muted hover:text-foreground">Back</Link>
             <h1 className="text-lg font-semibold gradient-title">HCLAW Hub</h1>
           </div>
-          <span className="text-xs text-dim">
-            {isConnected && address ? `${address.slice(0, 6)}...${address.slice(-4)}` : "Connect wallet"}
-          </span>
+          <div className="flex items-center gap-2">
+            <TelegramChatButton />
+            <span className="text-xs text-dim">
+              {isConnected && address ? `${address.slice(0, 6)}...${address.slice(-4)}` : "Connect wallet"}
+            </span>
+          </div>
         </div>
       </header>
 

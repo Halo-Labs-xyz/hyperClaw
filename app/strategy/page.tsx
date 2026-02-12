@@ -5,6 +5,7 @@ import Link from "next/link";
 import { usePrivy } from "@privy-io/react-auth";
 import { HyperclawLogo } from "@/app/components/HyperclawLogo";
 import { HyperclawIcon } from "@/app/components/HyperclawIcon";
+import { TelegramChatButton } from "@/app/components/TelegramChatButton";
 import { NetworkToggle } from "@/app/components/NetworkToggle";
 import { useNetwork } from "@/app/components/NetworkContext";
 import { TestnetToggle } from "../components/strategy/TestnetToggle";
@@ -136,6 +137,7 @@ export default function StrategyPage() {
           </div>
 
           <div className="flex items-center gap-3">
+            <TelegramChatButton />
             <NetworkToggle />
             <TestnetToggle
               isTestnet={monadTestnet}

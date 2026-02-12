@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { getAgents, createAgent } from "@/lib/store";
 import { generateAgentWallet, provisionPKPWallet } from "@/lib/hyperliquid";
 import { addAccount, getAccountForAgent, addPKPAccount } from "@/lib/account-manager";
+import { getTotalDepositedUsd } from "@/lib/deposit-relay";
 import { type AgentConfig } from "@/lib/types";
 import { getNetworkState } from "@/lib/network";
 
@@ -54,6 +55,16 @@ export async function GET(request: Request) {
     const currentNetwork = getNetworkState().monadTestnet ? "testnet" : "mainnet";
     const network = requestedNetwork ?? currentNetwork;
     const networkScopedAgents = agents.filter((a) => getAgentDeploymentNetwork(a) === network);
+    const withDepositTvl = await Promise.all(
+      networkScopedAgents.map(async (agent) => {
+        try {
+          const totalDepositedUsd = await getTotalDepositedUsd(agent.id);
+          return { ...agent, vaultTvlUsd: totalDepositedUsd };
+        } catch {
+          return agent;
+        }
+      })
+    );
 
     if (view === "explore") {
       const viewerPrivyId =
@@ -67,8 +78,8 @@ export async function GET(request: Request) {
           request.headers.get("x-wallet-address")
         );
 
-      const active = networkScopedAgents.filter((a) => a.status === "active");
-      const owned = networkScopedAgents.filter((a) =>
+      const active = withDepositTvl.filter((a) => a.status === "active");
+      const owned = withDepositTvl.filter((a) =>
         isOwnedByViewer(
           a.telegram?.ownerPrivyId,
           a.telegram?.ownerWalletAddress,
@@ -86,6 +97,7 @@ export async function GET(request: Request) {
           status: a.status,
           markets: a.markets,
           riskLevel: a.riskLevel,
+          vaultTvlUsd: a.vaultTvlUsd,
         })),
       });
     }
@@ -93,7 +105,7 @@ export async function GET(request: Request) {
     // Enrich each agent's hlAddress from account-manager (source of truth for HL wallet)
     const { getAccountForAgent } = await import("@/lib/account-manager");
     const enriched = await Promise.all(
-      networkScopedAgents.map(async (a) => {
+      withDepositTvl.map(async (a) => {
         const account = await getAccountForAgent(a.id);
         const resolvedAddress = account?.address ?? a.hlAddress;
         return { ...a, hlAddress: resolvedAddress };

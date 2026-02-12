@@ -6,6 +6,7 @@ import { useState, useEffect, useCallback, useRef } from "react";
 import Link from "next/link";
 import { HyperclawLogo } from "@/app/components/HyperclawLogo";
 import { HyperclawIcon } from "@/app/components/HyperclawIcon";
+import { TelegramChatButton } from "@/app/components/TelegramChatButton";
 import { AgentAvatar } from "@/app/components/AgentAvatar";
 import { useNetwork } from "@/app/components/NetworkContext";
 import type { Agent, HclawState } from "@/lib/types";
@@ -362,7 +363,7 @@ export default function Dashboard() {
           </nav>
 
           <div className="flex items-center gap-2 sm:gap-3">
-            <div className="hidden" />
+            <TelegramChatButton />
             {isConnected && address ? (
               <div className="relative group">
                 <div className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-surface border border-card-border cursor-default">

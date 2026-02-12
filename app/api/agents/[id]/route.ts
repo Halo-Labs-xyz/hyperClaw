@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { getAgent, updateAgent, getTradeLogsForAgent } from "@/lib/store";
 import { getAccountForAgent } from "@/lib/account-manager";
+import { getTotalDepositedUsd } from "@/lib/deposit-relay";
 import { stopAgent } from "@/lib/agent-runner";
 import { handleStatusChange, getLifecycleState } from "@/lib/agent-lifecycle";
 import { getNetworkState } from "@/lib/network";
@@ -50,7 +51,10 @@ export async function GET(
   { params }: { params: { id: string } }
 ) {
   try {
-    const agent = await getAgent(params.id);
+    const baseAgent = await getAgent(params.id);
+    const agent =
+      baseAgent &&
+      ({ ...baseAgent, vaultTvlUsd: await getTotalDepositedUsd(baseAgent.id).catch(() => baseAgent.vaultTvlUsd) });
     if (!agent) {
       return NextResponse.json({ error: "Agent not found" }, { status: 404 });
     }

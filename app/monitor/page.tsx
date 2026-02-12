@@ -4,6 +4,7 @@ import { useState, useEffect } from "react";
 import Link from "next/link";
 import { HyperclawLogo } from "@/app/components/HyperclawLogo";
 import { HyperclawIcon } from "@/app/components/HyperclawIcon";
+import { TelegramChatButton } from "@/app/components/TelegramChatButton";
 import { NetworkToggle } from "@/app/components/NetworkToggle";
 import { useNetwork } from "@/app/components/NetworkContext";
 import { PositionPanel } from "../components/monitor/PositionPanel";
@@ -72,6 +73,7 @@ export default function MonitorPage() {
 
           {/* Agent Selector */}
           <div className="flex items-center gap-3">
+            <TelegramChatButton />
             <NetworkToggle />
             {agents.length > 0 && (
               <select

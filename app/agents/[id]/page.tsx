@@ -9,6 +9,7 @@ import { usePrivy } from "@privy-io/react-auth";
 import { NetworkToggle } from "@/app/components/NetworkToggle";
 import { useNetwork } from "@/app/components/NetworkContext";
 import { HyperclawIcon } from "@/app/components/HyperclawIcon";
+import { TelegramChatButton } from "@/app/components/TelegramChatButton";
 import { AgentAvatar } from "@/app/components/AgentAvatar";
 import type { Agent, TradeLog, MonadToken, VaultChatMessage, IndicatorConfig } from "@/lib/types";
 import { MONAD_TOKENS, INDICATOR_TEMPLATES } from "@/lib/types";
@@ -421,10 +422,17 @@ export default function AgentDetailPage() {
             const hlInfo = d.hlFunded
               ? ` HL wallet ${d.hlWalletAddress?.slice(0, 6)}...${d.hlWalletAddress?.slice(-4)} funded $${d.hlFundedAmount}.`
               : "";
+            const bridgeInfo = d.bridgeProvider
+              ? ` Bridge ${d.bridgeProvider}: ${d.bridgeStatus || "pending"}${
+                  d.bridgeTxHash ? ` (${d.bridgeTxHash.slice(0, 10)}...)` : ""
+                }.${d.bridgeNote ? ` ${d.bridgeNote}` : ""}`
+              : "";
             const hclawInfo = d.rebateBps
               ? ` Tier ${d.lockTier} active. Rebate ${(Number(d.rebateBps) / 100).toFixed(2)}%. Remaining cap $${Number(d.userCapRemainingUsd || 0).toFixed(2)}.`
               : "";
-            setDepositStatus(`Deposit confirmed! ${d.shares} shares minted.${hlInfo}${hclawInfo}`);
+            setDepositStatus(
+              `Deposit confirmed! ${d.shares} shares minted.${hlInfo}${bridgeInfo ? ` ${bridgeInfo}` : ""}${hclawInfo}`
+            );
             setCapPreview({
               baseCapUsd: Number(d.userCapUsd || 0) / ((Number(d.boostBps || 10_000) || 10_000) / 10_000),
               boostedCapUsd: Number(d.userCapUsd || 0),
@@ -464,7 +472,15 @@ export default function AgentDetailPage() {
         .then((res) => res.json())
         .then((data) => {
           if (data.success && data.eventType === "withdrawal") {
-            setWithdrawStatus("Withdrawal confirmed and synced.");
+            const w = data.withdrawal;
+            const bridgeInfo = w?.bridgeProvider
+              ? ` Bridge ${w.bridgeProvider}: ${w.bridgeStatus || "pending"}${
+                  w.bridgeTxHash ? ` (${String(w.bridgeTxHash).slice(0, 10)}...)` : ""
+                }.${w.bridgeNote ? ` ${w.bridgeNote}` : ""}`
+              : "";
+            setWithdrawStatus(
+              `Withdrawal confirmed and synced.${bridgeInfo ? ` ${bridgeInfo}` : ""}`
+            );
           } else if (data.success) {
             setWithdrawStatus("Withdrawal confirmed.");
           } else {
@@ -925,6 +941,7 @@ export default function AgentDetailPage() {
             <span className="text-foreground font-medium truncate">{agent.name}</span>
           </div>
           <div className="flex items-center gap-2 sm:gap-3">
+            <TelegramChatButton />
             <NetworkToggle />
           </div>
         </div>

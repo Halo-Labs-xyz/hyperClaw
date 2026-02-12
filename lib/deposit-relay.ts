@@ -33,6 +33,11 @@ import { getAgent, updateAgent } from "./store";
 import { provisionAgentWallet } from "./hyperliquid";
 import { isMonadTestnet } from "./network";
 import {
+  bridgeDepositToHyperliquidAgent,
+  bridgeWithdrawalToMonadUser,
+  isMainnetBridgeEnabled,
+} from "./mainnet-bridge";
+import {
   type DepositRow,
   isSupabaseStoreEnabled,
   sbGetDepositByTxHash,
@@ -146,10 +151,14 @@ async function fetchMonPrice(): Promise<number> {
  * Testnet: Fixed rate (1 MON = $1000 USDC)
  * Mainnet: Live MON/USD price minus relay fee
  */
-async function monToUsdc(amountWei: bigint): Promise<{ usdValue: number; rate: number; fee: number }> {
+async function monToUsdc(
+  amountWei: bigint,
+  network?: MonadNetwork
+): Promise<{ usdValue: number; rate: number; fee: number }> {
   const monAmount = parseFloat(formatEther(amountWei));
+  const useTestnet = network ? network === "testnet" : isMonadTestnet();
 
-  if (isMonadTestnet()) {
+  if (useTestnet) {
     const usdValue = monAmount * TESTNET_MON_TO_USDC;
     return { usdValue, rate: TESTNET_MON_TO_USDC, fee: 0 };
   }
@@ -186,10 +195,12 @@ function normalizeUsd(usd: number): number {
 async function erc20ToUsdc(
   token: Address,
   amount: bigint,
-  client = getMonadClient()
+  client = getMonadClient(),
+  network?: MonadNetwork
 ): Promise<{ usdValue: number; rate: number; fee: number }> {
   const lower = token.toLowerCase();
-  if (!isMonadTestnet()) {
+  const useTestnet = network ? network === "testnet" : isMonadTestnet();
+  if (!useTestnet) {
     if (RELAY_STABLE_TOKENS.size === 0) {
       throw new Error(
         "RELAY_STABLE_TOKENS is required on mainnet for ERC20 relay pricing"
@@ -208,13 +219,14 @@ async function erc20ToUsdc(
 async function tokenAmountToUsdc(
   token: Address,
   amount: bigint,
-  client = getMonadClient()
+  client = getMonadClient(),
+  network?: MonadNetwork
 ): Promise<{ usdValue: number; rate: number; fee: number }> {
   if (token.toLowerCase() === zeroAddress) {
-    const mon = await monToUsdc(amount);
+    const mon = await monToUsdc(amount, network);
     return { ...mon, usdValue: normalizeUsd(mon.usdValue) };
   }
-  return erc20ToUsdc(token, amount, client);
+  return erc20ToUsdc(token, amount, client, network);
 }
 
 // ============================================
@@ -274,6 +286,12 @@ interface DepositRecord {
   hlWalletAddress?: string;
   hlFunded?: boolean;
   hlFundedAmount?: number;
+  bridgeProvider?: "hyperunit" | "debridge" | "none";
+  bridgeStatus?: "submitted" | "pending" | "failed";
+  bridgeDestination?: Address;
+  bridgeTxHash?: string;
+  bridgeOrderId?: string;
+  bridgeNote?: string;
   lockTier?: number;
   boostBps?: number;
   rebateBps?: number;
@@ -291,6 +309,12 @@ interface WithdrawalRecord {
   monAmount: string;
   timestamp: number;
   relayed: boolean;
+  bridgeProvider?: "hyperunit" | "debridge" | "none";
+  bridgeStatus?: "submitted" | "pending" | "failed";
+  bridgeDestination?: Address;
+  bridgeTxHash?: string;
+  bridgeOrderId?: string;
+  bridgeNote?: string;
 }
 
 type VaultTxRecord =
@@ -497,7 +521,12 @@ export async function processVaultTx(
           const shares = BigInt("0x" + data.slice(128, 192));
           const agentIdHex = bytes32ToAgentId(agentIdBytes);
 
-          const conversion = await tokenAmountToUsdc(tokenAddress, amount, client);
+          const conversion = await tokenAmountToUsdc(
+            tokenAddress,
+            amount,
+            client,
+            activeNetwork ?? undefined
+          );
           const usdValue = conversion.usdValue;
           const amountLabel =
             tokenAddress.toLowerCase() === zeroAddress
@@ -565,21 +594,64 @@ export async function processVaultTx(
             record.hlFunded = false;
           } else if (usdValue > 0) {
             try {
-              console.log(
-                `[DepositRelay] Provisioning HL wallet for agent ${agentIdHex} with $${usdValue}`
-              );
-              const hlResult = await provisionAgentWallet(agentIdHex, usdValue);
-              record.hlWalletAddress = hlResult.address;
-              record.hlFunded = hlResult.funded;
-              record.hlFundedAmount = hlResult.fundedAmount;
-              record.relayed = !!hlResult.funded;
-              console.log(
-                `[DepositRelay] HL wallet ${hlResult.address} funded=${hlResult.funded} amount=$${hlResult.fundedAmount}`
-              );
+              const isMainnet = (activeNetwork ?? (isMonadTestnet() ? "testnet" : "mainnet")) === "mainnet";
 
-              if (agent.hlAddress !== hlResult.address) {
-                await updateAgent(agentIdHex, { hlAddress: hlResult.address });
-                console.log(`[DepositRelay] Updated agent hlAddress to ${hlResult.address}`);
+              if (isMainnet && isMainnetBridgeEnabled()) {
+                console.log(
+                  `[DepositRelay] Mainnet bridge funding for agent ${agentIdHex} ($${usdValue.toFixed(2)})`
+                );
+                const walletResult = await provisionAgentWallet(agentIdHex, 0);
+                record.hlWalletAddress = walletResult.address;
+
+                if (agent.hlAddress !== walletResult.address) {
+                  await updateAgent(agentIdHex, { hlAddress: walletResult.address });
+                  console.log(`[DepositRelay] Updated agent hlAddress to ${walletResult.address}`);
+                }
+
+                const bridge = await bridgeDepositToHyperliquidAgent({
+                  hlAddress: walletResult.address,
+                  sourceToken: tokenAddress,
+                  sourceAmountRaw: amount,
+                  sourceAmountRawLabel: amount.toString(),
+                });
+
+                record.bridgeProvider = bridge.provider;
+                record.bridgeStatus = bridge.status;
+                record.bridgeDestination = bridge.destinationAddress;
+                record.bridgeTxHash = bridge.relayTxHash;
+                record.bridgeOrderId = bridge.bridgeOrderId;
+                record.bridgeNote = bridge.note;
+
+                record.hlFunded = bridge.status === "submitted";
+                record.hlFundedAmount = bridge.status === "submitted" ? usdValue : 0;
+                record.relayed = bridge.status === "submitted";
+
+                if (bridge.status !== "submitted") {
+                  shouldRetryFunding = true;
+                }
+
+                console.log(
+                  `[DepositRelay] Bridge provider=${bridge.provider} status=${bridge.status}` +
+                    (bridge.relayTxHash ? ` tx=${bridge.relayTxHash}` : "") +
+                    (bridge.note ? ` note=${bridge.note}` : "")
+                );
+              } else {
+                console.log(
+                  `[DepositRelay] Provisioning HL wallet for agent ${agentIdHex} with $${usdValue}`
+                );
+                const hlResult = await provisionAgentWallet(agentIdHex, usdValue);
+                record.hlWalletAddress = hlResult.address;
+                record.hlFunded = hlResult.funded;
+                record.hlFundedAmount = hlResult.fundedAmount;
+                record.relayed = !!hlResult.funded;
+                console.log(
+                  `[DepositRelay] HL wallet ${hlResult.address} funded=${hlResult.funded} amount=$${hlResult.fundedAmount}`
+                );
+
+                if (agent.hlAddress !== hlResult.address) {
+                  await updateAgent(agentIdHex, { hlAddress: hlResult.address });
+                  console.log(`[DepositRelay] Updated agent hlAddress to ${hlResult.address}`);
+                }
               }
             } catch (hlErr) {
               const hlMsg = hlErr instanceof Error ? hlErr.message : String(hlErr);
@@ -636,12 +708,14 @@ export async function processVaultTx(
             shares: shares.toString(),
             monAmount: monAmount.toString(),
             timestamp: Date.now(),
-            relayed: true,
+            relayed: false,
           };
 
           if (alreadyProcessed) {
             return { eventType: "withdrawal", withdrawal };
           }
+
+          let shouldRetryWithdrawalRelay = false;
 
           const agent = await getAgent(agentIdHex);
           if (agent) {
@@ -670,7 +744,63 @@ export async function processVaultTx(
             });
           }
 
-          await markVaultTxProcessed(txHash);
+          const isMainnet = (activeNetwork ?? (isMonadTestnet() ? "testnet" : "mainnet")) === "mainnet";
+          if (isMainnet && isMainnetBridgeEnabled() && monAmount > BigInt(0)) {
+            try {
+              const conversion = await tokenAmountToUsdc(
+                zeroAddress,
+                monAmount,
+                client,
+                activeNetwork ?? undefined
+              );
+
+              if (conversion.usdValue > 0) {
+                const bridge = await bridgeWithdrawalToMonadUser({
+                  agentId: agentIdHex,
+                  userAddress,
+                  usdAmount: conversion.usdValue,
+                });
+
+                withdrawal.bridgeProvider = bridge.provider;
+                withdrawal.bridgeStatus = bridge.status;
+                withdrawal.bridgeDestination = bridge.destinationAddress;
+                withdrawal.bridgeTxHash = bridge.relayTxHash;
+                withdrawal.bridgeOrderId = bridge.bridgeOrderId;
+                withdrawal.bridgeNote = bridge.note;
+                withdrawal.relayed = bridge.status === "submitted";
+
+                if (bridge.status !== "submitted") {
+                  shouldRetryWithdrawalRelay = true;
+                }
+
+                console.log(
+                  `[DepositRelay] Withdrawal bridge provider=${bridge.provider} status=${bridge.status}` +
+                    (bridge.relayTxHash ? ` tx=${bridge.relayTxHash}` : "") +
+                    (bridge.note ? ` note=${bridge.note}` : "")
+                );
+              } else {
+                withdrawal.relayed = true;
+              }
+            } catch (withdrawBridgeErr) {
+              const msg =
+                withdrawBridgeErr instanceof Error
+                  ? withdrawBridgeErr.message
+                  : String(withdrawBridgeErr);
+              shouldRetryWithdrawalRelay = true;
+              withdrawal.bridgeProvider = "none";
+              withdrawal.bridgeStatus = "failed";
+              withdrawal.bridgeNote = msg.slice(0, 180);
+              withdrawal.relayed = false;
+              console.error(`[DepositRelay] Withdrawal bridge failed: ${msg.slice(0, 180)}`);
+            }
+          } else {
+            // Testnet and non-bridge paths do not need an outbound HL transfer.
+            withdrawal.relayed = true;
+          }
+
+          if (!shouldRetryWithdrawalRelay) {
+            await markVaultTxProcessed(txHash);
+          }
           return { eventType: "withdrawal", withdrawal };
         }
       } catch (eventError) {
