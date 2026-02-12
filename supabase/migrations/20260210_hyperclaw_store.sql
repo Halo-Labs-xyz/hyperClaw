@@ -25,7 +25,8 @@ create table if not exists public.hc_agents (
   win_rate double precision not null default 0,
   vault_tvl_usd double precision not null default 0,
   depositor_count integer not null default 0,
-  pending_approval jsonb
+  pending_approval jsonb,
+  aip_attestation jsonb
 );
 
 create index if not exists hc_agents_status_idx on public.hc_agents(status);

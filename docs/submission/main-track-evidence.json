@@ -1,0 +1,62 @@
+{
+  "submissionDate": "2026-02-12",
+  "track": "main-agent-plus-token",
+  "autonomousAgent": {
+    "productionMode": "full_auto",
+    "reasoningVisible": true,
+    "learningOrMemoryEnabled": true,
+    "demoClipReferences": [
+      {
+        "label": "TODO: replace with real clip label",
+        "timestampRange": "00:00-00:00"
+      }
+    ]
+  },
+  "monadIntegration": {
+    "network": "mainnet",
+    "chainId": 143,
+    "contracts": {
+      "vault": "0x11C095FD374CCf908Bee6F9eb7CA266d94132Dbf",
+      "hclawLock": "0xcBA4ac3a4A343944Ce4c1856AF2329cfb11B7fa3",
+      "hclawPolicy": "0x2D63f4BBC5ec39EAca0F8b8bF88bbD1813c12DBF",
+      "hclawRewards": "0x7375217B67ED81A13C295Bfa96b1278736986ea5",
+      "agenticLpVault": "0xcCAABa6A2903cb7fC609Ff4ff20c8D996177f386",
+      "treasuryRouter": "0x2125F78Ca894C55f97D991bC5e17d3aFd290D83d"
+    },
+    "transactions": [
+      {
+        "label": "HCLAW token mainnet tx (MonadScan)",
+        "hash": "0x8799a4708343a764ce812e1220c6c8d470bfb2f7981c39a7585f9664cde0c92b"
+      },
+      {
+        "label": "HCLAW token mainnet tx (MonadScan)",
+        "hash": "0x920ed8cf57d0292ae547582271947499a9570b3c37b30b2a8794ea13572871bd"
+      }
+    ],
+    "integrationPurpose": "On-chain vault deposits, cap policy, lock/rebate mechanics, and treasury flow accounting on Monad."
+  },
+  "token": {
+    "nadFunTokenUrl": "https://nad.fun/tokens/0x640aE5523bAb907552829686eD031E06cE667777",
+    "launch": {
+      "launchedDuringHackathon": true,
+      "launchDate": "2026-02-12"
+    },
+    "tradability": {
+      "isActive": true,
+      "isTradable": true,
+      "activeThroughDate": "2026-02-18"
+    },
+    "compliance": {
+      "nadFunTermsAccepted": true,
+      "policyViolations": false
+    }
+  },
+  "demoVideo": {
+    "url": "https://www.youtube.com/watch?v=<video-id>",
+    "durationSeconds": 115,
+    "showsLiveOperation": true,
+    "showsAutonomousDecisions": true,
+    "showsMonadInteractions": true,
+    "showsTokenIntegration": true
+  }
+}

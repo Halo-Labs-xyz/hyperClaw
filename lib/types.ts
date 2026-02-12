@@ -99,8 +99,25 @@ export interface Agent {
   depositorCount: number;
   // Pending approvals (for semi-autonomous mode)
   pendingApproval?: PendingTradeApproval;
-  // User API key for unlimited AI decisions (encrypted)
+  // Optional user API key override for this agent (encrypted)
   aiApiKey?: { provider: "anthropic" | "openai"; encryptedKey: string };
+  // Monad on-chain metadata attestation for AIP/external verification.
+  aipAttestation?: AgentOnchainAttestation;
+}
+
+export interface AgentOnchainAttestation {
+  version: "hyperclaw-agent-attestation-v1";
+  status: "confirmed";
+  method: "monad_tx_calldata";
+  txHash: `0x${string}`;
+  blockNumber: number;
+  chainId: number;
+  network: "mainnet" | "testnet";
+  attestedAt: number;
+  metadataHash: `0x${string}`;
+  metadataUri?: string;
+  attestor: Address;
+  explorerUrl?: string;
 }
 
 export interface PendingTradeApproval {

@@ -16,6 +16,7 @@ import type { Agent } from "./types";
 import { getAgent, getAllAgents } from "./store";
 import { getTradeDecision } from "./ai";
 import { getEnrichedMarketData, getAccountState, getHistoricalPrices } from "./hyperliquid";
+import { ensureAgentOnchainAttestation } from "./agent-attestation";
 
 // ============================================
 // Types - AIP SDK Interface
@@ -230,6 +231,10 @@ export function buildAgentConfig(
       riskLevel: agent.riskLevel,
       autonomy: agent.autonomy.mode,
       status: agent.status,
+      metadataHash: agent.aipAttestation?.metadataHash,
+      attestationTxHash: agent.aipAttestation?.txHash,
+      attestationChainId: agent.aipAttestation?.chainId,
+      attestationExplorerUrl: agent.aipAttestation?.explorerUrl,
     },
   };
 }
@@ -466,7 +471,7 @@ export async function registerAIPAgent(
   mode: DeploymentMode,
   publicEndpoint?: string
 ): Promise<{ aipAgentId: string; config: AgentConfig }> {
-  const agent = await getAgent(hyperClawAgentId);
+  let agent = await getAgent(hyperClawAgentId);
   if (!agent) {
     throw new Error(`HyperClaw agent ${hyperClawAgentId} not found`);
   }
@@ -474,6 +479,11 @@ export async function registerAIPAgent(
   if (mode === "DIRECT" && !publicEndpoint) {
     throw new Error("DIRECT mode requires publicEndpoint parameter");
   }
+
+  const attestationResult = await ensureAgentOnchainAttestation(hyperClawAgentId, {
+    reason: "aip_register",
+  });
+  agent = attestationResult.agent;
 
   const config = buildAgentConfig(agent, mode, publicEndpoint);
   const handler = createAgentHandler(hyperClawAgentId);
@@ -511,10 +521,6 @@ export async function invokeAIPAgent(
   if (!registered) {
     throw new Error(`AIP agent ${aipAgentId} not registered`);
   }
-
-  // In production, X402 payment verification would happen here via AIP Gateway
-  // For now, we'll simulate verification
-  context.payment_verified = true;
 
   return await registered.handler(context);
 }

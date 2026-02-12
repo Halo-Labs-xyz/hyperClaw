@@ -18,7 +18,7 @@ import { verifyApiKey, unauthorizedResponse } from "@/lib/auth";
  *
  * Body (optional):
  *   { action: "tick" }      - Execute a single tick (default)
- *   { action: "start", intervalMs?: number }  - Start autonomous runner
+ *   { action: "start", intervalMs?: number }  - Start autonomous runner (interval clamped to 30-60 minutes)
  *   { action: "stop" }      - Stop autonomous runner
  *   { action: "status" }    - Get runner status
  */

@@ -1233,7 +1233,8 @@ export async function getTradeDecision(params: {
   agentName?: string;
   agentStrategy?: string; // The agent's custom strategy description
   agentId?: string; // For Supermemory per-agent context
-  agentApiKeys?: AgentApiKeys; // User's API keys for unlimited decisions
+  autonomousEvaluation?: string; // Rolling strategy evaluation from recent trade history
+  agentApiKeys?: AgentApiKeys; // Optional per-agent API keys
 }): Promise<TradeDecision> {
   // Evaluate indicator if configured
   let indicatorSection = "";
@@ -1299,6 +1300,16 @@ Parse the strategy for:
 `;
   }
 
+  let autonomousEvaluationSection = "";
+  if (params.autonomousEvaluation && params.autonomousEvaluation.trim()) {
+    autonomousEvaluationSection = `
+=== AUTONOMOUS STRATEGY EVALUATION ===
+${params.autonomousEvaluation}
+
+Use this recent evaluation to adapt position sizing, confidence thresholds, and market selection.
+`;
+  }
+
   const userPrompt = `CURRENT MARKET DATA:
 ${params.markets
   .filter((m) => params.allowedMarkets.includes(m.coin))
@@ -1327,6 +1338,7 @@ ACCOUNT:
 - Allowed markets: ${params.allowedMarkets.join(", ")}
 - Aggressiveness: ${params.aggressiveness ?? 50}% (higher = more willing to take trades even with weaker signals)
 ${strategySection}
+${autonomousEvaluationSection}
 ${(params.aggressiveness ?? 50) >= 80 ? 'NOTE: High aggressiveness - be willing to take trades with moderate signals. Do not require strong momentum.' : ''}
 ${memorySection}
 ${indicatorSection}

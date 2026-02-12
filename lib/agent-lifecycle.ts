@@ -28,11 +28,16 @@ import type { Agent } from "./types";
 // Configuration
 // ============================================
 
-const DEFAULT_TICK_INTERVAL = parseInt(process.env.AGENT_TICK_INTERVAL || "7200000"); // 2 hours (testing holistic decisions, saves API/memory costs)
 const AIP_MODE: DeploymentMode = (process.env.AIP_MODE as DeploymentMode) || "POLLING";
-const AIP_ENDPOINT = process.env.AGENT_PUBLIC_URL || process.env.VERCEL_URL 
-  ? `https://${process.env.VERCEL_URL}/api/unibase`
-  : undefined;
+const AIP_ENDPOINT =
+  process.env.AGENT_PUBLIC_URL?.trim() ||
+  (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}/api/unibase` : undefined);
+const AIP_REGISTRATION_REQUIRED = (() => {
+  const raw = process.env.AIP_REGISTRATION_REQUIRED?.trim().toLowerCase();
+  if (raw === "false" || raw === "0" || raw === "no") return false;
+  if (raw === "true" || raw === "1" || raw === "yes") return true;
+  return process.env.NODE_ENV === "production";
+})();
 
 // ============================================
 // Lifecycle State
@@ -100,11 +105,10 @@ export async function activateAgent(
 
   // 1. Start the autonomous trading runner
   try {
-    const tickInterval = options?.tickIntervalMs ?? DEFAULT_TICK_INTERVAL;
-    await startAgent(agentId, tickInterval);
+    const runnerState = await startAgent(agentId, options?.tickIntervalMs);
     state.runnerActive = true;
     state.startedAt = Date.now();
-    console.log(`[Lifecycle] Runner started for ${agent.name} (interval: ${tickInterval}ms)`);
+    console.log(`[Lifecycle] Runner started for ${agent.name} (interval: ${runnerState.intervalMs}ms)`);
   } catch (error) {
     console.error(`[Lifecycle] Failed to start runner for ${agentId}:`, error);
     state.healthStatus = "unhealthy";
@@ -130,7 +134,20 @@ export async function activateAgent(
       }
     } catch (error) {
       console.error(`[Lifecycle] Failed to register ${agentId} with AIP:`, error);
-      // Don't fail activation if AIP registration fails
+      if (AIP_REGISTRATION_REQUIRED) {
+        try {
+          if (state.runnerActive) {
+            await stopAgent(agentId);
+            state.runnerActive = false;
+          }
+        } catch (stopError) {
+          console.error(`[Lifecycle] Failed to stop runner after AIP registration error for ${agentId}:`, stopError);
+        }
+        state.healthStatus = "unhealthy";
+        state.lastHealthCheck = Date.now();
+        lifecycleStates.set(agentId, state);
+        throw error instanceof Error ? error : new Error(`AIP registration failed for ${agentId}`);
+      }
     }
   }
 
@@ -289,9 +306,9 @@ export async function checkAllHealth(): Promise<Map<string, AgentLifecycleState>
       }
     }
 
-    // Check for stale runner (no tick in 5 minutes)
+    // Check for stale runner (no tick for 2x configured interval, minimum 5 minutes)
     if (runner?.isRunning && runner.lastTickAt) {
-      const staleThreshold = 5 * 60 * 1000; // 5 minutes
+      const staleThreshold = Math.max(5 * 60 * 1000, (runner.intervalMs || 0) * 2);
       if (Date.now() - runner.lastTickAt > staleThreshold) {
         state.healthStatus = "degraded";
       }

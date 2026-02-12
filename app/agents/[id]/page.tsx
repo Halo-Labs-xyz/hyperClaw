@@ -206,7 +206,7 @@ export default function AgentDetailPage() {
   const [editMaxTradesPerDay, setEditMaxTradesPerDay] = useState(10);
   const [editStatus, setEditStatus] = useState<"active" | "paused" | "stopped">("active");
 
-  // AI API Key (for unlimited decisions beyond free tier daily limit)
+  // Optional per-agent AI API key override
   const [editAiApiKeyProvider, setEditAiApiKeyProvider] = useState<"anthropic" | "openai">("anthropic");
   const [editAiApiKeyValue, setEditAiApiKeyValue] = useState("");
   const [editAiApiKeyRemove, setEditAiApiKeyRemove] = useState(false);
@@ -2189,7 +2189,7 @@ export default function AgentDetailPage() {
               <div className="card rounded-2xl p-6">
                 <h3 className="font-semibold text-sm uppercase tracking-wider text-muted mb-2">AI API Key</h3>
                 <p className="text-xs text-dim mb-4">
-                  New agents get limited free Agentic decisions. Add your Anthropic or OpenAI API key or lock up more than 100M $HCLAW for more trading outcomes.
+                  Platform model access is uncapped. Add an Anthropic or OpenAI key to force this agent onto your own provider credentials.
                 </p>
                 <div className="space-y-4">
                   {agent?.aiApiKey && !editAiApiKeyRemove && (

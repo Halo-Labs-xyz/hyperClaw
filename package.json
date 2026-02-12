@@ -19,6 +19,8 @@
     "deploy:lit-actions": "node scripts/deploy-lit-actions.mjs",
     "test:solidity": "forge test --offline",
     "preflight:mainnet": "node scripts/preflight-mainnet.mjs",
+    "sync:main-track": "node scripts/sync-main-track-evidence.mjs",
+    "check:main-track": "node scripts/validate-main-track-evidence.mjs",
     "deploy:hclaw-stack": "node scripts/deploy-hclaw-stack.mjs",
     "hclaw:epoch:close": "node scripts/close-hclaw-epoch.mjs",
     "hclaw:report": "node scripts/hclaw-weekly-report.mjs",

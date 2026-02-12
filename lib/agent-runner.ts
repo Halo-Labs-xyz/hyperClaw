@@ -9,7 +9,13 @@
  * runs server-side with full orchestration.
  */
 
-import { getAgent, updateAgent, appendTradeLog, clearPendingApproval } from "./store";
+import {
+  getAgent,
+  updateAgent,
+  appendTradeLog,
+  clearPendingApproval,
+  getTradeLogsForAgent,
+} from "./store";
 import { getTradeDecision } from "./ai";
 import {
   getEnrichedMarketData,
@@ -65,30 +71,35 @@ const AGENT_GLOBAL_TICK_CONCURRENCY = Math.max(
   1,
   parseInt(process.env.AGENT_GLOBAL_TICK_CONCURRENCY || "1", 10)
 );
-const AGENT_AI_HOT_HOURS_UTC_RAW = process.env.AGENT_AI_HOT_HOURS_UTC || "12-21";
-/** Default 2h: temporary throttle for testing holistic decisions, saves API/memory/Anthropic costs */
-const AGENT_TICK_INTERVAL_DEFAULT_MS = 2 * 60 * 60 * 1000; // 2 hours
-const AGENT_AI_HOT_HOURS_DECISION_MIN_INTERVAL_MS = Math.max(
-  15_000,
-  parseInt(
-    process.env.AGENT_AI_HOT_HOURS_DECISION_MIN_INTERVAL_MS ||
-      process.env.AGENT_TICK_INTERVAL ||
-      String(AGENT_TICK_INTERVAL_DEFAULT_MS),
-    10
-  )
+const AGENT_TICK_MIN_FLOOR_MS = 30 * 60 * 1000;
+const AGENT_TICK_MAX_CEIL_MS = 60 * 60 * 1000;
+const AGENT_TICK_MIN_INTERVAL_ENV = Number.parseInt(
+  process.env.AGENT_TICK_MIN_INTERVAL_MS || "",
+  10
 );
-const AGENT_AI_OFF_HOURS_DECISION_MIN_INTERVAL_MS = Math.max(
-  60_000,
-  parseInt(
-    process.env.AGENT_AI_OFF_HOURS_DECISION_MIN_INTERVAL_MS ||
-      process.env.AGENT_TICK_INTERVAL ||
-      String(AGENT_TICK_INTERVAL_DEFAULT_MS),
-    10
-  )
+const AGENT_TICK_MAX_INTERVAL_ENV = Number.parseInt(
+  process.env.AGENT_TICK_MAX_INTERVAL_MS || "",
+  10
 );
+export const AGENT_TICK_MIN_INTERVAL_MS = Number.isFinite(AGENT_TICK_MIN_INTERVAL_ENV)
+  ? Math.min(
+      AGENT_TICK_MAX_CEIL_MS,
+      Math.max(AGENT_TICK_MIN_FLOOR_MS, AGENT_TICK_MIN_INTERVAL_ENV)
+    )
+  : AGENT_TICK_MIN_FLOOR_MS;
+export const AGENT_TICK_MAX_INTERVAL_MS = Number.isFinite(AGENT_TICK_MAX_INTERVAL_ENV)
+  ? Math.max(
+      AGENT_TICK_MIN_INTERVAL_MS,
+      Math.min(AGENT_TICK_MAX_CEIL_MS, AGENT_TICK_MAX_INTERVAL_ENV)
+    )
+  : AGENT_TICK_MAX_CEIL_MS;
 const AGENT_AI_THROTTLE_LOG_INTERVAL_MS = Math.max(
   60_000,
   parseInt(process.env.AGENT_AI_THROTTLE_LOG_INTERVAL_MS || "900000", 10)
+);
+const AGENT_AUTONOMOUS_BACKTEST_LOOKBACK = Math.max(
+  10,
+  parseInt(process.env.AGENT_AUTONOMOUS_BACKTEST_LOOKBACK || "60", 10)
 );
 const AGENT_MIN_ORDER_NOTIONAL_USD = Math.max(
   1,
@@ -109,14 +120,37 @@ const TESTNET_MIN_ORDER_NOTIONAL_USD = (() => {
 /** When true, never skip trades: minConfidence=0, min notional=$0.01. Default true. */
 const AGENT_NEVER_SKIP_TRADES = process.env.AGENT_NEVER_SKIP_TRADES !== "false";
 
-/** Testing wallet: no AI cap, 30 min interval for our internal testing */
-const TESTING_WALLET = (process.env.AGENT_TESTING_WALLET_ADDRESS || "0xF3dCE9f6a8dC77d30847Ece744d68b652a730185").toLowerCase();
-const TESTING_WALLET_INTERVAL_MS = 30 * 60 * 1000; // 30 min
+function parsePositiveInt(raw: string | undefined): number | null {
+  if (!raw) return null;
+  const parsed = Number.parseInt(raw, 10);
+  if (!Number.isFinite(parsed) || parsed <= 0) return null;
+  return parsed;
+}
 
-function isTestingWallet(agent: { hlAddress?: string; telegram?: { ownerWalletAddress?: string } }): boolean {
-  const a = agent.hlAddress?.toLowerCase();
-  const b = agent.telegram?.ownerWalletAddress?.toLowerCase();
-  return (!!a && a === TESTING_WALLET) || (!!b && b === TESTING_WALLET);
+function clampTickIntervalMs(intervalMs: number): number {
+  return Math.max(
+    AGENT_TICK_MIN_INTERVAL_MS,
+    Math.min(AGENT_TICK_MAX_INTERVAL_MS, Math.round(intervalMs))
+  );
+}
+
+function getRandomTickIntervalMs(): number {
+  const span = AGENT_TICK_MAX_INTERVAL_MS - AGENT_TICK_MIN_INTERVAL_MS;
+  if (span <= 0) return AGENT_TICK_MIN_INTERVAL_MS;
+  return AGENT_TICK_MIN_INTERVAL_MS + Math.floor(Math.random() * (span + 1));
+}
+
+function resolveTickIntervalMs(intervalMs?: number): number {
+  if (typeof intervalMs === "number" && Number.isFinite(intervalMs) && intervalMs > 0) {
+    return clampTickIntervalMs(intervalMs);
+  }
+
+  const legacy = parsePositiveInt(process.env.AGENT_TICK_INTERVAL);
+  if (legacy !== null) {
+    return clampTickIntervalMs(legacy);
+  }
+
+  return getRandomTickIntervalMs();
 }
 
 function getAgentDeploymentNetwork(agent: {
@@ -154,47 +188,6 @@ function getConfiguredMinConfidence(agent: {
   return Math.max(0, Math.min(1, derived));
 }
 
-function parseUtcHourToken(token: string): number | null {
-  const n = Number.parseInt(token.trim(), 10);
-  if (!Number.isFinite(n) || n < 0 || n > 23) return null;
-  return n;
-}
-
-function parseUtcHotHours(raw: string): Set<number> {
-  const normalized = raw.trim().toLowerCase();
-  if (!normalized || normalized === "all" || normalized === "*") {
-    return new Set(Array.from({ length: 24 }, (_, i) => i));
-  }
-
-  const result = new Set<number>();
-  const tokens = normalized.split(",").map((x) => x.trim()).filter(Boolean);
-  for (const token of tokens) {
-    if (token.includes("-")) {
-      const [startRaw, endRaw] = token.split("-", 2);
-      const start = parseUtcHourToken(startRaw);
-      const end = parseUtcHourToken(endRaw);
-      if (start === null || end === null) continue;
-      if (start <= end) {
-        for (let h = start; h <= end; h++) result.add(h);
-      } else {
-        for (let h = start; h <= 23; h++) result.add(h);
-        for (let h = 0; h <= end; h++) result.add(h);
-      }
-      continue;
-    }
-
-    const hour = parseUtcHourToken(token);
-    if (hour !== null) result.add(hour);
-  }
-
-  if (result.size === 0) {
-    for (let h = 0; h < 24; h++) result.add(h);
-  }
-  return result;
-}
-
-const AGENT_AI_HOT_HOURS_UTC = parseUtcHotHours(AGENT_AI_HOT_HOURS_UTC_RAW);
-
 function getDecisionCadence(agentId: string): { lastDecisionAtMs: number; lastThrottleLogAtMs: number } {
   const existing = decisionCadence.get(agentId);
   if (existing) return existing;
@@ -203,14 +196,10 @@ function getDecisionCadence(agentId: string): { lastDecisionAtMs: number; lastTh
   return created;
 }
 
-function getUtcHour(nowMs: number): number {
-  return new Date(nowMs).getUTCHours();
-}
-
 function evaluateDecisionCadence(
   agentId: string,
   nowMs: number,
-  agent?: { hlAddress?: string; telegram?: { ownerWalletAddress?: string } }
+  intervalMs: number
 ): {
   shouldThrottle: boolean;
   reason: string;
@@ -218,15 +207,9 @@ function evaluateDecisionCadence(
   shouldPersistThrottleLog: boolean;
 } {
   const cadence = getDecisionCadence(agentId);
-  const hour = getUtcHour(nowMs);
-  const inHotHours = AGENT_AI_HOT_HOURS_UTC.has(hour);
-  const intervalMs = agent && isTestingWallet(agent)
-    ? TESTING_WALLET_INTERVAL_MS
-    : inHotHours
-      ? AGENT_AI_HOT_HOURS_DECISION_MIN_INTERVAL_MS
-      : AGENT_AI_OFF_HOURS_DECISION_MIN_INTERVAL_MS;
+  const boundedInterval = clampTickIntervalMs(intervalMs);
 
-  if (cadence.lastDecisionAtMs <= 0 || nowMs - cadence.lastDecisionAtMs >= intervalMs) {
+  if (cadence.lastDecisionAtMs <= 0 || nowMs - cadence.lastDecisionAtMs >= boundedInterval) {
     cadence.lastDecisionAtMs = nowMs;
     return {
       shouldThrottle: false,
@@ -236,17 +219,17 @@ function evaluateDecisionCadence(
     };
   }
 
-  const nextEligibleAtMs = cadence.lastDecisionAtMs + intervalMs;
+  const nextEligibleAtMs = cadence.lastDecisionAtMs + boundedInterval;
   const shouldPersistThrottleLog =
     nowMs - cadence.lastThrottleLogAtMs >= AGENT_AI_THROTTLE_LOG_INTERVAL_MS;
   if (shouldPersistThrottleLog) {
     cadence.lastThrottleLogAtMs = nowMs;
   }
 
-  const modeLabel = inHotHours ? "hot-hour pacing" : "off-hours throttle";
+  const intervalMinutes = Math.round(boundedInterval / 60000);
   return {
     shouldThrottle: true,
-    reason: `AI decision ${modeLabel} active (UTC hour ${hour}). Next AI evaluation at ${new Date(nextEligibleAtMs).toISOString()}.`,
+    reason: `Decision cadence active (${intervalMinutes}m minimum). Next AI evaluation at ${new Date(nextEligibleAtMs).toISOString()}.`,
     nextEligibleAtMs,
     shouldPersistThrottleLog,
   };
@@ -310,6 +293,78 @@ function getIndicatorMarkets(markets: string[]): string[] {
   return Array.from(new Set(markets.filter(Boolean))).slice(0, HL_MAX_INDICATOR_MARKETS);
 }
 
+function buildAutonomousStrategyEvaluation(
+  trades: TradeLog[],
+  markets: Array<{ coin: string; price: number }>
+): string {
+  const recentDirectionalTrades = trades
+    .filter(
+      (trade) =>
+        trade.executed &&
+        (trade.decision.action === "long" || trade.decision.action === "short")
+    )
+    .slice(-AGENT_AUTONOMOUS_BACKTEST_LOOKBACK);
+
+  if (recentDirectionalTrades.length === 0) {
+    return "No directional trade history yet.";
+  }
+
+  const priceByCoin = new Map(
+    markets.map((market) => [market.coin.toUpperCase(), market.price] as const)
+  );
+  const perAsset = new Map<string, { count: number; wins: number; sumEdgePct: number }>();
+
+  let evaluated = 0;
+  let wins = 0;
+  let sumEdgePct = 0;
+
+  for (const trade of recentDirectionalTrades) {
+    const asset = trade.decision.asset.toUpperCase();
+    const fillPrice = Number(trade.executionResult?.fillPrice || 0);
+    const currentPrice = Number(priceByCoin.get(asset) || 0);
+    if (!(fillPrice > 0) || !(currentPrice > 0)) continue;
+
+    const edgePct =
+      trade.decision.action === "long"
+        ? ((currentPrice - fillPrice) / fillPrice) * 100
+        : ((fillPrice - currentPrice) / fillPrice) * 100;
+
+    evaluated++;
+    sumEdgePct += edgePct;
+    if (edgePct > 0) wins++;
+
+    const assetStats = perAsset.get(asset) || { count: 0, wins: 0, sumEdgePct: 0 };
+    assetStats.count++;
+    assetStats.sumEdgePct += edgePct;
+    if (edgePct > 0) assetStats.wins++;
+    perAsset.set(asset, assetStats);
+  }
+
+  if (evaluated === 0) {
+    return `Directional history found (${recentDirectionalTrades.length} trades) but not enough price data for evaluation.`;
+  }
+
+  let bestAsset = "N/A";
+  let worstAsset = "N/A";
+  let bestAvg = -Infinity;
+  let worstAvg = Infinity;
+  for (const [asset, stats] of Array.from(perAsset.entries())) {
+    const avg = stats.sumEdgePct / Math.max(1, stats.count);
+    if (avg > bestAvg) {
+      bestAvg = avg;
+      bestAsset = `${asset} (${avg.toFixed(2)}%)`;
+    }
+    if (avg < worstAvg) {
+      worstAvg = avg;
+      worstAsset = `${asset} (${avg.toFixed(2)}%)`;
+    }
+  }
+
+  const winRatePct = (wins / evaluated) * 100;
+  const avgEdgePct = sumEdgePct / evaluated;
+  return `Recent strategy evaluation (${evaluated} directional trades): win rate ${winRatePct.toFixed(1)}%, avg edge ${avgEdgePct.toFixed(2)}%, best ${bestAsset}, weakest ${worstAsset}.`;
+}
+
 export function getRunnerState(agentId: string): AgentRunnerState | null {
   return runnerStates.get(agentId) || null;
 }
@@ -335,9 +390,7 @@ export async function startAgent(
   if (!agent) throw new Error(`Agent ${agentId} not found`);
   const skipAdaptiveBackoff = TESTNET_FORCE_CONTINUOUS_EXECUTION && isTestnetAgent(agent);
 
-  const tickInterval = isTestingWallet(agent)
-    ? TESTING_WALLET_INTERVAL_MS
-    : (intervalMs ?? parseInt(process.env.AGENT_TICK_INTERVAL || String(AGENT_TICK_INTERVAL_DEFAULT_MS)));
+  const tickInterval = resolveTickIntervalMs(intervalMs);
 
   const state: AgentRunnerState = {
     agentId,
@@ -351,17 +404,9 @@ export async function startAgent(
 
   runnerStates.set(agentId, state);
   consecutiveFailures.set(agentId, 0);
-  if (!decisionCadence.has(agentId)) {
-    decisionCadence.set(agentId, { lastDecisionAtMs: 0, lastThrottleLogAtMs: 0 });
-  }
+  decisionCadence.set(agentId, { lastDecisionAtMs: 0, lastThrottleLogAtMs: 0 });
 
-  // Stagger first tick by a random 0-5s to avoid all agents hitting API at once
-  const stagger = Math.random() * 5000;
-  setTimeout(() => {
-    executeTick(agentId).catch(() => {});
-  }, stagger);
-
-  // Set up interval with jitter to prevent thundering herd
+  // Agent execution cadence is bounded to 30-60 minutes.
   const interval = setInterval(() => {
     const failures = consecutiveFailures.get(agentId) || 0;
     // Adaptive backoff: if many consecutive failures, skip some ticks
@@ -449,14 +494,8 @@ async function executeTickInternal(agentId: string): Promise<TradeLog> {
   }
 
   const ex = agentExchange ?? undefined;
-  const cadence = testnetContinuousExecution || AGENT_NEVER_SKIP_TRADES
-    ? {
-        shouldThrottle: false,
-        reason: "",
-        nextEligibleAtMs: Date.now(),
-        shouldPersistThrottleLog: false,
-      }
-    : evaluateDecisionCadence(agentId, Date.now(), agent);
+  const cadenceIntervalMs = state?.intervalMs ?? AGENT_TICK_MIN_INTERVAL_MS;
+  const cadence = evaluateDecisionCadence(agentId, Date.now(), cadenceIntervalMs);
   if (cadence.shouldThrottle) {
     const holdLog: TradeLog = {
       id: randomBytes(8).toString("hex"),
@@ -594,7 +633,7 @@ async function executeTickInternal(agentId: string): Promise<TradeLog> {
       }
     }
 
-    // 4. Budget check (skip if agent has own API key)
+    // 4. Optional per-agent API key override
     const hasAgentOwnKey = Boolean(agent.aiApiKey?.encryptedKey && agent.aiApiKey?.provider);
     let agentApiKeys: { anthropic?: string; openai?: string } | undefined;
     if (hasAgentOwnKey) {
@@ -604,40 +643,20 @@ async function executeTickInternal(agentId: string): Promise<TradeLog> {
         if (agent.aiApiKey!.provider === "anthropic") agentApiKeys = { anthropic: key };
         else agentApiKeys = { openai: key };
       } catch (_e) {
-        console.warn(`[Agent ${agentId}] Failed to decrypt API key, using platform budget`);
+        console.warn(`[Agent ${agentId}] Failed to decrypt API key, using platform model credentials`);
       }
     }
 
-    if (!hasAgentOwnKey || !agentApiKeys) {
-      const { checkAgentBudget } = await import("./ai-budget");
-      const ownerWallet = agent.hlAddress ?? agent.telegram?.ownerWalletAddress;
-      const budget = await checkAgentBudget(agentId, { ownerWallet });
-      if (!budget.allowed) {
-        const holdLog: TradeLog = {
-          id: randomBytes(8).toString("hex"),
-          agentId,
-          timestamp: Date.now(),
-          decision: {
-            action: "hold",
-            asset: agent.markets[0] || "BTC",
-            size: 0,
-            leverage: 1,
-            confidence: 0,
-            reasoning: budget.reason ?? "AI budget exceeded.",
-          },
-          executed: false,
-        };
-        await appendTradeLog(holdLog);
-        if (state) {
-          state.lastTickAt = holdLog.timestamp;
-          state.nextTickAt = Date.now() + state.intervalMs;
-          state.tickCount++;
-        }
-        return holdLog;
-      }
+    // 5. Strategy self-evaluation from recent trade history (autonomous backtest loop)
+    let autonomousEvaluation = "No recent strategy evaluation available.";
+    try {
+      const allTrades = await getTradeLogsForAgent(agentId);
+      autonomousEvaluation = buildAutonomousStrategyEvaluation(allTrades, markets);
+    } catch (evaluationError) {
+      console.warn(`[Agent ${agentId}] Strategy evaluation failed:`, evaluationError);
     }
 
-    // 5. Ask AI for trade decision (with indicator, strategy, and Supermemory context)
+    // 6. Ask AI for trade decision (with indicator, strategy, Supermemory, and evaluation context)
     let decision = await getTradeDecision({
       markets,
       currentPositions: positions,
@@ -651,6 +670,7 @@ async function executeTickInternal(agentId: string): Promise<TradeLog> {
       agentName: agent.name,
       agentStrategy: agent.description,
       agentId,
+      autonomousEvaluation,
       agentApiKeys,
     });
 
@@ -696,16 +716,6 @@ async function executeTickInternal(agentId: string): Promise<TradeLog> {
         confidence: decision.confidence,
         reasoning: `Confidence ${decision.confidence.toFixed(2)} below min ${minConfidence.toFixed(2)}.`,
       };
-    }
-
-    // 6. Record AI cost when using platform key (not agent's own). Skip for testing wallet.
-    if (!hasAgentOwnKey && !isTestingWallet(agent)) {
-      try {
-        const { recordAgentDecisionCost } = await import("./ai-budget");
-        await recordAgentDecisionCost(agentId);
-      } catch (e) {
-        console.warn(`[Agent ${agentId}] Failed to record AI cost:`, e);
-      }
     }
 
     // 7. Execute full order pipeline
@@ -892,7 +902,7 @@ async function executeTickInternal(agentId: string): Promise<TradeLog> {
         const marketSummary = markets.filter((m) => agent.markets.includes(m.coin)).map((m) => `${m.coin}=$${m.price}`).join(", ") || "N/A";
         await addAgentMemory(
           agentId,
-          `Market: ${marketSummary}. Decision: ${decision.action} ${decision.asset} @ ${(decision.confidence ?? 0) * 100}% confidence. Reasoning: ${decision.reasoning ?? ""}. Outcome: ${outcome}`,
+          `Market: ${marketSummary}. Strategy eval: ${autonomousEvaluation}. Decision: ${decision.action} ${decision.asset} @ ${(decision.confidence ?? 0) * 100}% confidence. Reasoning: ${decision.reasoning ?? ""}. Outcome: ${outcome}`,
           { type: "trade_decision", executed: String(executed), timestamp: String(Date.now()) }
         );
       }
@@ -936,7 +946,7 @@ async function executeTickInternal(agentId: string): Promise<TradeLog> {
       });
       if (state.errors.length > 50) state.errors = state.errors.slice(-50);
       state.lastTickAt = Date.now();
-      state.nextTickAt = Date.now() + (state?.intervalMs ?? 60000);
+      state.nextTickAt = Date.now() + (state?.intervalMs ?? AGENT_TICK_MIN_INTERVAL_MS);
     }
 
     throw error;

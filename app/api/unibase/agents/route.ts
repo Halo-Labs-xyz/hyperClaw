@@ -29,6 +29,12 @@ export async function GET() {
         endpoint_url: a.endpoint_url,
         registered_at: a.registered_at,
         metadata: a.config.metadata,
+        onchain_attestation: {
+          tx_hash: a.config.metadata?.attestationTxHash,
+          chain_id: a.config.metadata?.attestationChainId,
+          metadata_hash: a.config.metadata?.metadataHash,
+          explorer_url: a.config.metadata?.attestationExplorerUrl,
+        },
       })),
     });
   } catch (error) {

@@ -1,17 +1,15 @@
 /**
- * AI decision budget: $1/day free per agent.
- * Agents with their own API key get unlimited decisions.
- * Testing wallet bypasses cap (no limit).
+ * AI decision spend ledger (uncapped).
+ *
+ * The enforcement cap has been removed. These helpers remain as an optional
+ * accounting layer for cost visibility if callers choose to use them.
  */
 
 import { readJSON, writeJSON } from "./store-backend";
 
 const BUDGET_FILE = "ai_budget.json";
-const DAILY_BUDGET_USD = parseFloat(process.env.AGENT_AI_DAILY_BUDGET_USD || "1");
+const DAILY_BUDGET_USD = Number.POSITIVE_INFINITY;
 const COST_PER_DECISION_USD = parseFloat(process.env.AGENT_AI_COST_PER_DECISION_USD || "0.02");
-
-/** Testing wallet: no AI budget cap, used for our internal testing */
-const TESTING_WALLET = (process.env.AGENT_TESTING_WALLET_ADDRESS || "0xF3dCE9f6a8dC77d30847Ece744d68b652a730185").toLowerCase();
 
 type BudgetEntry = { date: string; spendUsd: number };
 
@@ -28,37 +26,15 @@ function today(): string {
 }
 
 /**
- * Check if agent can make a decision (under daily budget).
+ * Check if agent can make a decision.
+ * Cap enforcement is disabled, so this always allows execution.
  * Returns { allowed, remainingUsd, reason }.
- * Testing wallet bypasses cap (allowed: true, no limit).
  */
 export async function checkAgentBudget(
-  agentId: string,
-  options?: { ownerWallet?: string }
+  _agentId: string,
+  _options?: { ownerWallet?: string }
 ): Promise<{ allowed: boolean; remainingUsd: number; reason?: string }> {
-  const wallet = options?.ownerWallet?.toLowerCase();
-  if (wallet && wallet === TESTING_WALLET) {
-    return { allowed: true, remainingUsd: Number.POSITIVE_INFINITY };
-  }
-
-  const budget = await readBudget();
-  const entry = budget[agentId];
-  const todayStr = today();
-
-  if (!entry || entry.date !== todayStr) {
-    return { allowed: true, remainingUsd: DAILY_BUDGET_USD };
-  }
-
-  const remaining = DAILY_BUDGET_USD - entry.spendUsd;
-  if (remaining < COST_PER_DECISION_USD) {
-    return {
-      allowed: false,
-      remainingUsd: Math.max(0, remaining),
-      reason: `AI budget exceeded ($1/day free). Add your Anthropic or OpenAI API key in Settings for unlimited decisions.`,
-    };
-  }
-
-  return { allowed: true, remainingUsd: remaining };
+  return { allowed: true, remainingUsd: DAILY_BUDGET_USD };
 }
 
 /**

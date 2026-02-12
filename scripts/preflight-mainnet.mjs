@@ -166,6 +166,23 @@ if (!process.env.HYPERLIQUID_PRIVATE_KEY) {
   warnings.push("HYPERLIQUID_PRIVATE_KEY is not set (required for operator funding)");
 }
 
+const attestationEnabled = parseBoolEnv("MONAD_AGENT_ATTESTATION_ENABLED", true);
+const attestationRequired = parseBoolEnv(
+  "MONAD_AGENT_ATTESTATION_REQUIRED",
+  process.env.NODE_ENV === "production"
+);
+if (attestationEnabled && attestationRequired) {
+  const attestorKey =
+    process.env.AIP_ATTESTATION_PRIVATE_KEY ||
+    process.env.RELAY_MONAD_PRIVATE_KEY ||
+    process.env.MONAD_PRIVATE_KEY;
+  if (!attestorKey || !isPrivateKey(attestorKey.trim())) {
+    errors.push(
+      "Monad agent attestation is enabled+required but no valid AIP_ATTESTATION_PRIVATE_KEY/RELAY_MONAD_PRIVATE_KEY/MONAD_PRIVATE_KEY is configured"
+    );
+  }
+}
+
 console.log("HyperClaw mainnet preflight");
 console.log(`- Monad network: ${monadTestnet ? "testnet" : "mainnet"}`);
 console.log(`- Hyperliquid network: ${hlTestnet ? "testnet" : "mainnet"}`);

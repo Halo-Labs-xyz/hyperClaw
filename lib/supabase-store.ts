@@ -40,6 +40,7 @@ interface AgentRow {
   pending_approval: unknown | null;
   ai_api_key_provider?: string | null;
   ai_api_key_encrypted?: string | null;
+  aip_attestation?: unknown | null;
 }
 
 interface TradeRow {
@@ -269,6 +270,7 @@ function toAgent(row: AgentRow): Agent {
             encryptedKey: row.ai_api_key_encrypted,
           }
         : undefined,
+    aipAttestation: (row.aip_attestation ?? undefined) as Agent["aipAttestation"],
   };
 }
 
@@ -298,6 +300,7 @@ function toAgentRow(agent: Agent): AgentRow {
     pending_approval: agent.pendingApproval ?? null,
     ai_api_key_provider: agent.aiApiKey?.provider ?? null,
     ai_api_key_encrypted: agent.aiApiKey?.encryptedKey ?? null,
+    aip_attestation: agent.aipAttestation ?? null,
   };
 }
 
@@ -416,6 +419,9 @@ export async function sbUpdateAgent(id: string, updates: Partial<Agent>): Promis
   if (updates.aiApiKey !== undefined) {
     patch.ai_api_key_provider = updates.aiApiKey?.provider ?? null;
     patch.ai_api_key_encrypted = updates.aiApiKey?.encryptedKey ?? null;
+  }
+  if (Object.prototype.hasOwnProperty.call(updates, "aipAttestation")) {
+    patch.aip_attestation = updates.aipAttestation ?? null;
   }
 
   const rows = await supabaseRequest<AgentRow[]>({

@@ -113,7 +113,10 @@ const TOOLS: McpTool[] = [
           enum: ["activate", "deactivate", "init", "health", "heal", "stop-all"],
         },
         agent_id: { type: "string", description: "Required for activate/deactivate" },
-        tick_interval_ms: { type: "number", description: "Optional; tick interval in ms for activate" },
+        tick_interval_ms: {
+          type: "number",
+          description: "Optional; runner tick interval in ms (clamped to 30-60 minutes).",
+        },
       },
       required: ["action"],
     },

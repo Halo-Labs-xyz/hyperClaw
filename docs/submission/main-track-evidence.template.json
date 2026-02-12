@@ -1,0 +1,62 @@
+{
+  "submissionDate": "2026-02-12",
+  "track": "main-agent-plus-token",
+  "autonomousAgent": {
+    "productionMode": "full_auto",
+    "reasoningVisible": true,
+    "learningOrMemoryEnabled": true,
+    "demoClipReferences": [
+      {
+        "label": "Autonomous decision and execution",
+        "timestampRange": "00:20-01:10"
+      }
+    ]
+  },
+  "monadIntegration": {
+    "network": "mainnet",
+    "chainId": 143,
+    "contracts": {
+      "vault": "0x0000000000000000000000000000000000000000",
+      "hclawLock": "0x0000000000000000000000000000000000000000",
+      "hclawPolicy": "0x0000000000000000000000000000000000000000",
+      "hclawRewards": "0x0000000000000000000000000000000000000000",
+      "agenticLpVault": "0x0000000000000000000000000000000000000000",
+      "treasuryRouter": "0x0000000000000000000000000000000000000000"
+    },
+    "transactions": [
+      {
+        "label": "Vault deployment tx",
+        "hash": "0x0000000000000000000000000000000000000000000000000000000000000000"
+      },
+      {
+        "label": "Live deposit tx",
+        "hash": "0x0000000000000000000000000000000000000000000000000000000000000000"
+      }
+    ],
+    "integrationPurpose": "On-chain vault deposits, cap policy, lock/rebate mechanics, and treasury flow accounting on Monad."
+  },
+  "token": {
+    "nadFunTokenUrl": "https://nad.fun/token/<token-id>",
+    "launch": {
+      "launchedDuringHackathon": true,
+      "launchDate": "2026-02-12"
+    },
+    "tradability": {
+      "isActive": true,
+      "isTradable": true,
+      "activeThroughDate": "2026-02-18"
+    },
+    "compliance": {
+      "nadFunTermsAccepted": true,
+      "policyViolations": false
+    }
+  },
+  "demoVideo": {
+    "url": "https://www.youtube.com/watch?v=<video-id>",
+    "durationSeconds": 115,
+    "showsLiveOperation": true,
+    "showsAutonomousDecisions": true,
+    "showsMonadInteractions": true,
+    "showsTokenIntegration": true
+  }
+}

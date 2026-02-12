@@ -196,7 +196,24 @@ export async function PATCH(
         await handleStatusChange(params.id, newStatus);
       } catch (lifecycleError) {
         console.error(`[Agent ${params.id}] Lifecycle change failed:`, lifecycleError);
-        // Don't fail the update if lifecycle fails
+        if (newStatus === "active") {
+          try {
+            await updateAgent(params.id, { status: currentAgent.status });
+          } catch (revertError) {
+            console.error(`[Agent ${params.id}] Failed to revert status after activation error:`, revertError);
+          }
+
+          return NextResponse.json(
+            {
+              error: "Failed to activate agent because lifecycle registration failed",
+              detail:
+                lifecycleError instanceof Error
+                  ? lifecycleError.message
+                  : "Unknown lifecycle activation error",
+            },
+            { status: 409 }
+          );
+        }
       }
     }
 

@@ -3,10 +3,12 @@
  * 
  * A2A Protocol endpoint for invoking an AIP agent.
  * This is called by the AIP Gateway in DIRECT mode.
+ * Enforces x402 payment verification bound to Monad chain.
  */
 
 import { NextRequest, NextResponse } from "next/server";
 import { invokeAIPAgent, type A2AContext } from "@/lib/unibase-aip";
+import { verifyX402MonadPayment } from "@/lib/x402";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -16,6 +18,7 @@ interface InvokeRequest {
   conversation_id?: string;
   user_id: string;
   payment_verified?: boolean;
+  payment?: Record<string, unknown>;
   memory?: any[];
   metadata?: Record<string, any>;
 }
@@ -35,13 +38,40 @@ export async function POST(
       );
     }
 
+    const x402Verification = verifyX402MonadPayment(req, body);
+    if (!x402Verification.ok) {
+      const headers = new Headers();
+      if (x402Verification.status === 402) {
+        headers.set("x-payment-required", "x402");
+        headers.set("x-required-network", "monad");
+        headers.set("x-required-chain-id", String(x402Verification.expectedChainId));
+      }
+
+      return NextResponse.json(
+        {
+          error: x402Verification.message,
+          code: x402Verification.code,
+          required: {
+            protocol: "x402",
+            network: "monad",
+            chain_id: x402Verification.expectedChainId,
+          },
+          observed: {
+            chain_id: x402Verification.observedChainId,
+            chain: x402Verification.observedChain,
+          },
+        },
+        { status: x402Verification.status, headers }
+      );
+    }
+
     // Build A2A context
     const context: A2AContext = {
       message: body.message,
       conversation_id: body.conversation_id || `conv_${Date.now()}`,
       user_id: body.user_id,
       agent_id: agentId,
-      payment_verified: body.payment_verified || false, // Gateway sets this
+      payment_verified: true,
       memory: body.memory || [],
     };
 

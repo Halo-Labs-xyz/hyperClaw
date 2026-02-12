@@ -42,6 +42,7 @@ import { ensureRuntimeBootstrap } from "@/lib/runtime-bootstrap";
 const TELEGRAM_API = "https://api.telegram.org/bot";
 const MAX_TELEGRAM_MESSAGE = 3900;
 const COMMAND_SYNC_INTERVAL_MS = 6 * 60 * 60 * 1000;
+const IRONCLAW_TEMP_AUTH_FALLBACK = "Temporary LLM auth issue.";
 
 const TELEGRAM_BOT_COMMANDS: Array<{ command: string; description: string }> = [
   { command: "start", description: "Initialize chat and link Privy identity" },
@@ -128,6 +129,11 @@ type ScopedAgents = {
   scopeType: "privy" | "chat";
   privyUserId: string | null;
 };
+
+type AskFallbackIntent =
+  | { kind: "exposure"; args: string[] }
+  | { kind: "daily"; args: string[] }
+  | { kind: "pause"; args: string[] };
 
 type AgentExecutionContext = {
   address: Address;
@@ -336,22 +342,11 @@ async function handleStart(ctx: CommandContext, args: string[]): Promise<void> {
         privyUserId,
         telegramChatId: ctx.chatId,
       });
-      const allAgents = await getAgents();
-      const candidates = allAgents.filter((a) => a.telegram?.chatId === ctx.chatId);
-      for (const agent of candidates) {
-        await updateAgent(agent.id, {
-          telegram: {
-            enabled: agent.telegram?.enabled ?? true,
-            chatId: agent.telegram?.chatId ?? ctx.chatId,
-            notifyOnTrade: agent.telegram?.notifyOnTrade ?? true,
-            notifyOnPnl: agent.telegram?.notifyOnPnl ?? true,
-            notifyOnTierUnlock: agent.telegram?.notifyOnTierUnlock ?? true,
-            ownerPrivyId: link.privyUserId,
-            ownerWalletAddress: agent.telegram?.ownerWalletAddress,
-          },
-        });
-      }
+      const claimedAgents = await claimAgentsForPrivy(link.privyUserId, ctx.chatId);
       linkLine = `Linked to Privy user <code>${escapeHtml(link.privyUserId)}</code>.`;
+      if (claimedAgents.length > 0) {
+        linkLine += ` Claimed <code>${claimedAgents.length}</code> agent(s).`;
+      }
     }
   }
 
@@ -431,21 +426,7 @@ async function handleLink(ctx: CommandContext, args: string[]): Promise<void> {
     telegramChatId: ctx.chatId,
   });
 
-  const allAgents = await getAgents();
-  const linkedAgents = allAgents.filter((a) => a.telegram?.chatId === ctx.chatId);
-  for (const agent of linkedAgents) {
-    await updateAgent(agent.id, {
-      telegram: {
-        enabled: agent.telegram?.enabled ?? true,
-        chatId: agent.telegram?.chatId ?? ctx.chatId,
-        notifyOnTrade: agent.telegram?.notifyOnTrade ?? true,
-        notifyOnPnl: agent.telegram?.notifyOnPnl ?? true,
-        notifyOnTierUnlock: agent.telegram?.notifyOnTierUnlock ?? true,
-        ownerPrivyId: link.privyUserId,
-        ownerWalletAddress: agent.telegram?.ownerWalletAddress,
-      },
-    });
-  }
+  const claimedAgents = await claimAgentsForPrivy(link.privyUserId, ctx.chatId);
 
   await sendHtmlMessage(
     ctx.chatId,
@@ -453,7 +434,7 @@ async function handleLink(ctx: CommandContext, args: string[]): Promise<void> {
       "<b>Identity Link Updated</b>",
       `Privy user: <code>${escapeHtml(link.privyUserId)}</code>`,
       `Telegram user: <code>${escapeHtml(link.telegramUserId)}</code>`,
-      `Claimed agents in this chat: <code>${linkedAgents.length}</code>`,
+      `Claimed agents: <code>${claimedAgents.length}</code>`,
     ].join("\n")
   );
 }
@@ -1310,6 +1291,11 @@ async function handleAsk(ctx: CommandContext, prompt: string): Promise<void> {
     return;
   }
 
+  if (isIronClawTempAuthFallback(result.response)) {
+    const handled = await tryHandleAskFallbackIntent(ctx, content);
+    if (handled) return;
+  }
+
   const chunks = chunkString(result.response, MAX_TELEGRAM_MESSAGE - 120);
   for (let i = 0; i < chunks.length; i++) {
     const prefix = i === 0 ? "<b>IronClaw</b>\n\n" : "";
@@ -1353,6 +1339,34 @@ async function handleApproval(
     await sendHtmlMessage(chatId, "Approval action failed.");
     return NextResponse.json({ ok: true });
   }
+}
+
+async function claimAgentsForPrivy(privyUserId: string, chatId: string): Promise<Agent[]> {
+  const allAgents = await getAgents();
+  const ownedCount = allAgents.filter((a) => !!a.telegram?.ownerPrivyId).length;
+  let candidates = allAgents.filter((a) => a.telegram?.chatId === chatId);
+
+  // Bootstrap fallback: if there is no ownership metadata yet and no chat match,
+  // claim unowned agents to the first linked identity.
+  if (candidates.length === 0 && ownedCount === 0) {
+    candidates = allAgents.filter((a) => !a.telegram?.ownerPrivyId);
+  }
+
+  for (const agent of candidates) {
+    await updateAgent(agent.id, {
+      telegram: {
+        enabled: agent.telegram?.enabled ?? true,
+        chatId: agent.telegram?.chatId ?? chatId,
+        notifyOnTrade: agent.telegram?.notifyOnTrade ?? true,
+        notifyOnPnl: agent.telegram?.notifyOnPnl ?? true,
+        notifyOnTierUnlock: agent.telegram?.notifyOnTierUnlock ?? true,
+        ownerPrivyId: privyUserId,
+        ownerWalletAddress: agent.telegram?.ownerWalletAddress,
+      },
+    });
+  }
+
+  return candidates;
 }
 
 async function getScopedAgents(ctx: CommandContext): Promise<ScopedAgents> {
@@ -1761,6 +1775,99 @@ function sparkline(values: number[]): string {
       return bars[idx] ?? bars[0];
     })
     .join("");
+}
+
+function isIronClawTempAuthFallback(response: string): boolean {
+  return response.includes(IRONCLAW_TEMP_AUTH_FALLBACK);
+}
+
+async function tryHandleAskFallbackIntent(ctx: CommandContext, prompt: string): Promise<boolean> {
+  const intent = parseAskFallbackIntent(prompt);
+  if (!intent) return false;
+
+  if (intent.kind === "exposure") {
+    await handleExposure(ctx, intent.args);
+    return true;
+  }
+  if (intent.kind === "daily") {
+    await handleDaily(ctx, intent.args);
+    return true;
+  }
+  if (intent.kind === "pause") {
+    await handlePause(ctx, intent.args);
+    return true;
+  }
+  return false;
+}
+
+function parseAskFallbackIntent(prompt: string): AskFallbackIntent | null {
+  const trimmed = prompt.trim();
+  if (!trimmed) return null;
+
+  const cmd = parseCommand(trimmed);
+  if (cmd?.name === "exposure") return { kind: "exposure", args: cmd.args };
+  if (cmd?.name === "daily") return { kind: "daily", args: cmd.args };
+  if (cmd?.name === "pause" || cmd?.name === "stop") return { kind: "pause", args: cmd.args };
+
+  const normalized = trimmed.replace(/^\/+/, "").trim();
+  const lower = normalized.toLowerCase();
+
+  if (
+    lower.includes("daily trade summary") ||
+    (lower.includes("daily") &&
+      (lower.includes("summary") || lower.includes("anomal") || lower.includes("outlier"))) ||
+    (lower.includes("action") &&
+      (lower.includes("being done") ||
+        lower.includes("happening") ||
+        lower.includes("today") ||
+        lower.includes("recent")))
+  ) {
+    const args: string[] = [];
+    const agent = extractAskAgentTarget(normalized, lower);
+    if (agent) args.push(agent);
+    const windowHours = extractAskWindowHours(lower);
+    if (windowHours !== null) args.push(String(windowHours));
+    return { kind: "daily", args };
+  }
+
+  if (
+    lower.includes("exposure") ||
+    lower.includes("portfolio risk") ||
+    lower.includes("risk exposure")
+  ) {
+    const agent = extractAskAgentTarget(normalized, lower);
+    return { kind: "exposure", args: agent ? [agent] : [] };
+  }
+
+  const pauseMatch = normalized.match(/\b(?:pause|stop)\s+(?:agent\s+)?(.+)$/i);
+  if (pauseMatch) {
+    const cleaned = pauseMatch[1]
+      .trim()
+      .replace(/^[\s"'`<>()]+|[\s"'`<>().,!?]+$/g, "");
+    return { kind: "pause", args: cleaned ? [cleaned] : [] };
+  }
+
+  return null;
+}
+
+function extractAskAgentTarget(original: string, lower: string): string | null {
+  const marker = " for ";
+  const idx = lower.indexOf(marker);
+  if (idx < 0) return null;
+
+  const raw = original.slice(idx + marker.length).trim();
+  if (!raw) return null;
+  const withoutPrefix = raw.replace(/^agent\s+/i, "").trim();
+  const cleaned = withoutPrefix.replace(/^[\s"'`<>()]+|[\s"'`<>().,!?]+$/g, "");
+  return cleaned || null;
+}
+
+function extractAskWindowHours(lower: string): number | null {
+  const match = lower.match(/\b(?:last|past)\s+(\d{1,3})\s*h(?:ours?)?\b/);
+  if (!match) return null;
+  const parsed = Number(match[1]);
+  if (!Number.isFinite(parsed) || parsed < 1) return null;
+  return Math.floor(parsed);
 }
 
 function chunkString(value: string, max: number): string[] {

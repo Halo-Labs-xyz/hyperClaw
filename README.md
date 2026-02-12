@@ -371,6 +371,23 @@ MEMBASE_ACCOUNT=your_wallet_address
 
 # Deployment mode: DIRECT or POLLING
 AIP_DEPLOYMENT_MODE=POLLING
+
+# Enforce X402 + Monad validation on agent invoke endpoints
+X402_REQUIRED=true
+X402_GATEWAY_KEY=your_unibase_gateway_shared_secret
+# Optional override (defaults to active runtime network: 143 mainnet, 10143 testnet)
+# X402_MONAD_CHAIN_ID=143
+
+# Monad on-chain attestation (one tx per agent metadata state)
+MONAD_AGENT_ATTESTATION_ENABLED=true
+MONAD_AGENT_ATTESTATION_REQUIRED=true
+# AIP_ATTESTATION_PRIVATE_KEY=0x...
+# AIP_ATTESTATION_SINK_ADDRESS=0x...
+# AIP_AGENT_METADATA_BASE_URI=https://cdn.hyperclaw.com/agents
+AIP_ATTESTATION_RECEIPT_TIMEOUT_MS=180000
+
+# Require lifecycle activation to fail closed if AIP registration fails
+AIP_REGISTRATION_REQUIRED=true
 ```
 
 ### Example Configurations
@@ -575,7 +592,7 @@ Design system: dark terminal aesthetic. Neon green (`#30e8a0`, Hyperliquid), pur
 | GET    | `/api/agents/[id]/chat`          | Fetch vault chat messages                |
 | POST   | `/api/agents/[id]/chat`          | Post message (AI responds if question)   |
 | POST   | `/api/agents/[id]/approve`       | Approve/reject pending trade             |
-| GET    | `/api/agents/orchestrator`       | Active agent IDs (EC2 orchestrator)      |
+| GET    | `/api/agents/orchestrator`       | Active agent IDs + 30-60m tick bounds (EC2 orchestrator) |
 
 ### Trading
 
@@ -797,10 +814,10 @@ cp .env.example .env.local
 | `GEMINI_API_KEY`                     | No       | Gemini API key used in model fallback chain           |
 | `AI_MODEL_CHAIN`                     | No       | Ordered `provider:model` fallback list for AI decisions |
 | `AI_NEAR_LIMIT_THRESHOLD`            | No       | Start falling back before hard quota (default: 0.85)  |
-| `AGENT_AI_HOT_HOURS_UTC`             | No       | UTC hot-hour list/ranges for frequent decisions       |
-| `AGENT_AI_HOT_HOURS_DECISION_MIN_INTERVAL_MS` | No | Minimum AI decision spacing during hot hours         |
-| `AGENT_AI_OFF_HOURS_DECISION_MIN_INTERVAL_MS` | No | Minimum AI decision spacing outside hot hours        |
-| `AGENT_TICK_INTERVAL`                | No       | Agent runner interval in ms (default: 60000)          |
+| `AGENT_TICK_MIN_INTERVAL_MS`         | No       | Minimum runner cadence in ms (default: 1800000 / 30m) |
+| `AGENT_TICK_MAX_INTERVAL_MS`         | No       | Maximum runner cadence in ms (default: 3600000 / 60m) |
+| `AGENT_TICK_INTERVAL`                | No       | Legacy fixed interval override in ms (clamped to min/max) |
+| `AGENT_AUTONOMOUS_BACKTEST_LOOKBACK` | No       | Number of recent directional trades used for autonomous strategy evaluation |
 | `TELEGRAM_BOT_TOKEN`                 | No       | Telegram bot token from @BotFather                    |
 | `TELEGRAM_WEBHOOK_URL`               | No       | Explicit full webhook URL for Telegram                 |
 | `PUBLIC_BASE_URL`                    | No       | Public app base URL for Telegram webhook auto-sync     |
@@ -820,6 +837,16 @@ cp .env.example .env.local
 | `AGENT_PUBLIC_URL`                  | No       | Public endpoint for DIRECT mode AIP agents            |
 | `MEMBASE_ACCOUNT`                   | No       | Wallet address for X402 payments and Membase          |
 | `AIP_DEPLOYMENT_MODE`               | No       | AIP agent mode: "DIRECT" or "POLLING" (default: POLLING) |
+| `X402_REQUIRED`                     | No       | Enforce x402 verification on `/api/unibase/invoke/*` (default: true) |
+| `X402_GATEWAY_KEY`                  | Yes*     | Shared secret for trusted Unibase Gateway requests (*required when `X402_REQUIRED=true`) |
+| `X402_MONAD_CHAIN_ID`               | No       | Explicit Monad chain id for x402 checks (default: 143 mainnet / 10143 testnet) |
+| `MONAD_AGENT_ATTESTATION_ENABLED`   | No       | Enable Monad on-chain metadata attestation for agents (default: true) |
+| `MONAD_AGENT_ATTESTATION_REQUIRED`  | No       | Fail create/activation when attestation fails (default: true in production) |
+| `AIP_ATTESTATION_PRIVATE_KEY`       | No       | Dedicated signer key for attestation txs (fallback: `RELAY_MONAD_PRIVATE_KEY` then `MONAD_PRIVATE_KEY`) |
+| `AIP_ATTESTATION_SINK_ADDRESS`      | No       | Destination address for calldata attestation tx (default: signer self-address) |
+| `AIP_AGENT_METADATA_BASE_URI`       | No       | Base URI for off-chain metadata references in attestation payload |
+| `AIP_ATTESTATION_RECEIPT_TIMEOUT_MS`| No       | Receipt wait timeout for attestation tx confirmation |
+| `AIP_REGISTRATION_REQUIRED`         | No       | Fail lifecycle activation if AIP registration fails (default: true in production) |
 
 **Production (Vercel + EC2):**
 
@@ -1035,7 +1062,7 @@ IRONCLAW_WEBHOOK_SECRET=<same-as-HTTP_WEBHOOK_SECRET-on-ironclaw-host>
 
 ### EC2 Orchestrator
 
-For autonomous agent execution at scale, run an EC2 instance that polls `/api/agents/orchestrator` for active agents and calls `/api/agents/[id]/tick` on intervals. Authenticate with the `ORCHESTRATOR_SECRET` header.
+For autonomous agent execution at scale, run an EC2 instance that polls `/api/agents/orchestrator` for active agents and uses the returned `tickIntervalMinMs`/`tickIntervalMaxMs` (30-60 minute cadence) when calling `/api/agents/[id]/tick`. Authenticate with the `ORCHESTRATOR_SECRET` header.
 
 ---
 

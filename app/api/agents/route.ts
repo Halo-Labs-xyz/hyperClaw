@@ -1,10 +1,11 @@
 import { NextResponse } from "next/server";
-import { getAgents, createAgent } from "@/lib/store";
+import { getAgents, createAgent, updateAgent } from "@/lib/store";
 import { generateAgentWallet, provisionPKPWallet } from "@/lib/hyperliquid";
 import { addAccount, getAccountForAgent, addPKPAccount } from "@/lib/account-manager";
 import { getTotalDepositedUsd } from "@/lib/deposit-relay";
-import { type AgentConfig } from "@/lib/types";
+import { type Agent, type AgentConfig } from "@/lib/types";
 import { getNetworkState } from "@/lib/network";
+import { ensureAgentOnchainAttestation } from "@/lib/agent-attestation";
 
 function normalizeString(value: unknown): string | undefined {
   if (typeof value !== "string") return undefined;
@@ -43,6 +44,34 @@ function isOwnedByViewer(
     ownerWalletAddress.toLowerCase() === viewerWalletAddress.toLowerCase()
   ) return true;
   return false;
+}
+
+async function finalizeCreatedAgentResponse(
+  agent: Agent,
+  extras: Record<string, unknown> = {}
+) {
+  try {
+    const attestationResult = await ensureAgentOnchainAttestation(agent.id, {
+      reason: "agent_create",
+    });
+
+    return NextResponse.json(
+      {
+        agent: attestationResult.agent,
+        ...extras,
+        attestation: attestationResult.attestation,
+      },
+      { status: 201 }
+    );
+  } catch (attestationError) {
+    console.error(`[AgentCreate] Attestation failed for ${agent.id}; pausing agent`, attestationError);
+    try {
+      await updateAgent(agent.id, { status: "paused" });
+    } catch (pauseError) {
+      console.error(`[AgentCreate] Failed to pause unattested agent ${agent.id}:`, pauseError);
+    }
+    throw attestationError;
+  }
 }
 
 export async function GET(request: Request) {
@@ -220,7 +249,7 @@ export async function POST(request: Request) {
           }
           
           console.log(`[AgentCreate] Traditional wallet ${address} saved for agent ${agent.id}`);
-          return NextResponse.json({ agent }, { status: 201 });
+          return await finalizeCreatedAgentResponse(agent);
         }
         
         address = pkpResult.address;
@@ -246,7 +275,7 @@ export async function POST(request: Request) {
         }
         
         console.log(`[AgentCreate] Traditional wallet ${address} saved (PKP failed)`);
-        return NextResponse.json({ agent }, { status: 201 });
+        return await finalizeCreatedAgentResponse(agent);
       }
     } else {
       // Traditional: generate local wallet with encrypted private key
@@ -272,7 +301,7 @@ export async function POST(request: Request) {
         console.error("[AgentCreate] Failed to save HL key:", err);
       }
       
-      return NextResponse.json({ agent }, { status: 201 });
+      return await finalizeCreatedAgentResponse(agent);
     }
 
     // If we get here, PKP was successful - create agent with PKP address
@@ -307,11 +336,10 @@ export async function POST(request: Request) {
       }
     }
 
-    return NextResponse.json({ 
-      agent,
+    return await finalizeCreatedAgentResponse(agent, {
       walletType: "pkp",
       address,
-    }, { status: 201 });
+    });
     
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
