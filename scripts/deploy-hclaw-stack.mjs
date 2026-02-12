@@ -7,7 +7,7 @@ const isTestnet = process.env.NEXT_PUBLIC_MONAD_TESTNET !== "false";
 const rpcUrl = process.env.MONAD_RPC_URL || (isTestnet ? "https://testnet-rpc.monad.xyz" : "https://rpc.monad.xyz");
 
 const hclawToken = process.env.NEXT_PUBLIC_HCLAW_TOKEN_ADDRESS;
-const nadFunLens = process.env.NADFUN_LENS_ADDRESS || "0x73363D4090Fd6A012Fb31514733235AF2De0CdA7";
+const nadFunLens = process.env.NADFUN_LENS_ADDRESS || "0x73363d4090fd6a012fb31514733235af2de0cda7";
 const rebateToken = process.env.HCLAW_REBATE_TOKEN_ADDRESS || "0x0000000000000000000000000000000000000000";
 
 const buybackRecipient = process.env.HCLAW_BUYBACK_RECIPIENT;

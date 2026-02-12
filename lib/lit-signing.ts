@@ -50,6 +50,11 @@ export interface PKPOrderResult {
   errors?: string[];
 }
 
+function isBuilderApprovalError(error: unknown): boolean {
+  if (!(error instanceof Error)) return false;
+  return error.message.toLowerCase().includes("builder fee has not been approved");
+}
+
 // ============================================
 // PKP Order Signing
 // ============================================
@@ -494,6 +499,28 @@ export async function executeOrderWithPKP(
   // Use Hyperliquid SDK end-to-end with a PKP-backed viem account.
   // This aligns signing payload/domain/nonce semantics with the SDK implementation.
   const { getExchangeClientForPKP, executeOrder } = await import("./hyperliquid");
+  const { ensureBuilderApproval } = await import("./builder");
   const exchange = await getExchangeClientForPKP(agentId);
-  return await executeOrder(orderParams, exchange);
+  const pkpInfo = await getPKPForAgent(agentId);
+
+  if (pkpInfo?.ethAddress) {
+    try {
+      await ensureBuilderApproval(pkpInfo.ethAddress, undefined, agentId);
+    } catch (error) {
+      console.warn(`[LitSigning] Pre-trade builder approval check failed for ${agentId}:`, error);
+    }
+  }
+
+  try {
+    return await executeOrder(orderParams, exchange);
+  } catch (error) {
+    if (pkpInfo?.ethAddress && isBuilderApprovalError(error)) {
+      console.warn(`[LitSigning] Builder approval missing for ${agentId}; attempting auto-approval and retry`);
+      const approved = await ensureBuilderApproval(pkpInfo.ethAddress, undefined, agentId);
+      if (approved) {
+        return await executeOrder(orderParams, exchange);
+      }
+    }
+    throw error;
+  }
 }

@@ -35,7 +35,9 @@ Railway injects env vars at runtime. For `NEXT_PUBLIC_*` vars, Railway passes th
 | `NEXT_PUBLIC_VAULT_ADDRESS` | Hyperclaw vault contract address |
 | `HYPERLIQUID_PRIVATE_KEY` | Operator wallet (funds agent wallets) |
 | `ACCOUNT_ENCRYPTION_KEY` | Encrypt stored agent keys (`openssl rand -hex 32`) |
-| `OPENAI_API_KEY` | AI agent brain |
+| `OPENAI_API_KEY` | AI agent brain (or use Anthropic/Gemini below) |
+| `ANTHROPIC_API_KEY` | Claude fallback — **required if no local Ollama** (Railway cannot reach Cloudflare tunnels) |
+| `RAILWAY_AI_MODEL_CHAIN` | Override AI chain for Railway; use Anthropic-first, e.g. `anthropic:claude-sonnet-4-5-20250929,anthropic:claude-opus-4-5-20251101,gemini:gemini-3-flash-preview` |
 | `HYPERCLAW_API_KEY` | API auth (`openssl rand -hex 32`) |
 
 ### Storage (pick one)
@@ -145,4 +147,5 @@ Webhook URL resolution priority:
 - **Build fails**: Check Railway build logs. Ensure all `NEXT_PUBLIC_*` vars needed at build time are set.
 - **App crashes on start**: Check logs for missing env vars. Supabase/S3 must be configured (no persistent `.data/` on Railway).
 - **Port**: Railway sets `PORT` automatically; the app uses it.
+- **Agents not trading**: Railway cannot reach local Ollama. Add `ANTHROPIC_API_KEY` and `RAILWAY_AI_MODEL_CHAIN=anthropic:claude-sonnet-4-5-20250929,anthropic:claude-opus-4-5-20251101,gemini:gemini-3-flash-preview`. Leave `OPENAI_API_BASE_URL` unset.
 - **Redeploy**: Push to your connected branch or use “Redeploy” in the Railway dashboard.

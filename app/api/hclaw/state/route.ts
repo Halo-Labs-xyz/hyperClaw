@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { type Address } from "viem";
+import { type Address, getAddress } from "viem";
 import { getHclawState } from "@/lib/hclaw";
 import { getUserCapContext } from "@/lib/hclaw-policy";
 import { getUserLockState } from "@/lib/hclaw-lock";
@@ -13,7 +13,11 @@ function parseUser(value: string | null): Address | null {
   if (!value) return null;
   const trimmed = value.trim();
   if (!/^0x[a-fA-F0-9]{40}$/.test(trimmed)) return null;
-  return trimmed as Address;
+  try {
+    return getAddress(trimmed.toLowerCase());
+  } catch {
+    return null;
+  }
 }
 
 function parseNetwork(value: string | null): "mainnet" | "testnet" | null {

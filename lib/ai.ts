@@ -645,8 +645,12 @@ function buildBalancedPrimaryRoutes(geminiModels: string[], nvidiaModels: string
 }
 
 function getConfiguredModelChain(): ModelRoute[] {
-  const explicit = (process.env.AI_MODEL_CHAIN || "").trim();
-  const chainItems = explicit
+  const onRailway = Boolean(
+    process.env.RAILWAY_STATIC_URL?.trim() || process.env.RAILWAY_PUBLIC_DOMAIN?.trim()
+  );
+  const railwayChain = (process.env.RAILWAY_AI_MODEL_CHAIN || "").trim();
+  const chainSource = onRailway && railwayChain ? railwayChain : (process.env.AI_MODEL_CHAIN || "").trim();
+  const chainItems = chainSource
     ? explicit.split(",").map((x) => x.trim()).filter(Boolean)
     : [
         ...buildBalancedPrimaryRoutes(getConfiguredGeminiModels(), getConfiguredNvidiaModels()).map(
@@ -1333,7 +1337,7 @@ Provide your trading decision as JSON:`;
       size: 0,
       leverage: 1,
       confidence: 0,
-      reasoning: "AI unavailable due to provider rate limit/quota; holding position.",
+      reasoning: `AI unavailable (${msg.slice(0, 60)}...); holding position. Set ANTHROPIC_API_KEY or GEMINI_API_KEY in Railway.`,
     };
   }
 

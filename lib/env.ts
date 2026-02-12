@@ -1,6 +1,7 @@
 /**
  * Environment variable validation helpers.
  */
+import { getAddress } from "viem";
 
 const PLACEHOLDER_VALUES = [
   "your_deployed_vault_contract_address",
@@ -22,11 +23,22 @@ export function isHexAddress(value: string | undefined | null): value is `0x${st
   return /^0x[a-fA-F0-9]{40}$/.test(value.trim());
 }
 
+export function normalizeHexAddress(value: string | undefined | null): `0x${string}` | null {
+  if (!value) return null;
+  const trimmed = value.trim();
+  if (!/^0x[a-fA-F0-9]{40}$/.test(trimmed)) return null;
+  try {
+    // Accept non-checksummed input and return canonical checksum address.
+    return getAddress(trimmed.toLowerCase()) as `0x${string}`;
+  } catch {
+    return null;
+  }
+}
+
 export function getAddressIfSet(name: string): `0x${string}` | null {
   const value = process.env[name];
   if (!isEnvSet(value)) return null;
-  if (!isHexAddress(value)) return null;
-  return value as `0x${string}`;
+  return normalizeHexAddress(value);
 }
 
 export function getVaultAddressIfDeployed(): `0x${string}` | null {

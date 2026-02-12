@@ -1,8 +1,9 @@
-import { createPublicClient, http, type Address, formatEther } from "viem";
+import { createPublicClient, http, type Address, formatEther, getAddress } from "viem";
 import { HCLAW_TIERS, type HclawState, type HclawTier } from "@/lib/types";
 import { getUserCapContext } from "@/lib/hclaw-policy";
 import { getUserPointsSummary } from "@/lib/hclaw-points";
 import { getClaimableSummary } from "@/lib/hclaw-rewards";
+import { getHclawAddressIfSet } from "@/lib/env";
 
 const LENS_ABI = [
   {
@@ -42,17 +43,19 @@ export function getProgressToNextTier(mcap: number, currentTier: HclawTier, next
 }
 
 function getNadfunConfig(network: "mainnet" | "testnet") {
+  // Canonical checksummed lens address to avoid viem mixed-case checksum errors.
+  const lens = getAddress("0x73363d4090fd6a012fb31514733235af2de0cda7");
   if (network === "mainnet") {
     return {
       chainId: 143,
-      lens: "0x73363D4090Fd6A012Fb31514733235AF2De0CdA7" as Address,
+      lens,
       rpcUrl: "https://rpc.monad.xyz",
     };
   }
 
   return {
     chainId: 10143,
-    lens: "0x73363D4090Fd6A012Fb31514733235AF2De0CdA7" as Address,
+    lens,
     rpcUrl: "https://testnet-rpc.monad.xyz",
   };
 }
@@ -75,8 +78,8 @@ export async function getHclawState(
   network: "mainnet" | "testnet" = "mainnet",
   opts?: { userAddress?: Address; agentId?: string }
 ): Promise<HclawState | null> {
-  const tokenAddress = process.env.NEXT_PUBLIC_HCLAW_TOKEN_ADDRESS as Address | undefined;
-  if (!tokenAddress || !tokenAddress.startsWith("0x") || tokenAddress.length !== 42) {
+  const tokenAddress = getHclawAddressIfSet() as Address | null;
+  if (!tokenAddress) {
     return null;
   }
 

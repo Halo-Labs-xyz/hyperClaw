@@ -5,7 +5,7 @@
  * Users must approve the builder fee once before trading.
  */
 
-import { type Address } from "viem";
+import { type Address, getAddress } from "viem";
 import { getInfoClient } from "./hyperliquid";
 import { isHlTestnet } from "./network";
 
@@ -53,10 +53,17 @@ export function getBuilderConfig(opts: { logIfMissing?: boolean } = {}): Builder
     return null;
   }
 
-  return {
-    address: address as Address,
-    feePoints: parsedFeePoints,
-  };
+  try {
+    return {
+      address: getAddress(address.toLowerCase()),
+      feePoints: parsedFeePoints,
+    };
+  } catch {
+    if (logIfMissing) {
+      console.error("[Builder] BUILDER_ADDRESS is not a valid EVM address.");
+    }
+    return null;
+  }
 }
 
 /**
