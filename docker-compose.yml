@@ -43,7 +43,7 @@ services:
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
       NEARAI_SESSION_PATH: /home/ironclaw/.ironclaw/session.json
       NEARAI_SESSION_TOKEN: ${NEARAI_SESSION_TOKEN:-}
-      IRONCLAW_SKIP_SESSION_CHECK: ${IRONCLAW_SKIP_SESSION_CHECK:-false}
+      IRONCLAW_SKIP_SESSION_CHECK: ${IRONCLAW_SKIP_SESSION_CHECK:-true}
     volumes:
       - ironclaw_home:/home/ironclaw/.ironclaw
     ports:

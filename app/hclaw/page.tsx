@@ -2,9 +2,16 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { parseUnits, formatUnits, type Address } from "viem";
+import {
+  BaseError,
+  ContractFunctionRevertedError,
+  parseUnits,
+  formatUnits,
+  type Address,
+} from "viem";
 import {
   useAccount,
+  usePublicClient,
   useReadContract,
   useSwitchChain,
   useWaitForTransactionReceipt,
@@ -180,6 +187,7 @@ export default function HclawHubPage() {
   const [submittedTxNetwork, setSubmittedTxNetwork] = useState<MonadNetwork | null>(null);
 
   const { switchChainAsync } = useSwitchChain();
+  const publicClient = usePublicClient({ chainId: activeChainId });
   const { writeContractAsync } = useWriteContract();
   const { isSuccess: lockConfirmed } = useWaitForTransactionReceipt({ hash: lockTxHash });
 
@@ -365,16 +373,36 @@ export default function HclawHubPage() {
         });
         setSubmittedApproveTxHash(approveHash);
         setSubmittedTxNetwork(activeNetwork);
-        setLockStatus(`Approval submitted on ${activeNetwork}: ${approveHash}`);
+        setLockStatus(`Approval submitted on ${activeNetwork}: ${approveHash}. Waiting for confirmation...`);
+        if (!publicClient) {
+          setLocking(false);
+          setLockStatus("No public client available. Refresh and retry.");
+          return;
+        }
+        await publicClient.waitForTransactionReceipt({ hash: approveHash });
+        await refetchHclawAllowance();
       }
 
       setLockStatus(`Submitting ${amount} HCLAW lock for ${previewDuration} days...`);
-      const hash = await writeContractAsync({
+      if (!publicClient) {
+        setLocking(false);
+        setLockStatus("No public client available. Refresh and retry.");
+        return;
+      }
+      const simulation = await publicClient.simulateContract({
+        account: address,
         chainId: activeChainId,
         address: hclawLockAddress,
         abi: HCLAW_LOCK_ABI,
         functionName: "lock",
         args: [amountWei, previewDuration],
+      });
+      const simulatedGas = simulation.request.gas;
+      const gasWithBuffer = simulatedGas ? (simulatedGas * 120n) / 100n : undefined;
+      const hash = await writeContractAsync({
+        chainId: activeChainId,
+        ...simulation.request,
+        ...(gasWithBuffer ? { gas: gasWithBuffer } : {}),
       });
 
       setSubmittedTxNetwork(activeNetwork);
@@ -382,6 +410,17 @@ export default function HclawHubPage() {
       setLockStatus(`Lock transaction submitted on ${activeNetwork}: ${hash}. Waiting for confirmation...`);
     } catch (error) {
       setLocking(false);
+      if (error instanceof BaseError) {
+        const reverted = error.walk((e) => e instanceof ContractFunctionRevertedError);
+        if (reverted instanceof ContractFunctionRevertedError) {
+          const reason =
+            (typeof reverted.reason === "string" && reverted.reason) ||
+            reverted.data?.errorName ||
+            "execution reverted";
+          setLockStatus(`Failed to lock HCLAW: ${reason}`);
+          return;
+        }
+      }
       setLockStatus(error instanceof Error ? error.message : "Failed to lock HCLAW.");
     }
   }
