@@ -27,6 +27,7 @@ import { getAgent, updateAgent } from "./store";
 import { getAgentHlState, provisionAgentWallet } from "./hyperliquid";
 import { isMonadTestnet } from "./network";
 import {
+  bridgeDepositToHyperliquidAgent,
   bridgeWithdrawalToMonadUser,
   isMainnetBridgeEnabled,
 } from "./mainnet-bridge";
@@ -832,32 +833,78 @@ export async function processVaultTx(
             );
             record.hlFunded = false;
           } else if (usdValue > 0) {
+            const isMainnet = activeNetwork === "mainnet";
+            const isMonDeposit = tokenAddress.toLowerCase() === zeroAddress.toLowerCase();
+            const useBridge = isMainnet && isMainnetBridgeEnabled() && isMonDeposit;
+
             try {
-              console.log(
-                `[DepositRelay] Operator funding for agent ${agentIdHex} with $${usdValue.toFixed(2)} USDC`
-              );
-              const hlResult = await provisionAgentWallet(agentIdHex, usdValue);
-              record.hlWalletAddress = hlResult.address;
-              record.hlFunded = hlResult.funded;
-              record.hlFundedAmount = hlResult.fundedAmount;
-              record.relayed = !!hlResult.funded;
-              record.bridgeProvider = "none";
-              record.bridgeStatus = undefined;
-              record.bridgeDestination = undefined;
-              record.bridgeTxHash = undefined;
-              record.bridgeOrderId = undefined;
-              record.bridgeNote = "Deposit bridge disabled; funded directly from operator HL wallet";
+              // Ensure agent has HL wallet (create if needed)
+              const provisionResult = await provisionAgentWallet(agentIdHex, 0);
+              const hlAddress = provisionResult.address;
 
-              console.log(
-                `[DepositRelay] HL wallet ${hlResult.address} funded=${hlResult.funded} amount=$${hlResult.fundedAmount}`
-              );
-
-              if (agent.hlAddress !== hlResult.address) {
-                await updateAgent(agentIdHex, { hlAddress: hlResult.address });
-                console.log(`[DepositRelay] Updated agent hlAddress to ${hlResult.address}`);
+              if (agent.hlAddress !== hlAddress) {
+                await updateAgent(agentIdHex, { hlAddress });
+                console.log(`[DepositRelay] Updated agent hlAddress to ${hlAddress}`);
               }
 
-              shouldRetryFunding = !hlResult.funded;
+              let funded = false;
+
+              if (useBridge) {
+                try {
+                  const bridge = await bridgeDepositToHyperliquidAgent({
+                    hlAddress,
+                    sourceToken: tokenAddress,
+                    sourceAmountRaw: amount,
+                    sourceAmountRawLabel: amount.toString(),
+                  });
+                  record.bridgeProvider = bridge.provider;
+                  record.bridgeStatus = bridge.status;
+                  record.bridgeDestination = bridge.destinationAddress;
+                  record.bridgeTxHash = bridge.relayTxHash;
+                  record.bridgeOrderId = bridge.bridgeOrderId;
+                  record.bridgeNote = bridge.note;
+
+                  if (bridge.status === "submitted") {
+                    funded = true;
+                    record.hlWalletAddress = hlAddress;
+                    record.hlFunded = true;
+                    record.hlFundedAmount = usdValue;
+                    record.relayed = true;
+                    console.log(
+                      `[DepositRelay] Mainnet bridge ${bridge.provider} submitted for agent ${agentIdHex}: tx=${bridge.relayTxHash ?? "pending"}`
+                    );
+                  } else {
+                    console.warn(
+                      `[DepositRelay] Bridge returned status=${bridge.status}, falling back to operator USDC`
+                    );
+                  }
+                } catch (bridgeErr) {
+                  const msg = bridgeErr instanceof Error ? bridgeErr.message : String(bridgeErr);
+                  console.warn(`[DepositRelay] Bridge deposit failed: ${msg.slice(0, 120)}`);
+                }
+              }
+
+              if (!funded) {
+                console.log(
+                  `[DepositRelay] Operator funding for agent ${agentIdHex} with $${usdValue.toFixed(2)} USDC`
+                );
+                const hlResult = await provisionAgentWallet(agentIdHex, usdValue);
+                record.hlWalletAddress = hlResult.address;
+                record.hlFunded = hlResult.funded;
+                record.hlFundedAmount = hlResult.fundedAmount;
+                record.relayed = !!hlResult.funded;
+                if (!record.bridgeProvider) {
+                  record.bridgeProvider = "none";
+                  record.bridgeNote = "Funded directly from operator HL wallet";
+                }
+
+                console.log(
+                  `[DepositRelay] HL wallet ${hlResult.address} funded=${hlResult.funded} amount=$${hlResult.fundedAmount}`
+                );
+                funded = hlResult.funded;
+              }
+
+              shouldRetryFunding = !funded;
             } catch (hlErr) {
               const hlMsg = hlErr instanceof Error ? hlErr.message : String(hlErr);
               shouldRetryFunding = true;
