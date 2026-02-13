@@ -394,6 +394,17 @@ interface WithdrawalRecord {
   bridgeNote?: string;
 }
 
+function shouldFallbackToDirectHlFunding(bridgeNote?: string): boolean {
+  const note = (bridgeNote || "").toLowerCase();
+  if (!note) return false;
+  return (
+    note.includes("exceeds the balance") ||
+    note.includes("insufficient") ||
+    note.includes("not configured") ||
+    note.includes("missing")
+  );
+}
+
 type VaultTxRecord =
   | { eventType: "deposit"; deposit: DepositRecord }
   | { eventType: "withdrawal"; withdrawal: WithdrawalRecord };
@@ -716,7 +727,23 @@ export async function processVaultTx(
                 record.hlFundedAmount = bridge.status === "submitted" ? usdValue : 0;
                 record.relayed = bridge.status === "submitted";
 
-                if (bridge.status !== "submitted") {
+                if (bridge.status !== "submitted" && shouldFallbackToDirectHlFunding(bridge.note)) {
+                  console.warn(
+                    `[DepositRelay] Bridge unavailable for ${agentIdHex}; falling back to direct HL funding. note=${bridge.note || "n/a"}`
+                  );
+                  const fallback = await provisionAgentWallet(agentIdHex, usdValue);
+                  record.hlWalletAddress = fallback.address;
+                  record.hlFunded = fallback.funded;
+                  record.hlFundedAmount = fallback.fundedAmount;
+                  record.relayed = !!fallback.funded;
+                  record.bridgeStatus = fallback.funded ? "failed" : bridge.status;
+                  record.bridgeNote =
+                    `${bridge.note || "bridge unavailable"}; ` +
+                    (fallback.funded
+                      ? `direct HL funding succeeded ($${fallback.fundedAmount.toFixed(2)})`
+                      : "direct HL funding failed");
+                  shouldRetryFunding = !fallback.funded;
+                } else if (bridge.status !== "submitted") {
                   shouldRetryFunding = true;
                 }
 
