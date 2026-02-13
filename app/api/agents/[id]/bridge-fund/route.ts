@@ -46,6 +46,16 @@ function parseMonAmount(value: unknown): string | undefined {
   return undefined;
 }
 
+function parseRequestedMonadNetwork(request: Request): "mainnet" | "testnet" | undefined {
+  const raw = normalizeString(
+    request.headers.get("x-monad-network") ?? request.headers.get("x-network")
+  );
+  if (!raw) return undefined;
+  const lowered = raw.toLowerCase();
+  if (lowered === "mainnet" || lowered === "testnet") return lowered;
+  return undefined;
+}
+
 export async function POST(
   request: Request,
   { params }: { params: { id: string } }
@@ -61,6 +71,14 @@ export async function POST(
     if (!isMainnetBridgeEnabled()) {
       return NextResponse.json(
         { error: "Mainnet bridge is disabled" },
+        { status: 400 }
+      );
+    }
+
+    const requestedNetwork = parseRequestedMonadNetwork(request);
+    if (requestedNetwork && requestedNetwork !== "mainnet") {
+      return NextResponse.json(
+        { error: "Emergency bridge funding is mainnet-only. Switch Monad network to mainnet." },
         { status: 400 }
       );
     }
@@ -124,6 +142,7 @@ export async function POST(
       bridgeTxHash: bridge.relayTxHash ?? null,
       bridgeOrderId: bridge.bridgeOrderId ?? null,
       bridgeNote: bridge.note ?? null,
+      network: "mainnet",
     });
   } catch (error) {
     const msg = error instanceof Error ? error.message : String(error);
@@ -133,4 +152,3 @@ export async function POST(
     );
   }
 }
-

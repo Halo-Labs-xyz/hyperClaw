@@ -253,6 +253,7 @@ export default function AgentDetailPage() {
     (!Number.isFinite(parsedDepositAmount) || parsedDepositAmount < MIN_MON_DEPOSIT);
   const canUseEmergencyBridgeFund =
     process.env.NEXT_PUBLIC_ENABLE_EMERGENCY_BRIDGE_FUND === "true" &&
+    activeNetwork === "mainnet" &&
     isOwner &&
     depositToken.symbol === "MON" &&
     !!depositAmount &&
@@ -260,6 +261,7 @@ export default function AgentDetailPage() {
     parsedDepositAmount > 0;
   const canUseDirectUnitDeposit =
     process.env.NEXT_PUBLIC_ENABLE_DIRECT_UNIT_DEPOSIT === "true" &&
+    activeNetwork === "mainnet" &&
     isOwner &&
     depositToken.symbol === "MON" &&
     !!depositAmount &&
@@ -822,6 +824,11 @@ export default function AgentDetailPage() {
 
   const handleEmergencyBridgeFund = async () => {
     if (!canUseEmergencyBridgeFund || !address) return;
+    if (activeNetwork !== "mainnet") {
+      setDepositPhase("error");
+      setDepositStatus("Emergency bridge funding is mainnet-only. Switch wallet to Monad mainnet.");
+      return;
+    }
     setBridgeFunding(true);
     setDepositPhase("syncing");
     setDepositStatus("Submitting emergency Unit bridge funding...");
@@ -832,6 +839,7 @@ export default function AgentDetailPage() {
         headers: {
           "Content-Type": "application/json",
           "x-owner-wallet-address": address.toLowerCase(),
+          "x-monad-network": activeNetwork,
           ...(user?.id ? { "x-owner-privy-id": user.id } : {}),
         },
         body: JSON.stringify({ monAmount: depositAmount }),
@@ -864,6 +872,11 @@ export default function AgentDetailPage() {
 
   const handleDirectUnitDeposit = async () => {
     if (!canUseDirectUnitDeposit || !address) return;
+    if (activeNetwork !== "mainnet") {
+      setDepositPhase("error");
+      setDepositStatus("Direct Unit deposit is mainnet-only. Switch wallet to Monad mainnet.");
+      return;
+    }
     setDirectUnitFunding(true);
     setDepositPhase("switching");
     setDepositStatus("Resolving Unit deposit address...");
@@ -874,6 +887,7 @@ export default function AgentDetailPage() {
         headers: {
           "Content-Type": "application/json",
           "x-owner-wallet-address": address.toLowerCase(),
+          "x-monad-network": activeNetwork,
           ...(user?.id ? { "x-owner-privy-id": user.id } : {}),
         },
       });
