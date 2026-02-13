@@ -391,14 +391,15 @@ export default function HclawHubPage() {
       }
       const simulation = await publicClient.simulateContract({
         account: address,
-        chainId: activeChainId,
         address: hclawLockAddress,
         abi: HCLAW_LOCK_ABI,
         functionName: "lock",
         args: [amountWei, previewDuration],
       });
       const simulatedGas = simulation.request.gas;
-      const gasWithBuffer = simulatedGas ? (simulatedGas * 120n) / 100n : undefined;
+      const gasWithBuffer = simulatedGas
+        ? (simulatedGas * BigInt(120)) / BigInt(100)
+        : undefined;
       const hash = await writeContractAsync({
         chainId: activeChainId,
         ...simulation.request,
