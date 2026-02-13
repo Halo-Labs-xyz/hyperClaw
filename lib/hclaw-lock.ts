@@ -8,6 +8,7 @@ export const HCLAW_LOCK_DURATIONS = [30, 90, 180] as const;
 export type MonadNetwork = "mainnet" | "testnet";
 const LOCK_COMPAT_CACHE_TTL_MS = 60_000;
 const LOCK_READ_PROBE_USER = "0x000000000000000000000000000000000000dEaD" as Address;
+const LOCK_READ_WARN_COOLDOWN_MS = 60_000;
 const lockCompatCache = new Map<
   string,
   {
@@ -15,6 +16,7 @@ const lockCompatCache = new Map<
     value: { deployed: boolean; compatible: boolean; reason?: string };
   }
 >();
+const lockReadWarnCache = new Map<string, number>();
 
 function getMonadRpcUrl(network?: MonadNetwork): string {
   const mainnetRpc =
@@ -88,6 +90,43 @@ export function getEmptyLockState(user: Address): HclawLockState {
 function formatOneLineError(error: unknown): string {
   if (error instanceof Error) return error.message.split("\n")[0];
   return String(error);
+}
+
+function warnLockReadOnce(key: string, message: string): void {
+  const now = Date.now();
+  const last = lockReadWarnCache.get(key) ?? 0;
+  if (now - last < LOCK_READ_WARN_COOLDOWN_MS) return;
+  lockReadWarnCache.set(key, now);
+  console.warn(message);
+}
+
+function isReadRevertMessage(message: string): boolean {
+  const msg = message.toLowerCase();
+  return (
+    msg.includes("reverted") ||
+    msg.includes("execution reverted") ||
+    msg.includes("contract function") ||
+    msg.includes("returned no data")
+  );
+}
+
+function deriveTierFromPositions(positions: HclawLockPosition[]): HclawLockTier {
+  let tier: HclawLockTier = 0;
+  for (const p of positions) {
+    if (p.unlocked || p.remainingMs <= 0) continue;
+    const candidate = durationToTier(p.durationDays);
+    if (candidate > tier) tier = candidate;
+  }
+  return tier;
+}
+
+function derivePowerFromPositions(positions: HclawLockPosition[]): number {
+  let power = 0;
+  for (const p of positions) {
+    if (p.unlocked || p.remainingMs <= 0) continue;
+    power += p.amount * (p.multiplierBps / 10_000);
+  }
+  return power;
 }
 
 function classifyReadProbeFailure(reason: string): "soft" | "hard" {
@@ -236,22 +275,45 @@ export async function getUserLockState(user: Address, network?: MonadNetwork): P
   }
   const lockAddress = status.address;
   const client = getPublicClient(network);
+  const networkKey = network ?? (isMonadTestnet() ? "testnet" : "mainnet");
 
   try {
-    const [tierRaw, powerRaw] = await Promise.all([
-      client.readContract({
+    let tierRaw: number | bigint | null = null;
+    let powerRaw: bigint | null = null;
+
+    try {
+      tierRaw = (await client.readContract({
         address: lockAddress,
         abi: HCLAW_LOCK_ABI,
         functionName: "getUserTier",
         args: [user],
-      }) as Promise<number>,
-      client.readContract({
+      })) as number | bigint;
+    } catch (error) {
+      const msg = formatOneLineError(error);
+      if (!isReadRevertMessage(msg)) {
+        warnLockReadOnce(
+          `${networkKey}:${lockAddress.toLowerCase()}:tier:${user.toLowerCase()}`,
+          `[HCLAW] getUserTier read failed for ${user.slice(0, 10)}…: ${msg}`
+        );
+      }
+    }
+
+    try {
+      powerRaw = (await client.readContract({
         address: lockAddress,
         abi: HCLAW_LOCK_ABI,
         functionName: "getUserPower",
         args: [user],
-      }) as Promise<bigint>,
-    ]);
+      })) as bigint;
+    } catch (error) {
+      const msg = formatOneLineError(error);
+      if (!isReadRevertMessage(msg)) {
+        warnLockReadOnce(
+          `${networkKey}:${lockAddress.toLowerCase()}:power:${user.toLowerCase()}`,
+          `[HCLAW] getUserPower read failed for ${user.slice(0, 10)}…: ${msg}`
+        );
+      }
+    }
 
     let lockIdsRaw: bigint[] = [];
     try {
@@ -263,7 +325,10 @@ export async function getUserLockState(user: Address, network?: MonadNetwork): P
       })) as bigint[];
     } catch (error) {
       const msg = formatOneLineError(error);
-      console.warn(`[HCLAW] getUserLockIds unavailable for ${user.slice(0, 10)}…: ${msg}`);
+      warnLockReadOnce(
+        `${networkKey}:${lockAddress.toLowerCase()}:ids:${user.toLowerCase()}`,
+        `[HCLAW] getUserLockIds unavailable for ${user.slice(0, 10)}…: ${msg}`
+      );
     }
 
     const positionsRaw = await Promise.all(
@@ -293,15 +358,21 @@ export async function getUserLockState(user: Address, network?: MonadNetwork): P
       })
     );
 
-    const tier = Math.max(0, Math.min(3, Number(tierRaw))) as HclawLockTier;
     const positions = positionsRaw
       .filter((p): p is HclawLockPosition => Boolean(p))
       .sort((a, b) => a.endTs - b.endTs);
+    const derivedTier = deriveTierFromPositions(positions);
+    const tier =
+      tierRaw === null
+        ? derivedTier
+        : (Math.max(0, Math.min(3, Number(tierRaw))) as HclawLockTier);
+    const derivedPower = derivePowerFromPositions(positions);
+    const power = powerRaw === null ? derivedPower : Number(formatEther(powerRaw));
 
     return {
       user,
       tier,
-      power: Number(formatEther(powerRaw)),
+      power,
       boostBps: tierToBoostBps(tier),
       rebateBps: tierToRebateBps(tier),
       lockIds: lockIdsRaw.map((id) => id.toString()),
