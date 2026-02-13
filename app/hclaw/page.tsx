@@ -28,6 +28,8 @@ interface HclawPageData {
   state?: {
     marketCap: number;
     price: number;
+    tokenAddress?: string | null;
+    lockAddress?: string | null;
     lockTier?: number;
     hclawPower?: number;
     boostedCapUsd?: number;
@@ -186,6 +188,19 @@ export default function HclawHubPage() {
   const [submittedLockTxHash, setSubmittedLockTxHash] = useState<`0x${string}` | undefined>();
   const [submittedTxNetwork, setSubmittedTxNetwork] = useState<MonadNetwork | null>(null);
 
+  const runtimeTokenAddress = useMemo(
+    () => normalizeClientAddress(data.state?.tokenAddress ?? undefined),
+    [data.state?.tokenAddress]
+  );
+  const runtimeLockAddress = useMemo(
+    () =>
+      normalizeClientAddress(data.state?.lockAddress ?? undefined) ??
+      normalizeClientAddress(data.lockContract?.address ?? undefined),
+    [data.lockContract?.address, data.state?.lockAddress]
+  );
+  const resolvedHclawTokenAddress = runtimeTokenAddress ?? hclawTokenAddress;
+  const resolvedHclawLockAddress = runtimeLockAddress ?? hclawLockAddress;
+
   const { switchChainAsync } = useSwitchChain();
   const publicClient = usePublicClient({ chainId: activeChainId });
   const { writeContractAsync } = useWriteContract();
@@ -196,11 +211,11 @@ export default function HclawHubPage() {
     refetch: refetchHclawBalance,
   } = useReadContract({
     chainId: activeChainId,
-    address: hclawTokenAddress,
+    address: resolvedHclawTokenAddress,
     abi: ERC20_ABI,
     functionName: "balanceOf",
-    args: hclawTokenAddress && address ? [address] : undefined,
-    query: { enabled: Boolean(hclawTokenAddress && address) },
+    args: resolvedHclawTokenAddress && address ? [address] : undefined,
+    query: { enabled: Boolean(resolvedHclawTokenAddress && address) },
   });
 
   const {
@@ -208,14 +223,14 @@ export default function HclawHubPage() {
     refetch: refetchHclawAllowance,
   } = useReadContract({
     chainId: activeChainId,
-    address: hclawTokenAddress,
+    address: resolvedHclawTokenAddress,
     abi: ERC20_ABI,
     functionName: "allowance",
     args:
-      hclawTokenAddress && address && hclawLockAddress
-        ? [address, hclawLockAddress]
+      resolvedHclawTokenAddress && address && resolvedHclawLockAddress
+        ? [address, resolvedHclawLockAddress]
         : undefined,
-    query: { enabled: Boolean(hclawTokenAddress && address && hclawLockAddress) },
+    query: { enabled: Boolean(resolvedHclawTokenAddress && address && resolvedHclawLockAddress) },
   });
 
   const hclawBalance = useMemo(() => {
@@ -313,11 +328,11 @@ export default function HclawHubPage() {
       return;
     }
 
-    if (!hclawTokenAddress || !hclawLockAddress) {
+    if (!resolvedHclawTokenAddress || !resolvedHclawLockAddress) {
       setLockStatus(
         activeNetwork === "mainnet"
-          ? "Set NEXT_PUBLIC_HCLAW_TOKEN_ADDRESS_MAINNET and NEXT_PUBLIC_HCLAW_LOCK_ADDRESS_MAINNET (or fallback NEXT_PUBLIC_HCLAW_* values)."
-          : "Set NEXT_PUBLIC_HCLAW_TOKEN_ADDRESS_TESTNET and NEXT_PUBLIC_HCLAW_LOCK_ADDRESS_TESTNET (or fallback NEXT_PUBLIC_HCLAW_* values)."
+          ? "HCLAW token/lock addresses are not configured for mainnet."
+          : "HCLAW token/lock addresses are not configured for testnet."
       );
       return;
     }
@@ -366,10 +381,10 @@ export default function HclawHubPage() {
         setLockStatus("Approving HCLAW spend for lock contract...");
         const approveHash = await writeContractAsync({
           chainId: activeChainId,
-          address: hclawTokenAddress,
+          address: resolvedHclawTokenAddress,
           abi: ERC20_ABI,
           functionName: "approve",
-          args: [hclawLockAddress, amountWei],
+          args: [resolvedHclawLockAddress, amountWei],
         });
         setSubmittedApproveTxHash(approveHash);
         setSubmittedTxNetwork(activeNetwork);
@@ -391,7 +406,7 @@ export default function HclawHubPage() {
       }
       const simulation = await publicClient.simulateContract({
         account: address,
-        address: hclawLockAddress,
+        address: resolvedHclawLockAddress,
         abi: HCLAW_LOCK_ABI,
         functionName: "lock",
         args: [amountWei, previewDuration],

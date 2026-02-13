@@ -6,6 +6,7 @@ import { getUserLockState } from "@/lib/hclaw-lock";
 import { getUserPointsSummary } from "@/lib/hclaw-points";
 import { getClaimableSummary } from "@/lib/hclaw-rewards";
 import { getNetworkState } from "@/lib/network";
+import { getHclawAddressIfSet, getHclawLockAddressIfSet } from "@/lib/env";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -33,6 +34,8 @@ export async function GET(request: Request) {
     const agentId = searchParams.get("agentId") ?? undefined;
     const defaultNetwork = getNetworkState().monadTestnet ? "testnet" : "mainnet";
     const network = parseNetwork(searchParams.get("network")) ?? defaultNetwork;
+    const tokenAddress = getHclawAddressIfSet(network);
+    const lockAddress = getHclawLockAddressIfSet(network);
 
     const state = await getHclawState(network, {
       userAddress: user ?? undefined,
@@ -43,6 +46,9 @@ export async function GET(request: Request) {
       return NextResponse.json(
         {
           configured: false,
+          network,
+          tokenAddress,
+          lockAddress,
           message: "HCLAW token address is not configured",
         },
         { status: 200 }
@@ -52,7 +58,11 @@ export async function GET(request: Request) {
     if (!user) {
       return NextResponse.json({
         configured: true,
-        state,
+        state: {
+          ...state,
+          tokenAddress,
+          lockAddress,
+        },
       });
     }
 
@@ -65,7 +75,11 @@ export async function GET(request: Request) {
 
     return NextResponse.json({
       configured: true,
-      state,
+      state: {
+        ...state,
+        tokenAddress,
+        lockAddress,
+      },
       userContext: {
         cap: capContext,
         lock: lockState,
