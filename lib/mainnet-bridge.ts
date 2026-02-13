@@ -470,6 +470,7 @@ export async function bridgeDepositToHyperliquidAgent(params: {
       const known = await getKnownHyperunitProtocolAddress(hlAddress, HYPERUNIT_HYPERLIQUID_CHAIN);
       if (!known) throw error;
       protocolAddress = known;
+      console.warn(`[Bridge] Using known Hyperunit protocol address for deposit: ${protocolAddress}`);
     }
 
     if (!sourceIsNative) {

@@ -792,6 +792,10 @@ cp .env.example .env.local
 | `HYPERLIQUID_PRIVATE_KEY`            | Yes      | Operator wallet key (testnet funding + ops signer)    |
 | `NEXT_PUBLIC_HYPERLIQUID_TESTNET`    | No       | `"true"` for HL testnet (default: mirrors Monad)      |
 | `RELAY_FEE_BPS`                      | No       | Deposit relay fee in basis points (default: 100 = 1%) |
+| `MAINNET_MON_MIN_PRICE_USD`          | No       | Reject mainnet MON pricing below this bound (default: 1.05) |
+| `MAINNET_MON_MAX_PRICE_USD`          | No       | Reject mainnet MON pricing above this bound |
+| `MAINNET_MON_ORACLE_FEED_MAX_DRIFT_PCT` | No    | Max allowed drift between vault oracle and external MON feed |
+| `MAINNET_MON_PRICE_OVERRIDE_USD`     | No       | Manual MON/USD override for relay conversion (use cautiously) |
 | `RELAY_STABLE_TOKENS`                | No       | Comma-separated ERC20 addresses treated as $1 in relay conversion |
 | `MAINNET_BRIDGE_ENABLED`             | No       | Enable mainnet withdrawal bridge relay (deposit bridge is disabled) |
 | `MAINNET_BRIDGE_PREFER_DEBRIDGE`     | No       | Try deBridge execution before Hyperunit (withdrawal path) |

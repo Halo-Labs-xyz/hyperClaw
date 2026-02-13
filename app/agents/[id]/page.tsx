@@ -37,6 +37,7 @@ const AUTONOMY_LABELS = {
   semi: { icon: "🤝", label: "Semi-Auto", color: "text-accent", bg: "bg-accent/10", border: "border-accent/20" },
   manual: { icon: "👤", label: "Manual", color: "text-muted", bg: "bg-muted/10", border: "border-muted/20" },
 };
+const TRADES_PER_PAGE = 12;
 
 type TxUiPhase =
   | "idle"
@@ -161,6 +162,7 @@ export default function AgentDetailPage() {
   const [summaryAgent, setSummaryAgent] = useState<AgentSummary | null>(null);
   const [isOwner, setIsOwner] = useState(false);
   const [trades, setTrades] = useState<TradeLog[]>([]);
+  const [tradePage, setTradePage] = useState(1);
   const [loading, setLoading] = useState(true);
   const [viewError, setViewError] = useState("");
   const [tab, setTab] = useState<TabKey>("overview");
@@ -279,6 +281,22 @@ export default function AgentDetailPage() {
   const [indicatorCustomBullish, setIndicatorCustomBullish] = useState("");
   const [indicatorCustomBearish, setIndicatorCustomBearish] = useState("");
   const [indicatorCustomDescription, setIndicatorCustomDescription] = useState("");
+
+  const sortedTrades = useMemo(() => {
+    return [...trades].sort((a, b) => b.timestamp - a.timestamp);
+  }, [trades]);
+  const tradePageCount = Math.max(1, Math.ceil(sortedTrades.length / TRADES_PER_PAGE));
+  const currentTradePage = Math.min(tradePage, tradePageCount);
+  const tradePageStartIndex = (currentTradePage - 1) * TRADES_PER_PAGE;
+  const paginatedTrades = sortedTrades.slice(
+    tradePageStartIndex,
+    tradePageStartIndex + TRADES_PER_PAGE
+  );
+  const tradeRangeStart = sortedTrades.length === 0 ? 0 : tradePageStartIndex + 1;
+  const tradeRangeEnd = Math.min(
+    tradePageStartIndex + paginatedTrades.length,
+    sortedTrades.length
+  );
 
   const { writeContractAsync } = useWriteContract();
   const { switchChainAsync } = useSwitchChain();
@@ -681,6 +699,14 @@ export default function AgentDetailPage() {
       return () => clearInterval(interval);
     }
   }, [tab, fetchChat]);
+
+  useEffect(() => {
+    if (tab === "trades") setTradePage(1);
+  }, [tab]);
+
+  useEffect(() => {
+    setTradePage((prev) => Math.min(prev, tradePageCount));
+  }, [tradePageCount]);
 
   useEffect(() => {
     if (tab !== "deposit") return;
@@ -1779,64 +1805,92 @@ export default function AgentDetailPage() {
                   <p className="text-muted text-sm">No trades yet. {agent.autonomy?.mode === "manual" ? "Trigger AI Trade to start." : "Agent will trade based on its autonomy settings."}</p>
                 </div>
               ) : (
-                <div className="overflow-x-auto">
-                  <table className="w-full text-sm">
-                    <thead>
-                      <tr className="table-header text-[11px] text-dim uppercase tracking-wider text-left">
-                        <th className="px-5 py-3.5 font-medium">Time</th>
-                        <th className="px-5 py-3.5 font-medium">Action</th>
-                        <th className="px-5 py-3.5 font-medium">Asset</th>
-                        <th className="px-5 py-3.5 font-medium">Size</th>
-                        <th className="px-5 py-3.5 font-medium">Leverage</th>
-                        <th className="px-5 py-3.5 font-medium">Confidence</th>
-                        <th className="px-5 py-3.5 font-medium">Status</th>
-                        <th className="px-5 py-3.5 font-medium">Reasoning</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {trades.map((trade) => (
-                        <tr key={trade.id} className="table-row">
-                          <td className="px-5 py-3.5 text-dim mono-nums text-xs">
-                            {new Date(trade.timestamp).toLocaleString()}
-                          </td>
-                          <td className="px-5 py-3.5">
-                            <span className={`chip ${
-                              trade.decision.action === "long" ? "chip-active" :
-                              trade.decision.action === "short" ? "bg-danger/15 text-danger" :
-                              trade.decision.action === "close" ? "chip-paused" : "chip-stopped"
-                            } uppercase text-[10px] font-semibold tracking-wider`}>
-                              {trade.decision.action}
-                            </span>
-                          </td>
-                          <td className="px-5 py-3.5 font-medium text-foreground">{trade.decision.asset}</td>
-                          <td className="px-5 py-3.5 mono-nums">{(trade.decision.size * 100).toFixed(0)}%</td>
-                          <td className="px-5 py-3.5 mono-nums">{trade.decision.leverage}x</td>
-                          <td className="px-5 py-3.5">
-                            <div className="flex items-center gap-2">
-                              <div className="w-12 h-1 rounded-full bg-surface overflow-hidden">
-                                <div
-                                  className="h-full rounded-full bg-accent"
-                                  style={{ width: `${trade.decision.confidence * 100}%` }}
-                                />
-                              </div>
-                              <span className="mono-nums text-xs">{(trade.decision.confidence * 100).toFixed(0)}%</span>
-                            </div>
-                          </td>
-                          <td className="px-5 py-3.5">
-                            {trade.executed ? (
-                              <span className="chip chip-active text-[10px]">Executed</span>
-                            ) : (
-                              <span className="chip chip-stopped text-[10px]">Skipped</span>
-                            )}
-                          </td>
-                          <td className="px-5 py-3.5 text-dim text-xs max-w-[200px]">
-                            <ReasoningCell reasoning={trade.decision.reasoning} />
-                          </td>
+                <>
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-sm">
+                      <thead>
+                        <tr className="table-header text-[11px] text-dim uppercase tracking-wider text-left">
+                          <th className="px-5 py-3.5 font-medium">Time</th>
+                          <th className="px-5 py-3.5 font-medium">Action</th>
+                          <th className="px-5 py-3.5 font-medium">Asset</th>
+                          <th className="px-5 py-3.5 font-medium">Size</th>
+                          <th className="px-5 py-3.5 font-medium">Leverage</th>
+                          <th className="px-5 py-3.5 font-medium">Confidence</th>
+                          <th className="px-5 py-3.5 font-medium">Status</th>
+                          <th className="px-5 py-3.5 font-medium">Reasoning</th>
                         </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
+                      </thead>
+                      <tbody>
+                        {paginatedTrades.map((trade) => (
+                          <tr key={trade.id} className="table-row">
+                            <td className="px-5 py-3.5 text-dim mono-nums text-xs">
+                              {new Date(trade.timestamp).toLocaleString()}
+                            </td>
+                            <td className="px-5 py-3.5">
+                              <span className={`chip ${
+                                trade.decision.action === "long" ? "chip-active" :
+                                trade.decision.action === "short" ? "bg-danger/15 text-danger" :
+                                trade.decision.action === "close" ? "chip-paused" : "chip-stopped"
+                              } uppercase text-[10px] font-semibold tracking-wider`}>
+                                {trade.decision.action}
+                              </span>
+                            </td>
+                            <td className="px-5 py-3.5 font-medium text-foreground">{trade.decision.asset}</td>
+                            <td className="px-5 py-3.5 mono-nums">{(trade.decision.size * 100).toFixed(0)}%</td>
+                            <td className="px-5 py-3.5 mono-nums">{trade.decision.leverage}x</td>
+                            <td className="px-5 py-3.5">
+                              <div className="flex items-center gap-2">
+                                <div className="w-12 h-1 rounded-full bg-surface overflow-hidden">
+                                  <div
+                                    className="h-full rounded-full bg-accent"
+                                    style={{ width: `${trade.decision.confidence * 100}%` }}
+                                  />
+                                </div>
+                                <span className="mono-nums text-xs">{(trade.decision.confidence * 100).toFixed(0)}%</span>
+                              </div>
+                            </td>
+                            <td className="px-5 py-3.5">
+                              {trade.executed ? (
+                                <span className="chip chip-active text-[10px]">Executed</span>
+                              ) : (
+                                <span className="chip chip-stopped text-[10px]">Skipped</span>
+                              )}
+                            </td>
+                            <td className="px-5 py-3.5 text-dim text-xs max-w-[200px]">
+                              <ReasoningCell reasoning={trade.decision.reasoning} />
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                  <div className="border-t border-card-border px-5 py-3.5 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                    <p className="text-xs text-muted mono-nums">
+                      Showing {tradeRangeStart}-{tradeRangeEnd} of {sortedTrades.length}
+                    </p>
+                    <div className="flex items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={() => setTradePage((prev) => Math.max(1, prev - 1))}
+                        disabled={currentTradePage === 1}
+                        className="px-3 py-1.5 rounded-lg border border-card-border bg-surface text-xs font-medium text-foreground disabled:opacity-40 disabled:cursor-not-allowed hover:border-accent/30"
+                      >
+                        Previous
+                      </button>
+                      <span className="text-xs text-muted mono-nums min-w-[92px] text-center">
+                        Page {currentTradePage} / {tradePageCount}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => setTradePage((prev) => Math.min(tradePageCount, prev + 1))}
+                        disabled={currentTradePage === tradePageCount}
+                        className="px-3 py-1.5 rounded-lg border border-card-border bg-surface text-xs font-medium text-foreground disabled:opacity-40 disabled:cursor-not-allowed hover:border-accent/30"
+                      >
+                        Next
+                      </button>
+                    </div>
+                  </div>
+                </>
               )}
             </div>
           )}

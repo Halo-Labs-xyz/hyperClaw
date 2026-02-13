@@ -81,6 +81,19 @@ const tokenDecimalsCache = new Map<string, number>();
 let monPriceCache: { price: number; timestamp: number } | null = null;
 const PRICE_CACHE_TTL = 30_000; // 30 seconds
 
+const MAINNET_MON_MIN_PRICE_USD = Number.parseFloat(
+  process.env.MAINNET_MON_MIN_PRICE_USD || "1.05"
+);
+const MAINNET_MON_MAX_PRICE_USD = Number.parseFloat(
+  process.env.MAINNET_MON_MAX_PRICE_USD || "100000"
+);
+const MAINNET_MON_ORACLE_FEED_MAX_DRIFT_PCT = Number.parseFloat(
+  process.env.MAINNET_MON_ORACLE_FEED_MAX_DRIFT_PCT || "35"
+);
+const MAINNET_MON_PRICE_OVERRIDE_USD = Number.parseFloat(
+  process.env.MAINNET_MON_PRICE_OVERRIDE_USD || ""
+);
+
 /**
  * Fetch the live MON/USD price from CoinGecko or a DEX aggregator.
  * Falls back to a secondary source if primary fails.
@@ -139,6 +152,22 @@ async function fetchMonPrice(): Promise<number> {
   throw new Error("Unable to fetch MON price. Deposit relay paused for safety.");
 }
 
+function isFinitePositive(value: number): boolean {
+  return Number.isFinite(value) && value > 0;
+}
+
+function isMonPriceWithinMainnetBounds(price: number): boolean {
+  if (!isFinitePositive(price)) return false;
+  if (Number.isFinite(MAINNET_MON_MIN_PRICE_USD) && price < MAINNET_MON_MIN_PRICE_USD) return false;
+  if (Number.isFinite(MAINNET_MON_MAX_PRICE_USD) && price > MAINNET_MON_MAX_PRICE_USD) return false;
+  return true;
+}
+
+function calculatePctDrift(a: number, b: number): number {
+  const base = Math.max(Math.abs(a), Math.abs(b), Number.EPSILON);
+  return (Math.abs(a - b) / base) * 100;
+}
+
 /**
  * Convert MON amount (in wei) to USDC value, applying network-specific logic.
  *
@@ -159,9 +188,54 @@ async function monToUsdc(
     return { usdValue, rate: TESTNET_MON_TO_USDC, fee: 0 };
   }
 
-  // Mainnet: prefer on-chain vault oracle, fallback to external feed.
-  const oraclePrice = await getVaultOracleTokenPriceUsd(zeroAddress, client, vaultAddress);
-  const monPrice = oraclePrice ?? (await fetchMonPrice());
+  // Mainnet: explicit override > reconciled oracle/feed.
+  const overridePrice = isFinitePositive(MAINNET_MON_PRICE_OVERRIDE_USD)
+    ? MAINNET_MON_PRICE_OVERRIDE_USD
+    : null;
+
+  if (overridePrice !== null) {
+    if (!isMonPriceWithinMainnetBounds(overridePrice)) {
+      throw new Error(
+        `MAINNET_MON_PRICE_OVERRIDE_USD=${overridePrice} is outside bounds ` +
+          `[${MAINNET_MON_MIN_PRICE_USD}, ${MAINNET_MON_MAX_PRICE_USD}]`
+      );
+    }
+    const grossUsdc = monAmount * overridePrice;
+    const fee = grossUsdc * (RELAY_FEE_BPS / 10000);
+    const usdValue = grossUsdc - fee;
+    return { usdValue: Math.max(0, usdValue), rate: overridePrice, fee };
+  }
+
+  // Mainnet: reconcile on-chain oracle with external feed to avoid bad $1 pricing.
+  const oracleCandidate = await getVaultOracleTokenPriceUsd(zeroAddress, client, vaultAddress);
+  const feedCandidate = await fetchMonPrice();
+  const oraclePrice = isFinitePositive(oracleCandidate ?? NaN) ? Number(oracleCandidate) : null;
+  const feedPrice = isFinitePositive(feedCandidate) ? feedCandidate : null;
+
+  let monPrice: number | null = null;
+
+  if (oraclePrice !== null && feedPrice !== null) {
+    const driftPct = calculatePctDrift(oraclePrice, feedPrice);
+    if (
+      Number.isFinite(MAINNET_MON_ORACLE_FEED_MAX_DRIFT_PCT) &&
+      driftPct > MAINNET_MON_ORACLE_FEED_MAX_DRIFT_PCT
+    ) {
+      throw new Error(
+        `MON price mismatch (oracle=${oraclePrice}, feed=${feedPrice}, drift=${driftPct.toFixed(2)}%)`
+      );
+    }
+    monPrice = feedPrice;
+  } else {
+    monPrice = feedPrice ?? oraclePrice;
+  }
+
+  if (monPrice === null || !isMonPriceWithinMainnetBounds(monPrice)) {
+    throw new Error(
+      `Invalid mainnet MON price ${monPrice ?? "n/a"} outside bounds ` +
+        `[${MAINNET_MON_MIN_PRICE_USD}, ${MAINNET_MON_MAX_PRICE_USD}]`
+    );
+  }
+
   const grossUsdc = monAmount * monPrice;
   const fee = grossUsdc * (RELAY_FEE_BPS / 10000);
   const usdValue = grossUsdc - fee;
