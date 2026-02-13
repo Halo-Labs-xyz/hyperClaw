@@ -14,6 +14,7 @@ import { verifyApiKey, unauthorizedResponse } from "@/lib/auth";
 import { type Address } from "viem";
 import { activateAgent, getLifecycleState } from "@/lib/agent-lifecycle";
 import { getAgent, updateAgent } from "@/lib/store";
+import { getVaultAddressIfDeployed } from "@/lib/env";
 
 function parseUsdAmount(value: unknown): number | undefined {
   if (typeof value === "number") {
@@ -364,7 +365,7 @@ export async function POST(request: Request) {
           network: isTestnet() ? "testnet" : "mainnet",
           configured: !!process.env.HYPERLIQUID_PRIVATE_KEY &&
             process.env.HYPERLIQUID_PRIVATE_KEY !== "your_agent_private_key_hex",
-          vaultAddress: process.env.NEXT_PUBLIC_VAULT_ADDRESS || null,
+          vaultAddress: getVaultAddressIfDeployed(isTestnet() ? "testnet" : "mainnet"),
         });
       }
 

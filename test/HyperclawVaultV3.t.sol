@@ -46,48 +46,59 @@ contract HyperclawVaultV3Test {
         alice = new VaultV3Actor();
         bob = new VaultV3Actor();
 
-        policy.setDefaultCapUsd(200e18);
-        policy.setUserCapUsd(address(alice), 100e18);
-        policy.setUserCapUsd(address(bob), 50e18);
+        policy.setDefaultCapUsd(2_000e18);
+        policy.setUserCapUsd(address(alice), 700e18);
+        policy.setUserCapUsd(address(bob), 500e18);
     }
 
     function testEnforcesUserSpecificCapOnDeposit() public {
-        alice.depositMon{value: 80 ether}(vault, AGENT_A);
+        vault.setCapEnforcementEnabled(true);
+        alice.depositMon{value: 460 ether}(vault, AGENT_A);
 
-        assertEq(vault.userDepositsUSD(AGENT_A, address(alice)), 80 ether, "alice basis mismatch");
+        assertEq(vault.userDepositsUSD(AGENT_A, address(alice)), 460 ether, "alice basis mismatch");
 
-        (bool ok, ) = address(alice).call{value: 30 ether}(
+        (bool ok, ) = address(alice).call{value: 300 ether}(
             abi.encodeWithSelector(VaultV3Actor.depositMon.selector, vault, AGENT_A)
         );
         assertTrue(!ok, "expected user cap revert for alice");
 
-        (bool bobOk, ) = address(bob).call{value: 60 ether}(
+        (bool bobOk, ) = address(bob).call{value: 600 ether}(
             abi.encodeWithSelector(VaultV3Actor.depositMon.selector, vault, AGENT_A)
         );
         assertTrue(!bobOk, "expected user cap revert for bob");
     }
 
     function testWithdrawReducesUserDepositBasis() public {
-        alice.depositMon{value: 90 ether}(vault, AGENT_A);
-        assertEq(vault.userDepositsUSD(AGENT_A, address(alice)), 90 ether, "basis before withdraw");
+        alice.depositMon{value: 900 ether}(vault, AGENT_A);
+        assertEq(vault.userDepositsUSD(AGENT_A, address(alice)), 900 ether, "basis before withdraw");
 
-        alice.withdraw(vault, AGENT_A, 30 ether);
+        alice.withdraw(vault, AGENT_A, 300 ether);
 
-        assertEq(vault.userDepositsUSD(AGENT_A, address(alice)), 60 ether, "basis after withdraw");
-        assertEq(vault.userShares(AGENT_A, address(alice)), 60 ether, "shares after withdraw");
+        assertEq(vault.userDepositsUSD(AGENT_A, address(alice)), 600 ether, "basis after withdraw");
+        assertEq(vault.userShares(AGENT_A, address(alice)), 600 ether, "shares after withdraw");
     }
 
     function testKeepsDepositAndWithdrawCompatibility() public {
-        alice.depositMon{value: 40 ether}(vault, AGENT_A);
-        bob.depositMon{value: 10 ether}(vault, AGENT_A);
+        alice.depositMon{value: 600 ether}(vault, AGENT_A);
+        bob.depositMon{value: 500 ether}(vault, AGENT_A);
 
-        assertEq(vault.totalShares(AGENT_A), 50 ether, "total shares mismatch");
-        assertEq(vault.totalDepositsUSD(AGENT_A), 50 ether, "total deposit basis mismatch");
+        assertEq(vault.totalShares(AGENT_A), 1_100 ether, "total shares mismatch");
+        assertEq(vault.totalDepositsUSD(AGENT_A), 1_100 ether, "total deposit basis mismatch");
 
-        alice.withdraw(vault, AGENT_A, 20 ether);
+        alice.withdraw(vault, AGENT_A, 300 ether);
 
-        assertEq(vault.totalShares(AGENT_A), 30 ether, "shares should burn pro-rata");
-        assertEq(vault.userDepositsUSD(AGENT_A, address(alice)), 20 ether, "alice basis should reduce");
+        assertEq(vault.totalShares(AGENT_A), 800 ether, "shares should burn pro-rata");
+        assertEq(vault.userDepositsUSD(AGENT_A, address(alice)), 300 ether, "alice basis should reduce");
+    }
+
+    function testCapsDisabledByDefaultForEndToEndFlow() public {
+        assertTrue(!vault.capEnforcementEnabled(), "caps should default disabled");
+
+        alice.depositMon{value: 900 ether}(vault, AGENT_A);
+        alice.depositMon{value: 800 ether}(vault, AGENT_A);
+
+        assertEq(vault.userDepositsUSD(AGENT_A, address(alice)), 1_700 ether, "alice basis should include both deposits");
+        assertEq(vault.totalDepositsUSD(AGENT_A), 1_700 ether, "vault basis should include both deposits");
     }
 
     function assertEq(uint256 left, uint256 right, string memory reason) internal pure {

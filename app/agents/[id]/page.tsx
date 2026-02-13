@@ -323,6 +323,9 @@ export default function AgentDetailPage() {
     const pick = (value: string | undefined) =>
       value && /^0x[a-fA-F0-9]{40}$/.test(value) ? (value as Address) : undefined;
 
+    const hotfixMainnet =
+      pick(process.env.NEXT_PUBLIC_MAINNET_VAULT_HOTFIX_ADDRESS) ??
+      ("0x56C1093B0e960d5e0df987Ca9f85471a0945B50F" as Address);
     const mainnet =
       pick(process.env.NEXT_PUBLIC_MONAD_MAINNET_VAULT_ADDRESS) ??
       pick(process.env.NEXT_PUBLIC_VAULT_ADDRESS_MAINNET);
@@ -331,7 +334,10 @@ export default function AgentDetailPage() {
       pick(process.env.NEXT_PUBLIC_VAULT_ADDRESS_TESTNET);
     const fallback = pick(process.env.NEXT_PUBLIC_VAULT_ADDRESS);
 
-    return (activeNetwork === "mainnet" ? mainnet : testnet) ?? fallback;
+    if (activeNetwork === "mainnet") {
+      return hotfixMainnet ?? mainnet ?? fallback;
+    }
+    return testnet ?? fallback;
   }, [activeNetwork]);
   const agentIdBytes = agentIdToBytes32(agentId);
 

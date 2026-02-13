@@ -49,6 +49,7 @@ import {
 } from "./supabase-store";
 import { getUserCapContext } from "./hclaw-policy";
 import type { HclawPointsActivityInput } from "./hclaw-points";
+import { getVaultAddressIfDeployed } from "./env";
 type MonadNetwork = "mainnet" | "testnet";
 
 // ============================================
@@ -250,6 +251,7 @@ function getMonadRpcUrl(network?: MonadNetwork): string {
 
 function getVaultAddress(network?: MonadNetwork): Address | undefined {
   const selectedNetwork = network ?? (isMonadTestnet() ? "testnet" : "mainnet");
+  const resolvedForNetwork = getVaultAddressIfDeployed(selectedNetwork);
 
   const mainnetCandidates = [
     process.env.MONAD_MAINNET_VAULT_ADDRESS,
@@ -262,7 +264,10 @@ function getVaultAddress(network?: MonadNetwork): Address | undefined {
     process.env.NEXT_PUBLIC_VAULT_ADDRESS_TESTNET,
   ];
 
-  const preferred = selectedNetwork === "mainnet" ? mainnetCandidates : testnetCandidates;
+  const preferred =
+    selectedNetwork === "mainnet"
+      ? [resolvedForNetwork, ...mainnetCandidates]
+      : [resolvedForNetwork, ...testnetCandidates];
   const fallback = process.env.NEXT_PUBLIC_VAULT_ADDRESS;
   const alternates = selectedNetwork === "mainnet" ? testnetCandidates : mainnetCandidates;
   const seen = new Set<string>();
@@ -284,6 +289,7 @@ function getVaultAddress(network?: MonadNetwork): Address | undefined {
 
 function getVaultAddressCandidates(network?: MonadNetwork): Address[] {
   const selectedNetwork = network ?? (isMonadTestnet() ? "testnet" : "mainnet");
+  const resolvedForNetwork = getVaultAddressIfDeployed(selectedNetwork);
 
   const mainnetCandidates = [
     process.env.MONAD_MAINNET_VAULT_ADDRESS,
@@ -295,7 +301,10 @@ function getVaultAddressCandidates(network?: MonadNetwork): Address[] {
     process.env.NEXT_PUBLIC_MONAD_TESTNET_VAULT_ADDRESS,
     process.env.NEXT_PUBLIC_VAULT_ADDRESS_TESTNET,
   ];
-  const preferred = selectedNetwork === "mainnet" ? mainnetCandidates : testnetCandidates;
+  const preferred =
+    selectedNetwork === "mainnet"
+      ? [resolvedForNetwork, ...mainnetCandidates]
+      : [resolvedForNetwork, ...testnetCandidates];
   const alternates = selectedNetwork === "mainnet" ? testnetCandidates : mainnetCandidates;
   const fallback = process.env.NEXT_PUBLIC_VAULT_ADDRESS;
 

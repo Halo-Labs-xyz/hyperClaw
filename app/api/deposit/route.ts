@@ -8,6 +8,7 @@ import {
 } from "@/lib/deposit-relay";
 import { type Address } from "viem";
 import { getUserCapContext } from "@/lib/hclaw-policy";
+import { getVaultAddressIfDeployed } from "@/lib/env";
 
 type MonadNetwork = "mainnet" | "testnet";
 
@@ -17,17 +18,9 @@ function parseNetwork(value: unknown): MonadNetwork | undefined {
 }
 
 function summarizeVaultConfig() {
-  const mainnet =
-    process.env.MONAD_MAINNET_VAULT_ADDRESS ||
-    process.env.NEXT_PUBLIC_MONAD_MAINNET_VAULT_ADDRESS ||
-    process.env.NEXT_PUBLIC_VAULT_ADDRESS_MAINNET ||
-    null;
-  const testnet =
-    process.env.MONAD_TESTNET_VAULT_ADDRESS ||
-    process.env.NEXT_PUBLIC_MONAD_TESTNET_VAULT_ADDRESS ||
-    process.env.NEXT_PUBLIC_VAULT_ADDRESS_TESTNET ||
-    null;
-  const fallback = process.env.NEXT_PUBLIC_VAULT_ADDRESS || null;
+  const mainnet = getVaultAddressIfDeployed("mainnet");
+  const testnet = getVaultAddressIfDeployed("testnet");
+  const fallback = getVaultAddressIfDeployed();
   return { mainnet, testnet, fallback };
 }
 

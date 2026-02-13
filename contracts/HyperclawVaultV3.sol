@@ -62,6 +62,7 @@ contract HyperclawVaultV3 {
 
     mapping(address => TokenPrice) public tokenPrices;
     uint256 public maxPriceAge = 1 hours;
+    bool public capEnforcementEnabled = false;
 
     uint256 constant TIER_0_CAP = 100e18;
     uint256 constant TIER_1_MCAP = 1_000e18;
@@ -85,6 +86,7 @@ contract HyperclawVaultV3 {
     event OwnershipTransferred(address indexed oldOwner, address indexed newOwner);
     event CapTierUnlocked(uint256 newMaxDeposit, uint256 hclawMarketCap);
     event HclawPolicyUpdated(address indexed policy);
+    event CapEnforcementUpdated(bool enabled);
 
     modifier onlyOwner() {
         require(msg.sender == owner, "Not owner");
@@ -123,6 +125,11 @@ contract HyperclawVaultV3 {
     function setHclawPolicy(address _policy) external onlyOwner {
         hclawPolicy = _policy;
         emit HclawPolicyUpdated(_policy);
+    }
+
+    function setCapEnforcementEnabled(bool enabled) external onlyOwner {
+        capEnforcementEnabled = enabled;
+        emit CapEnforcementUpdated(enabled);
     }
 
     function whitelistToken(address token, bool status) external onlyOwner {
@@ -212,11 +219,13 @@ contract HyperclawVaultV3 {
     function _deposit(bytes32 agentId, address token, uint256 amount, uint256 usdValue) internal {
         require(usdValue > 0, "Zero USD value");
 
-        uint256 baseCap = getMaxDepositUSD();
-        require(totalDepositsUSD[agentId] + usdValue <= baseCap, "Exceeds vault cap");
+        if (capEnforcementEnabled) {
+            uint256 baseCap = getMaxDepositUSD();
+            require(totalDepositsUSD[agentId] + usdValue <= baseCap, "Exceeds vault cap");
 
-        uint256 userCap = getMaxDepositUSDForUser(msg.sender);
-        require(userDepositsUSD[agentId][msg.sender] + usdValue <= userCap, "Exceeds user cap");
+            uint256 userCap = getMaxDepositUSDForUser(msg.sender);
+            require(userDepositsUSD[agentId][msg.sender] + usdValue <= userCap, "Exceeds user cap");
+        }
 
         uint256 shares = _calculateShares(agentId, usdValue);
         require(shares > 0, "Deposit too small");

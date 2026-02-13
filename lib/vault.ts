@@ -1,4 +1,5 @@
 import { type Address } from "viem";
+import { getVaultAddressIfDeployed } from "@/lib/env";
 
 // ============================================
 // HyperclawVault ABI
@@ -390,7 +391,7 @@ export const ERC20_ABI = [
 // ============================================
 
 export function getVaultAddress(): Address {
-  const addr = process.env.NEXT_PUBLIC_VAULT_ADDRESS;
+  const addr = getVaultAddressIfDeployed();
   if (!addr) throw new Error("NEXT_PUBLIC_VAULT_ADDRESS not set");
   return addr as Address;
 }
