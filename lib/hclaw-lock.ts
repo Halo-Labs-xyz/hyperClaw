@@ -1,4 +1,4 @@
-import { createPublicClient, encodeFunctionData, formatEther, http, type Address } from "viem";
+import { createPublicClient, encodeFunctionData, formatEther, http, parseAbiItem, type Address } from "viem";
 import { getHclawLockAddressIfSet } from "@/lib/env";
 import { isMonadTestnet } from "@/lib/network";
 import type { HclawLockPosition, HclawLockState, HclawLockTier } from "@/lib/types";
@@ -9,6 +9,11 @@ export type MonadNetwork = "mainnet" | "testnet";
 const LOCK_COMPAT_CACHE_TTL_MS = 60_000;
 const LOCK_READ_PROBE_USER = "0x000000000000000000000000000000000000dEaD" as Address;
 const LOCK_READ_WARN_COOLDOWN_MS = 60_000;
+const LOCK_EVENT_CACHE_TTL_MS = 60_000;
+const LOCK_EVENT_SCAN_CHUNK_DEFAULT = BigInt(200_000);
+const LOCKED_EVENT = parseAbiItem(
+  "event Locked(uint256 indexed lockId, address indexed user, uint256 amount, uint16 durationDays, uint64 endTs)"
+);
 const lockCompatCache = new Map<
   string,
   {
@@ -17,6 +22,7 @@ const lockCompatCache = new Map<
   }
 >();
 const lockReadWarnCache = new Map<string, number>();
+const lockEventIdsCache = new Map<string, { expiresAt: number; value: bigint[] }>();
 
 function getMonadRpcUrl(network?: MonadNetwork): string {
   const mainnetRpc =
@@ -127,6 +133,85 @@ function derivePowerFromPositions(positions: HclawLockPosition[]): number {
     power += p.amount * (p.multiplierBps / 10_000);
   }
   return power;
+}
+
+function parseBlockEnv(name: string): bigint | null {
+  const raw = process.env[name];
+  if (!raw || !raw.trim()) return null;
+  try {
+    const parsed = BigInt(raw.trim());
+    return parsed >= BigInt(0) ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
+function getLockEventScanStartBlock(network?: MonadNetwork): bigint {
+  if (network === "mainnet") {
+    return (
+      parseBlockEnv("HCLAW_LOCK_EVENT_FROM_BLOCK_MAINNET") ??
+      parseBlockEnv("HCLAW_LOCK_EVENT_FROM_BLOCK") ??
+      BigInt(0)
+    );
+  }
+  if (network === "testnet") {
+    return (
+      parseBlockEnv("HCLAW_LOCK_EVENT_FROM_BLOCK_TESTNET") ??
+      parseBlockEnv("HCLAW_LOCK_EVENT_FROM_BLOCK") ??
+      BigInt(0)
+    );
+  }
+  return parseBlockEnv("HCLAW_LOCK_EVENT_FROM_BLOCK") ?? BigInt(0);
+}
+
+function getLockEventChunkSize(): bigint {
+  const configured = parseBlockEnv("HCLAW_LOCK_EVENT_SCAN_CHUNK");
+  if (!configured || configured <= BigInt(0)) return LOCK_EVENT_SCAN_CHUNK_DEFAULT;
+  return configured;
+}
+
+async function getUserLockIdsFromEvents(params: {
+  client: ReturnType<typeof getPublicClient>;
+  lockAddress: Address;
+  user: Address;
+  network?: MonadNetwork;
+}): Promise<bigint[]> {
+  const { client, lockAddress, user, network } = params;
+  const networkKey = network ?? (isMonadTestnet() ? "testnet" : "mainnet");
+  const cacheKey = `${networkKey}:${lockAddress.toLowerCase()}:${user.toLowerCase()}`;
+  const cached = lockEventIdsCache.get(cacheKey);
+  if (cached && cached.expiresAt > Date.now()) return cached.value;
+
+  const latest = await client.getBlockNumber();
+  let fromBlock = getLockEventScanStartBlock(network);
+  if (fromBlock > latest) fromBlock = latest;
+
+  const chunkSize = getLockEventChunkSize();
+  const ids = new Set<bigint>();
+  let cursor = fromBlock;
+
+  while (cursor <= latest) {
+    const toBlock =
+      cursor + chunkSize - BigInt(1) > latest
+        ? latest
+        : cursor + chunkSize - BigInt(1);
+    const logs = await client.getLogs({
+      address: lockAddress,
+      event: LOCKED_EVENT,
+      args: { user },
+      fromBlock: cursor,
+      toBlock,
+    });
+    for (const log of logs) {
+      const id = log.args.lockId;
+      if (typeof id === "bigint") ids.add(id);
+    }
+    cursor = toBlock + BigInt(1);
+  }
+
+  const value = Array.from(ids).sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));
+  lockEventIdsCache.set(cacheKey, { value, expiresAt: Date.now() + LOCK_EVENT_CACHE_TTL_MS });
+  return value;
 }
 
 function classifyReadProbeFailure(reason: string): "soft" | "hard" {
@@ -325,10 +410,27 @@ export async function getUserLockState(user: Address, network?: MonadNetwork): P
       })) as bigint[];
     } catch (error) {
       const msg = formatOneLineError(error);
-      warnLockReadOnce(
-        `${networkKey}:${lockAddress.toLowerCase()}:ids:${user.toLowerCase()}`,
-        `[HCLAW] getUserLockIds unavailable for ${user.slice(0, 10)}…: ${msg}`
-      );
+      if (isReadRevertMessage(msg)) {
+        try {
+          lockIdsRaw = await getUserLockIdsFromEvents({
+            client,
+            lockAddress,
+            user,
+            network,
+          });
+        } catch (eventErr) {
+          const eventMsg = formatOneLineError(eventErr);
+          warnLockReadOnce(
+            `${networkKey}:${lockAddress.toLowerCase()}:ids-events:${user.toLowerCase()}`,
+            `[HCLAW] getUserLockIds event fallback failed for ${user.slice(0, 10)}…: ${eventMsg}`
+          );
+        }
+      } else {
+        warnLockReadOnce(
+          `${networkKey}:${lockAddress.toLowerCase()}:ids:${user.toLowerCase()}`,
+          `[HCLAW] getUserLockIds unavailable for ${user.slice(0, 10)}…: ${msg}`
+        );
+      }
     }
 
     const positionsRaw = await Promise.all(

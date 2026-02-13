@@ -7,7 +7,6 @@ import {
   useBalance,
   usePublicClient,
   useReadContract,
-  useSendTransaction,
   useSwitchChain,
   useWaitForTransactionReceipt,
   useWriteContract,
@@ -170,8 +169,6 @@ export default function AgentDetailPage() {
   const [depositToken, setDepositToken] = useState<MonadToken>(MONAD_TOKENS[0]);
   const [depositAmount, setDepositAmount] = useState("");
   const [depositing, setDepositing] = useState(false);
-  const [bridgeFunding, setBridgeFunding] = useState(false);
-  const [directUnitFunding, setDirectUnitFunding] = useState(false);
   const [depositTxHash, setDepositTxHash] = useState<`0x${string}` | undefined>();
   const [depositStatus, setDepositStatus] = useState<string>("");
   const [depositPhase, setDepositPhase] = useState<TxUiPhase>("idle");
@@ -251,22 +248,6 @@ export default function AgentDetailPage() {
   const isMonBelowMinDeposit =
     depositToken.symbol === "MON" &&
     (!Number.isFinite(parsedDepositAmount) || parsedDepositAmount < MIN_MON_DEPOSIT);
-  const canUseEmergencyBridgeFund =
-    process.env.NEXT_PUBLIC_ENABLE_EMERGENCY_BRIDGE_FUND === "true" &&
-    activeNetwork === "mainnet" &&
-    isOwner &&
-    depositToken.symbol === "MON" &&
-    !!depositAmount &&
-    Number.isFinite(parsedDepositAmount) &&
-    parsedDepositAmount > 0;
-  const canUseDirectUnitDeposit =
-    process.env.NEXT_PUBLIC_ENABLE_DIRECT_UNIT_DEPOSIT === "true" &&
-    activeNetwork === "mainnet" &&
-    isOwner &&
-    depositToken.symbol === "MON" &&
-    !!depositAmount &&
-    Number.isFinite(parsedDepositAmount) &&
-    parsedDepositAmount > 0;
 
   // Settings state
   const [saving, setSaving] = useState(false);
@@ -300,7 +281,6 @@ export default function AgentDetailPage() {
   const [indicatorCustomDescription, setIndicatorCustomDescription] = useState("");
 
   const { writeContractAsync } = useWriteContract();
-  const { sendTransactionAsync } = useSendTransaction();
   const { switchChainAsync } = useSwitchChain();
 
   // Watch for deposit tx confirmation
@@ -583,19 +563,14 @@ export default function AgentDetailPage() {
           if (data.success && data.eventType === "deposit" && data.deposit) {
             const d = data.deposit;
             const hlInfo = d.hlFunded
-              ? ` HL wallet ${d.hlWalletAddress?.slice(0, 6)}...${d.hlWalletAddress?.slice(-4)} funded $${d.hlFundedAmount}.`
-              : "";
-            const bridgeInfo = d.bridgeProvider
-              ? ` Bridge ${d.bridgeProvider}: ${d.bridgeStatus || "pending"}${
-                  d.bridgeTxHash ? ` (${d.bridgeTxHash.slice(0, 10)}...)` : ""
-                }.${d.bridgeNote ? ` ${d.bridgeNote}` : ""}`
+              ? ` HL wallet ${d.hlWalletAddress?.slice(0, 6)}...${d.hlWalletAddress?.slice(-4)} funded $${d.hlFundedAmount} from operator USDC.`
               : "";
             const hclawInfo = d.rebateBps
               ? ` Tier ${d.lockTier} active. Rebate ${(Number(d.rebateBps) / 100).toFixed(2)}%. Remaining cap $${Number(d.userCapRemainingUsd || 0).toFixed(2)}.`
               : "";
             setDepositPhase("confirmed");
             setDepositStatus(
-              `Deposit confirmed! ${d.shares} shares minted.${hlInfo}${bridgeInfo ? ` ${bridgeInfo}` : ""}${hclawInfo}`
+              `Deposit confirmed! ${d.shares} shares minted.${hlInfo}${hclawInfo}`
             );
             setCapPreview({
               baseCapUsd: Number(d.userCapUsd || 0) / ((Number(d.boostBps || 10_000) || 10_000) / 10_000),
@@ -650,6 +625,14 @@ export default function AgentDetailPage() {
         .then((data) => {
           if (data.success && data.eventType === "withdrawal") {
             const w = data.withdrawal;
+            const settlementInfo =
+              typeof w?.settlementUsd === "number"
+                ? ` Settlement $${Number(w.settlementUsd).toFixed(2)} (${w?.pnlStatus || "flat"}${
+                    typeof w?.pnlUsd === "number"
+                      ? ` ${Number(w.pnlUsd) >= 0 ? "+" : ""}$${Number(w.pnlUsd).toFixed(2)}`
+                      : ""
+                  }).`
+                : "";
             const bridgeInfo = w?.bridgeProvider
               ? ` Bridge ${w.bridgeProvider}: ${w.bridgeStatus || "pending"}${
                   w.bridgeTxHash ? ` (${String(w.bridgeTxHash).slice(0, 10)}...)` : ""
@@ -657,7 +640,7 @@ export default function AgentDetailPage() {
               : "";
             setWithdrawPhase("confirmed");
             setWithdrawStatus(
-              `Withdrawal confirmed and synced.${bridgeInfo ? ` ${bridgeInfo}` : ""}`
+              `Withdrawal confirmed and synced.${settlementInfo}${bridgeInfo ? ` ${bridgeInfo}` : ""}`
             );
           } else if (data.success) {
             setWithdrawPhase("confirmed");
@@ -819,109 +802,6 @@ export default function AgentDetailPage() {
         e instanceof Error ? e.message : "Deposit failed. Check wallet and try again."
       );
       setDepositing(false);
-    }
-  };
-
-  const handleEmergencyBridgeFund = async () => {
-    if (!canUseEmergencyBridgeFund || !address) return;
-    if (activeNetwork !== "mainnet") {
-      setDepositPhase("error");
-      setDepositStatus("Emergency bridge funding is mainnet-only. Switch wallet to Monad mainnet.");
-      return;
-    }
-    setBridgeFunding(true);
-    setDepositPhase("syncing");
-    setDepositStatus("Submitting emergency Unit bridge funding...");
-
-    try {
-      const res = await fetch(`/api/agents/${agentId}/bridge-fund`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "x-owner-wallet-address": address.toLowerCase(),
-          "x-monad-network": activeNetwork,
-          ...(user?.id ? { "x-owner-privy-id": user.id } : {}),
-        },
-        body: JSON.stringify({ monAmount: depositAmount }),
-      });
-      const data = await res.json();
-      if (!res.ok || !data?.success) {
-        setDepositPhase("error");
-        setDepositStatus(
-          data?.error ||
-            data?.bridgeNote ||
-            "Emergency bridge funding failed."
-        );
-        return;
-      }
-
-      setDepositPhase("confirmed");
-      setDepositStatus(
-        `Emergency bridge submitted via ${data.bridgeProvider}. ` +
-          `Tx ${data.bridgeTxHash ? shortenTxHash(data.bridgeTxHash) : "pending"}`
-      );
-      fetchAgent();
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      setDepositPhase("error");
-      setDepositStatus(`Emergency bridge funding failed: ${msg.slice(0, 160)}`);
-    } finally {
-      setBridgeFunding(false);
-    }
-  };
-
-  const handleDirectUnitDeposit = async () => {
-    if (!canUseDirectUnitDeposit || !address) return;
-    if (activeNetwork !== "mainnet") {
-      setDepositPhase("error");
-      setDepositStatus("Direct Unit deposit is mainnet-only. Switch wallet to Monad mainnet.");
-      return;
-    }
-    setDirectUnitFunding(true);
-    setDepositPhase("switching");
-    setDepositStatus("Resolving Unit deposit address...");
-
-    try {
-      const addrRes = await fetch(`/api/agents/${agentId}/unit-deposit-address`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "x-owner-wallet-address": address.toLowerCase(),
-          "x-monad-network": activeNetwork,
-          ...(user?.id ? { "x-owner-privy-id": user.id } : {}),
-        },
-      });
-      const addrData = await addrRes.json();
-      if (!addrRes.ok || !addrData?.unitDepositAddress) {
-        setDepositPhase("error");
-        setDepositStatus(addrData?.error || "Failed to resolve Unit deposit address");
-        return;
-      }
-
-      await switchChainAsync({ chainId: vaultChainId });
-      setDepositPhase("signing");
-      setDepositStatus("Check wallet and sign direct Unit deposit transaction...");
-
-      const txHash = await sendTransactionAsync({
-        to: addrData.unitDepositAddress as Address,
-        value: parseEther(depositAmount),
-        chainId: vaultChainId,
-      });
-
-      setDepositPhase("confirmed");
-      setDepositStatus(
-        `Direct Unit deposit submitted: ${shortenTxHash(txHash)}. ` +
-          "Track settlement in Hyperunit operations."
-      );
-      setDepositTxNetwork(activeNetwork);
-      setSubmittedDepositTxHash(txHash);
-      fetchAgent();
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      setDepositPhase("error");
-      setDepositStatus(`Direct Unit deposit failed: ${msg.slice(0, 180)}`);
-    } finally {
-      setDirectUnitFunding(false);
     }
   };
 
@@ -2171,24 +2051,6 @@ export default function AgentDetailPage() {
                         </span>
                       ) : `Deposit ${depositToken.symbol}`}
                     </button>
-                    {canUseEmergencyBridgeFund && (
-                      <button
-                        onClick={handleEmergencyBridgeFund}
-                        disabled={bridgeFunding || depositing}
-                        className="w-full py-2.5 text-xs rounded-xl border border-warning/30 text-warning hover:bg-warning/10 transition-colors disabled:opacity-60"
-                      >
-                        {bridgeFunding ? "Submitting Emergency Bridge..." : "Emergency Bridge Fund (Bypass Vault)"}
-                      </button>
-                    )}
-                    {canUseDirectUnitDeposit && (
-                      <button
-                        onClick={handleDirectUnitDeposit}
-                        disabled={directUnitFunding || depositing || bridgeFunding}
-                        className="w-full py-2.5 text-xs rounded-xl border border-accent/30 text-accent hover:bg-accent/10 transition-colors disabled:opacity-60"
-                      >
-                        {directUnitFunding ? "Awaiting Signature..." : "Direct Unit Deposit (Sign Wallet Tx)"}
-                      </button>
-                    )}
                   </div>
                 ) : (
                   <div className="text-center text-muted text-sm py-4 bg-surface rounded-xl border border-card-border">

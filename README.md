@@ -61,7 +61,7 @@ flowchart LR
     Wallet_U -->|deposit MON / ERC20| Vault
     Hclaw -.->|tier caps deposit size| Vault
     Vault -->|confirmed tx| Relay
-    Relay -->|mainnet: Hyperunit/deBridge<br/>testnet: usdSend| HLWallet
+    Relay -->|operator-funded usdSend<br/>fair-value conversion| HLWallet
     Store -->|decrypt agent key| Runner
     Runner -->|fetch market data| Stream
     Stream -->|L2 book, mids,<br/>funding, fills| AI
@@ -77,8 +77,8 @@ flowchart LR
 
 1. User deposits MON or ERC20 into `HyperclawVault` on Monad. `$HCLAW` market cap sets the deposit cap tier.
 2. Deposit relay picks up the confirmed tx and funds the agent wallet:
-   - testnet: operator `usdSend`
-   - mainnet: bridge relay via Hyperunit with deBridge fallback/quote
+   - both networks: operator `usdSend` direct to the agent HL wallet (no bridge on deposit)
+   - fair-value conversion: MON/ERC20 amount -> USDC relay amount via oracle/feed pricing
 3. Agent runner ticks on a configurable interval. Each tick: pulls live market data from Hyperliquid WebSocket streams, passes it to the AI brain, receives a structured trade decision.
 4. If confidence exceeds the agent's threshold, the runner places a full order set (market entry + stop-loss + take-profit) on Hyperliquid using the agent's own wallet.
 5. In semi-auto mode, the decision is sent to Telegram first as an approval request. The user approves or rejects via inline buttons before execution.
@@ -792,13 +792,13 @@ cp .env.example .env.local
 | `HYPERLIQUID_PRIVATE_KEY`            | Yes      | Operator wallet key (testnet funding + ops signer)    |
 | `NEXT_PUBLIC_HYPERLIQUID_TESTNET`    | No       | `"true"` for HL testnet (default: mirrors Monad)      |
 | `RELAY_FEE_BPS`                      | No       | Deposit relay fee in basis points (default: 100 = 1%) |
-| `RELAY_STABLE_TOKENS`                | No       | Comma-separated mainnet ERC20 addresses allowed for $1 relay pricing |
-| `MAINNET_BRIDGE_ENABLED`             | No       | Enable mainnet bridge funding/withdraw relay           |
-| `MAINNET_BRIDGE_PREFER_DEBRIDGE`     | No       | Try deBridge execution before Hyperunit                |
+| `RELAY_STABLE_TOKENS`                | No       | Comma-separated ERC20 addresses treated as $1 in relay conversion |
+| `MAINNET_BRIDGE_ENABLED`             | No       | Enable mainnet withdrawal bridge relay (deposit bridge is disabled) |
+| `MAINNET_BRIDGE_PREFER_DEBRIDGE`     | No       | Try deBridge execution before Hyperunit (withdrawal path) |
 | `HYPERUNIT_API_URL`                  | No       | Hyperunit API base URL                                 |
 | `HYPERUNIT_MONAD_CHAIN`              | No       | Hyperunit source chain slug for Monad                  |
 | `HYPERUNIT_HYPERLIQUID_CHAIN`        | No       | Hyperunit destination chain slug for Hyperliquid       |
-| `HYPERUNIT_DEPOSIT_ASSET`            | No       | Hyperunit asset slug for mainnet deposit relays        |
+| `HYPERUNIT_DEPOSIT_ASSET`            | No       | Deprecated in relay path (deposit bridging disabled)   |
 | `HYPERUNIT_WITHDRAW_ASSET`           | No       | Hyperunit asset slug for mainnet withdrawal relays     |
 | `RELAY_MONAD_PRIVATE_KEY`            | No       | Monad signer for bridge tx submission (fallback: `MONAD_PRIVATE_KEY`) |
 | `DEBRIDGE_API_URL`                   | No       | deBridge DLN API base URL                              |
@@ -999,8 +999,8 @@ npm run preflight:mainnet
 Checks launch-blocker config for production cutover:
 - `ALLOW_RUNTIME_NETWORK_SWITCH=false`
 - Builder config set on HL mainnet
-- `RELAY_STABLE_TOKENS` set for Monad mainnet ERC20 relay deposits
-- Mainnet bridge config valid when `MAINNET_BRIDGE_ENABLED=true`
+- `RELAY_STABLE_TOKENS` and/or vault token oracle prices set for ERC20 relay conversion
+- Mainnet bridge config valid for withdrawal path when `MAINNET_BRIDGE_ENABLED=true`
 - Required API keys and vault address format
 
 ---

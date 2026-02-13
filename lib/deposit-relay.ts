@@ -1,20 +1,14 @@
 /**
  * Deposit Relay
  *
- * Bridges Monad vault deposits to Hyperliquid trading capital.
+ * Relays Monad vault deposits into direct operator-funded HL USDC balances.
  *
  * Flow:
  * 1. User deposits MON/ERC20 on Monad -> HyperclawVault emits Deposited event
  * 2. Relay detects event via polling (or called after tx confirmation)
  * 3. Relay records the deposit in the agent's share ledger
- * 4. Agent's HL account is pre-funded (testnet: via faucet, mainnet: operator-funded)
+ * 4. Operator wallet sends equivalent USDC directly to the agent HL wallet
  * 5. Relay tracks proportional allocation per depositor
- *
- * For the hackathon demo:
- * - Monad deposits track ownership shares
- * - HL testnet account is pre-funded with test USDC
- * - The relay maps shares to proportional trading capital
- * - No actual cross-chain bridge (that's a production concern)
  */
 
 import {
@@ -30,10 +24,9 @@ import {
 } from "viem";
 import { VAULT_ABI } from "./vault";
 import { getAgent, updateAgent } from "./store";
-import { provisionAgentWallet } from "./hyperliquid";
+import { getAgentHlState, provisionAgentWallet } from "./hyperliquid";
 import { isMonadTestnet } from "./network";
 import {
-  bridgeDepositToHyperliquidAgent,
   bridgeWithdrawalToMonadUser,
   isMainnetBridgeEnabled,
 } from "./mainnet-bridge";
@@ -150,11 +143,13 @@ async function fetchMonPrice(): Promise<number> {
  * Convert MON amount (in wei) to USDC value, applying network-specific logic.
  *
  * Testnet: Fixed rate (1 MON = $1000 USDC)
- * Mainnet: Live MON/USD price minus relay fee
+ * Mainnet: Vault oracle price when available, otherwise external feed, minus relay fee
  */
 async function monToUsdc(
   amountWei: bigint,
-  network?: MonadNetwork
+  network?: MonadNetwork,
+  client = getMonadClient(network),
+  vaultAddress?: Address
 ): Promise<{ usdValue: number; rate: number; fee: number }> {
   const monAmount = parseFloat(formatEther(amountWei));
   const useTestnet = network ? network === "testnet" : isMonadTestnet();
@@ -164,8 +159,9 @@ async function monToUsdc(
     return { usdValue, rate: TESTNET_MON_TO_USDC, fee: 0 };
   }
 
-  // Mainnet: live price
-  const monPrice = await fetchMonPrice();
+  // Mainnet: prefer on-chain vault oracle, fallback to external feed.
+  const oraclePrice = await getVaultOracleTokenPriceUsd(zeroAddress, client, vaultAddress);
+  const monPrice = oraclePrice ?? (await fetchMonPrice());
   const grossUsdc = monAmount * monPrice;
   const fee = grossUsdc * (RELAY_FEE_BPS / 10000);
   const usdValue = grossUsdc - fee;
@@ -193,41 +189,108 @@ function normalizeUsd(usd: number): number {
   return parseFloat(usd.toFixed(6));
 }
 
+const vaultOraclePriceCache = new Map<string, { price: number; updatedAtSec: number; cachedAtMs: number }>();
+const VAULT_ORACLE_CACHE_TTL_MS = 20_000;
+
+async function getVaultOracleTokenPriceUsd(
+  token: Address,
+  client = getMonadClient(),
+  vaultAddress?: Address
+): Promise<number | null> {
+  if (!vaultAddress) return null;
+
+  const key = `${vaultAddress.toLowerCase()}:${token.toLowerCase()}`;
+  const cached = vaultOraclePriceCache.get(key);
+  if (cached && Date.now() - cached.cachedAtMs < VAULT_ORACLE_CACHE_TTL_MS) {
+    return cached.price;
+  }
+
+  try {
+    const [rawPrice, maxPriceAgeRaw] = await Promise.all([
+      client.readContract({
+        address: vaultAddress,
+        abi: VAULT_ABI,
+        functionName: "tokenPrices",
+        args: [token],
+      }) as Promise<[bigint, bigint]>,
+      client.readContract({
+        address: vaultAddress,
+        abi: VAULT_ABI,
+        functionName: "maxPriceAge",
+      }) as Promise<bigint>,
+    ]);
+
+    const usdPriceE18 = rawPrice[0];
+    const updatedAtSec = Number(rawPrice[1]);
+    const maxPriceAgeSec = Number(maxPriceAgeRaw);
+    if (!Number.isFinite(updatedAtSec) || !Number.isFinite(maxPriceAgeSec)) return null;
+    if (usdPriceE18 <= BigInt(0) || updatedAtSec <= 0) return null;
+
+    const nowSec = Math.floor(Date.now() / 1000);
+    if (maxPriceAgeSec > 0 && nowSec - updatedAtSec > maxPriceAgeSec) {
+      return null;
+    }
+
+    const price = Number(formatUnits(usdPriceE18, 18));
+    if (!Number.isFinite(price) || price <= 0) return null;
+
+    vaultOraclePriceCache.set(key, { price, updatedAtSec, cachedAtMs: Date.now() });
+    return price;
+  } catch {
+    return null;
+  }
+}
+
 async function erc20ToUsdc(
   token: Address,
   amount: bigint,
   client = getMonadClient(),
-  network?: MonadNetwork
+  network?: MonadNetwork,
+  vaultAddress?: Address
 ): Promise<{ usdValue: number; rate: number; fee: number }> {
   const lower = token.toLowerCase();
   const useTestnet = network ? network === "testnet" : isMonadTestnet();
-  if (!useTestnet) {
-    if (RELAY_STABLE_TOKENS.size === 0) {
-      throw new Error(
-        "RELAY_STABLE_TOKENS is required on mainnet for ERC20 relay pricing"
-      );
-    }
-    if (!RELAY_STABLE_TOKENS.has(lower)) {
-      throw new Error(`ERC20 token ${token} is not in RELAY_STABLE_TOKENS`);
-    }
+  const decimals = await getTokenDecimals(token, client);
+  const tokenAmount = parseFloat(formatUnits(amount, decimals));
+  if (!Number.isFinite(tokenAmount) || tokenAmount <= 0) {
+    return { usdValue: 0, rate: 0, fee: 0 };
   }
 
-  const decimals = await getTokenDecimals(token, client);
-  const usdValue = parseFloat(formatUnits(amount, decimals));
-  return { usdValue: normalizeUsd(Math.max(0, usdValue)), rate: 1, fee: 0 };
+  if (RELAY_STABLE_TOKENS.has(lower)) {
+    return { usdValue: normalizeUsd(tokenAmount), rate: 1, fee: 0 };
+  }
+
+  const oraclePrice = await getVaultOracleTokenPriceUsd(token, client, vaultAddress);
+  if (oraclePrice && oraclePrice > 0) {
+    return {
+      usdValue: normalizeUsd(tokenAmount * oraclePrice),
+      rate: oraclePrice,
+      fee: 0,
+    };
+  }
+
+  if (useTestnet) {
+    // Testnet fallback keeps local testing unblocked when no oracle price is set.
+    return { usdValue: normalizeUsd(tokenAmount), rate: 1, fee: 0 };
+  }
+
+  throw new Error(
+    `ERC20 token ${token} requires a vault oracle price or RELAY_STABLE_TOKENS allowlist entry`
+  );
 }
 
 async function tokenAmountToUsdc(
   token: Address,
   amount: bigint,
   client = getMonadClient(),
-  network?: MonadNetwork
+  network?: MonadNetwork,
+  vaultAddress?: Address
 ): Promise<{ usdValue: number; rate: number; fee: number }> {
   if (token.toLowerCase() === zeroAddress) {
-    const mon = await monToUsdc(amount, network);
+    const mon = await monToUsdc(amount, network, client, vaultAddress);
     return { ...mon, usdValue: normalizeUsd(mon.usdValue) };
   }
-  return erc20ToUsdc(token, amount, client, network);
+  return erc20ToUsdc(token, amount, client, network, vaultAddress);
 }
 
 // ============================================
@@ -386,23 +449,19 @@ interface WithdrawalRecord {
   monAmount: string;
   timestamp: number;
   relayed: boolean;
+  settlementUsd?: number;
+  vaultUsdValue?: number;
+  hlAccountValueUsd?: number;
+  sharePercent?: number;
+  pnlUsd?: number;
+  pnlStatus?: "profit" | "loss" | "flat";
+  settlementMode?: "hl_share_equity" | "vault_value_fallback";
   bridgeProvider?: "hyperunit" | "debridge" | "none";
   bridgeStatus?: "submitted" | "pending" | "failed";
   bridgeDestination?: Address;
   bridgeTxHash?: string;
   bridgeOrderId?: string;
   bridgeNote?: string;
-}
-
-function shouldFallbackToDirectHlFunding(bridgeNote?: string): boolean {
-  const note = (bridgeNote || "").toLowerCase();
-  if (!note) return false;
-  return (
-    note.includes("exceeds the balance") ||
-    note.includes("insufficient") ||
-    note.includes("not configured") ||
-    note.includes("missing")
-  );
 }
 
 type VaultTxRecord =
@@ -532,6 +591,10 @@ export const WITHDRAWN_EVENT = parseAbiItem(
   "event Withdrawn(bytes32 indexed agentId, address indexed user, uint256 shares, uint256 monAmount)"
 );
 const WITHDRAWN_TOPIC = toEventSelector(WITHDRAWN_EVENT);
+const WITHDRAWAL_ASSET_EVENT = parseAbiItem(
+  "event WithdrawalAsset(bytes32 indexed agentId, address indexed user, address token, uint256 amount)"
+);
+const WITHDRAWAL_ASSET_TOPIC = toEventSelector(WITHDRAWAL_ASSET_EVENT);
 
 // ============================================
 // Process a confirmed deposit transaction
@@ -626,7 +689,8 @@ export async function processVaultTx(
             tokenAddress,
             amount,
             client,
-            activeNetwork ?? undefined
+            activeNetwork ?? undefined,
+            eventVaultAddress
           );
           const usdValue = conversion.usdValue;
           const amountLabel =
@@ -695,81 +759,31 @@ export async function processVaultTx(
             record.hlFunded = false;
           } else if (usdValue > 0) {
             try {
-              const isMainnet = (activeNetwork ?? (isMonadTestnet() ? "testnet" : "mainnet")) === "mainnet";
+              console.log(
+                `[DepositRelay] Operator funding for agent ${agentIdHex} with $${usdValue.toFixed(2)} USDC`
+              );
+              const hlResult = await provisionAgentWallet(agentIdHex, usdValue);
+              record.hlWalletAddress = hlResult.address;
+              record.hlFunded = hlResult.funded;
+              record.hlFundedAmount = hlResult.fundedAmount;
+              record.relayed = !!hlResult.funded;
+              record.bridgeProvider = "none";
+              record.bridgeStatus = undefined;
+              record.bridgeDestination = undefined;
+              record.bridgeTxHash = undefined;
+              record.bridgeOrderId = undefined;
+              record.bridgeNote = "Deposit bridge disabled; funded directly from operator HL wallet";
 
-              if (isMainnet && isMainnetBridgeEnabled()) {
-                console.log(
-                  `[DepositRelay] Mainnet bridge funding for agent ${agentIdHex} ($${usdValue.toFixed(2)})`
-                );
-                const walletResult = await provisionAgentWallet(agentIdHex, 0);
-                record.hlWalletAddress = walletResult.address;
+              console.log(
+                `[DepositRelay] HL wallet ${hlResult.address} funded=${hlResult.funded} amount=$${hlResult.fundedAmount}`
+              );
 
-                if (agent.hlAddress !== walletResult.address) {
-                  await updateAgent(agentIdHex, { hlAddress: walletResult.address });
-                  console.log(`[DepositRelay] Updated agent hlAddress to ${walletResult.address}`);
-                }
-
-                const bridge = await bridgeDepositToHyperliquidAgent({
-                  hlAddress: walletResult.address,
-                  sourceToken: tokenAddress,
-                  sourceAmountRaw: amount,
-                  sourceAmountRawLabel: amount.toString(),
-                });
-
-                record.bridgeProvider = bridge.provider;
-                record.bridgeStatus = bridge.status;
-                record.bridgeDestination = bridge.destinationAddress;
-                record.bridgeTxHash = bridge.relayTxHash;
-                record.bridgeOrderId = bridge.bridgeOrderId;
-                record.bridgeNote = bridge.note;
-
-                record.hlFunded = bridge.status === "submitted";
-                record.hlFundedAmount = bridge.status === "submitted" ? usdValue : 0;
-                record.relayed = bridge.status === "submitted";
-
-                if (bridge.status !== "submitted" && shouldFallbackToDirectHlFunding(bridge.note)) {
-                  console.warn(
-                    `[DepositRelay] Bridge unavailable for ${agentIdHex}; falling back to direct HL funding. note=${bridge.note || "n/a"}`
-                  );
-                  const fallback = await provisionAgentWallet(agentIdHex, usdValue);
-                  record.hlWalletAddress = fallback.address;
-                  record.hlFunded = fallback.funded;
-                  record.hlFundedAmount = fallback.fundedAmount;
-                  record.relayed = !!fallback.funded;
-                  record.bridgeStatus = fallback.funded ? "failed" : bridge.status;
-                  record.bridgeNote =
-                    `${bridge.note || "bridge unavailable"}; ` +
-                    (fallback.funded
-                      ? `direct HL funding succeeded ($${fallback.fundedAmount.toFixed(2)})`
-                      : "direct HL funding failed");
-                  shouldRetryFunding = !fallback.funded;
-                } else if (bridge.status !== "submitted") {
-                  shouldRetryFunding = true;
-                }
-
-                console.log(
-                  `[DepositRelay] Bridge provider=${bridge.provider} status=${bridge.status}` +
-                    (bridge.relayTxHash ? ` tx=${bridge.relayTxHash}` : "") +
-                    (bridge.note ? ` note=${bridge.note}` : "")
-                );
-              } else {
-                console.log(
-                  `[DepositRelay] Provisioning HL wallet for agent ${agentIdHex} with $${usdValue}`
-                );
-                const hlResult = await provisionAgentWallet(agentIdHex, usdValue);
-                record.hlWalletAddress = hlResult.address;
-                record.hlFunded = hlResult.funded;
-                record.hlFundedAmount = hlResult.fundedAmount;
-                record.relayed = !!hlResult.funded;
-                console.log(
-                  `[DepositRelay] HL wallet ${hlResult.address} funded=${hlResult.funded} amount=$${hlResult.fundedAmount}`
-                );
-
-                if (agent.hlAddress !== hlResult.address) {
-                  await updateAgent(agentIdHex, { hlAddress: hlResult.address });
-                  console.log(`[DepositRelay] Updated agent hlAddress to ${hlResult.address}`);
-                }
+              if (agent.hlAddress !== hlResult.address) {
+                await updateAgent(agentIdHex, { hlAddress: hlResult.address });
+                console.log(`[DepositRelay] Updated agent hlAddress to ${hlResult.address}`);
               }
+
+              shouldRetryFunding = !hlResult.funded;
             } catch (hlErr) {
               const hlMsg = hlErr instanceof Error ? hlErr.message : String(hlErr);
               shouldRetryFunding = true;
@@ -833,6 +847,19 @@ export async function processVaultTx(
           }
 
           let shouldRetryWithdrawalRelay = false;
+          const agentIdBytesForRead = ("0x" + agentIdHex.padStart(64, "0")) as `0x${string}`;
+          let postTotalShares: bigint | null = null;
+
+          try {
+            postTotalShares = (await client.readContract({
+              address: eventVaultAddress,
+              abi: VAULT_ABI,
+              functionName: "totalShares",
+              args: [agentIdBytesForRead],
+            })) as bigint;
+          } catch {
+            postTotalShares = null;
+          }
 
           const agent = await getAgent(agentIdHex);
           if (agent) {
@@ -840,8 +867,6 @@ export async function processVaultTx(
             let depositorCount = agent.depositorCount;
 
             try {
-              const agentIdBytesForRead = ("0x" +
-                agentIdHex.padStart(64, "0")) as `0x${string}`;
               const remainingShares = (await client.readContract({
                 address: eventVaultAddress,
                 abi: VAULT_ABI,
@@ -862,42 +887,105 @@ export async function processVaultTx(
           }
 
           const isMainnet = (activeNetwork ?? (isMonadTestnet() ? "testnet" : "mainnet")) === "mainnet";
-          if (isMainnet && isMainnetBridgeEnabled() && monAmount > BigInt(0)) {
-            try {
-              const conversion = await tokenAmountToUsdc(
-                zeroAddress,
-                monAmount,
+          const shareFraction = (() => {
+            if (shares <= BigInt(0)) return 0;
+            if (postTotalShares === null) return 0;
+            const totalBefore = postTotalShares + shares;
+            if (totalBefore <= BigInt(0)) return 0;
+            const scaled = (shares * BigInt(1_000_000)) / totalBefore;
+            return Number(scaled) / 1_000_000;
+          })();
+          withdrawal.sharePercent = parseFloat((shareFraction * 100).toFixed(4));
+
+          let vaultUsdValue = 0;
+          try {
+            const monConversion = await tokenAmountToUsdc(
+              zeroAddress,
+              monAmount,
+              client,
+              activeNetwork ?? undefined,
+              eventVaultAddress
+            );
+            vaultUsdValue += monConversion.usdValue;
+
+            for (const receiptLog of receipt.logs) {
+              const receiptTopics = receiptLog.topics as string[] | undefined;
+              const receiptTopic0 = receiptTopics?.[0];
+              if (receiptTopic0 !== WITHDRAWAL_ASSET_TOPIC) continue;
+              if (!receiptLog.data || !receiptTopics || receiptTopics.length < 3) continue;
+              if ((receiptTopics[1] || "").toLowerCase() !== agentIdBytes.toLowerCase()) continue;
+              const indexedUser = ("0x" + (receiptTopics[2] || "").slice(26)).toLowerCase();
+              if (indexedUser !== userAddress.toLowerCase()) continue;
+
+              const raw = receiptLog.data.slice(2);
+              if (raw.length < 128) continue;
+              const token = ("0x" + raw.slice(24, 64)) as Address;
+              const tokenAmount = BigInt("0x" + raw.slice(64, 128));
+              if (tokenAmount <= BigInt(0)) continue;
+              const tokenConversion = await tokenAmountToUsdc(
+                token,
+                tokenAmount,
                 client,
-                activeNetwork ?? undefined
+                activeNetwork ?? undefined,
+                eventVaultAddress
               );
+              vaultUsdValue += tokenConversion.usdValue;
+            }
+          } catch (vaultValErr) {
+            const msg = vaultValErr instanceof Error ? vaultValErr.message : String(vaultValErr);
+            console.warn(`[DepositRelay] Withdrawal vault USD valuation failed: ${msg.slice(0, 140)}`);
+          }
+          withdrawal.vaultUsdValue = normalizeUsd(Math.max(0, vaultUsdValue));
 
-              if (conversion.usdValue > 0) {
-                const bridge = await bridgeWithdrawalToMonadUser({
-                  agentId: agentIdHex,
-                  userAddress,
-                  usdAmount: conversion.usdValue,
-                });
-
-                withdrawal.bridgeProvider = bridge.provider;
-                withdrawal.bridgeStatus = bridge.status;
-                withdrawal.bridgeDestination = bridge.destinationAddress;
-                withdrawal.bridgeTxHash = bridge.relayTxHash;
-                withdrawal.bridgeOrderId = bridge.bridgeOrderId;
-                withdrawal.bridgeNote = bridge.note;
-                withdrawal.relayed = bridge.status === "submitted";
-
-                if (bridge.status !== "submitted") {
-                  shouldRetryWithdrawalRelay = true;
-                }
-
-                console.log(
-                  `[DepositRelay] Withdrawal bridge provider=${bridge.provider} status=${bridge.status}` +
-                    (bridge.relayTxHash ? ` tx=${bridge.relayTxHash}` : "") +
-                    (bridge.note ? ` note=${bridge.note}` : "")
-                );
-              } else {
-                withdrawal.relayed = true;
+          let settlementUsd = withdrawal.vaultUsdValue;
+          withdrawal.settlementMode = "vault_value_fallback";
+          if (shareFraction > 0) {
+            try {
+              const hlState = await getAgentHlState(agentIdHex);
+              const hlAccountValueUsd = parseFloat(hlState?.accountValue || "0");
+              if (Number.isFinite(hlAccountValueUsd) && hlAccountValueUsd >= 0) {
+                withdrawal.hlAccountValueUsd = normalizeUsd(hlAccountValueUsd);
+                settlementUsd = normalizeUsd(hlAccountValueUsd * shareFraction);
+                withdrawal.settlementMode = "hl_share_equity";
               }
+            } catch (hlStateErr) {
+              const msg = hlStateErr instanceof Error ? hlStateErr.message : String(hlStateErr);
+              console.warn(`[DepositRelay] Withdrawal HL state valuation failed: ${msg.slice(0, 140)}`);
+            }
+          }
+          settlementUsd = normalizeUsd(Math.max(0, settlementUsd));
+          withdrawal.settlementUsd = settlementUsd;
+
+          const pnlUsd = normalizeUsd(settlementUsd - (withdrawal.vaultUsdValue || 0));
+          withdrawal.pnlUsd = pnlUsd;
+          withdrawal.pnlStatus = pnlUsd > 0.01 ? "profit" : pnlUsd < -0.01 ? "loss" : "flat";
+
+          if (isMainnet && isMainnetBridgeEnabled() && settlementUsd > 0) {
+            try {
+              const bridge = await bridgeWithdrawalToMonadUser({
+                agentId: agentIdHex,
+                userAddress,
+                usdAmount: settlementUsd,
+              });
+
+              withdrawal.bridgeProvider = bridge.provider;
+              withdrawal.bridgeStatus = bridge.status;
+              withdrawal.bridgeDestination = bridge.destinationAddress;
+              withdrawal.bridgeTxHash = bridge.relayTxHash;
+              withdrawal.bridgeOrderId = bridge.bridgeOrderId;
+              withdrawal.bridgeNote = bridge.note;
+              withdrawal.relayed = bridge.status === "submitted";
+
+              if (bridge.status !== "submitted") {
+                shouldRetryWithdrawalRelay = true;
+              }
+
+              console.log(
+                `[DepositRelay] Withdrawal bridge provider=${bridge.provider} status=${bridge.status}` +
+                  ` settlement=$${settlementUsd.toFixed(2)}` +
+                  (bridge.relayTxHash ? ` tx=${bridge.relayTxHash}` : "") +
+                  (bridge.note ? ` note=${bridge.note}` : "")
+              );
             } catch (withdrawBridgeErr) {
               const msg =
                 withdrawBridgeErr instanceof Error

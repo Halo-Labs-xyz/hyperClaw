@@ -78,15 +78,11 @@ If HCLAW features are enabled, also apply `supabase/migrations/20260211_hclaw_re
 | `MCP_API_KEY` | IronClaw MCP auth |
 | `ORCHESTRATOR_SECRET` | If using external orchestrator |
 
-### Unit bridge deposit flags (mainnet only)
+### Relay + withdrawal bridge flags (mainnet)
 
 | Variable | Description |
 |----------|-------------|
-| `MAINNET_BRIDGE_ENABLED` | Enables mainnet Unit/deBridge relay in backend |
-| `ENABLE_EMERGENCY_BRIDGE_FUND` | Enables owner-only emergency bridge funding endpoint |
-| `ENABLE_DIRECT_UNIT_DEPOSIT` | Enables owner-only direct Unit deposit address endpoint |
-| `NEXT_PUBLIC_ENABLE_EMERGENCY_BRIDGE_FUND` | Shows emergency bridge button in frontend bundle |
-| `NEXT_PUBLIC_ENABLE_DIRECT_UNIT_DEPOSIT` | Shows direct Unit deposit button in frontend bundle |
+| `MAINNET_BRIDGE_ENABLED` | Enables mainnet Unit/deBridge relay for withdrawals |
 | `NEXT_PUBLIC_MIN_MON_DEPOSIT` | Frontend min MON validation threshold |
 
 ### HCLAW token (if using $HCLAW)
@@ -119,8 +115,6 @@ The Dockerfile expects these as build args for `NEXT_PUBLIC_*` vars. Railway pas
 - `NEXT_PUBLIC_WEB_PUSH_PUBLIC_KEY`
 - `NEXT_PUBLIC_HYPERLIQUID_TESTNET`
 - `NEXT_PUBLIC_MONAD_TESTNET`
-- `NEXT_PUBLIC_ENABLE_EMERGENCY_BRIDGE_FUND`
-- `NEXT_PUBLIC_ENABLE_DIRECT_UNIT_DEPOSIT`
 - `NEXT_PUBLIC_MIN_MON_DEPOSIT`
 - `NEXT_PUBLIC_MONAD_MAINNET_RPC_URL`
 - `NEXT_PUBLIC_MONAD_TESTNET_RPC_URL`

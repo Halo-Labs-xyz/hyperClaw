@@ -55,6 +55,23 @@ export const VAULT_ABI = [
     type: "function",
   },
   {
+    inputs: [{ name: "token", type: "address" }],
+    name: "tokenPrices",
+    outputs: [
+      { name: "usdPriceE18", type: "uint256" },
+      { name: "updatedAt", type: "uint64" },
+    ],
+    stateMutability: "view",
+    type: "function",
+  },
+  {
+    inputs: [],
+    name: "maxPriceAge",
+    outputs: [{ name: "", type: "uint256" }],
+    stateMutability: "view",
+    type: "function",
+  },
+  {
     inputs: [{ name: "user", type: "address" }],
     name: "getMaxDepositUSDForUser",
     outputs: [{ name: "", type: "uint256" }],
