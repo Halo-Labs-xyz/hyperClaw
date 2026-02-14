@@ -1181,6 +1181,83 @@ export async function sendUsdFromAgent(
   });
 }
 
+// Cooldown to avoid excessive spot→perp reconciliations
+const reconcileSpotToPerpLastAt = new Map<string, number>();
+const RECONCILE_COOLDOWN_MS = 60_000;
+const MIN_SPOT_TRANSFER_USD = 0.01;
+
+/**
+ * Reconcile spot USDC to perp margin based on agent market config.
+ * - Perps-only: transfer 100% of spot USDC to perp
+ * - Both perps and spot: transfer 50% to perp, leave 50% in spot
+ * - Spot-only: no transfer (all stays in spot)
+ * Only runs when agent has signing capability (trading or PKP).
+ */
+export async function reconcileSpotToPerp(agentId: string): Promise<void> {
+  const now = Date.now();
+  const lastAt = reconcileSpotToPerpLastAt.get(agentId) ?? 0;
+  if (now - lastAt < RECONCILE_COOLDOWN_MS) return;
+
+  const { getAgent } = await import("./store");
+  const { getAccountForAgent, getPrivateKeyForAgent } = await import("./account-manager");
+  const agent = await getAgent(agentId);
+  if (!agent) return;
+
+  const account = await getAccountForAgent(agentId);
+  if (!account || account.type === "readonly") return;
+  const canSign = account.type === "pkp" || Boolean(account.encryptedKey);
+  if (!canSign) return;
+
+  try {
+    const [allMarkets, spotState] = await Promise.all([
+      getAllMarkets(),
+      getSpotState(account.address),
+    ]);
+    const perpNames = new Set(allMarkets.perps.map((p) => p.name));
+    const spotNames = new Set(allMarkets.spots.map((s) => s.name));
+
+    const agentPerps = agent.markets.filter((m) => perpNames.has(m));
+    const agentSpots = agent.markets.filter((m) => spotNames.has(m));
+    const perpsOnly = agentSpots.length === 0;
+    const spotsOnly = agentPerps.length === 0;
+    const both = agentPerps.length > 0 && agentSpots.length > 0;
+
+    if (spotsOnly) return; // leave all in spot
+
+    const balances = (spotState as { balances?: Array<{ coin?: string; total?: string; hold?: string }> }).balances ?? [];
+    const usdc = balances.find((b) => (b.coin ?? "").toUpperCase() === "USDC");
+    if (!usdc) return;
+
+    const total = parseFloat(usdc.total ?? "0");
+    const hold = parseFloat(usdc.hold ?? "0");
+    const available = Math.max(0, total - hold);
+    if (available < MIN_SPOT_TRANSFER_USD) return;
+
+    const toTransfer = both ? available * 0.5 : available;
+    if (toTransfer < MIN_SPOT_TRANSFER_USD) return;
+
+    const amountStr = toTransfer.toFixed(6);
+    let exchange: ExchangeClient;
+    if (account.type === "pkp") {
+      exchange = await getExchangeClientForPKP(agentId);
+    } else {
+      const pk = await getPrivateKeyForAgent(agentId);
+      if (!pk) return;
+      exchange = getExchangeClientForAgent(pk);
+    }
+
+    await exchange.usdClassTransfer({ amount: amountStr, toPerp: true });
+    reconcileSpotToPerpLastAt.set(agentId, now);
+    console.log(
+      `[HL] reconcileSpotToPerp agent=${agentId} $${amountStr} spot→perp (${both ? "50% split" : "perps-only"})`
+    );
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.warn(`[HL] reconcileSpotToPerp agent=${agentId} failed: ${msg.slice(0, 120)}`);
+    // don't update lastAt on failure so next call can retry sooner
+  }
+}
+
 /**
  * Generate a brand new Hyperliquid wallet for an agent.
  * Returns the private key and derived address.
@@ -1464,6 +1541,7 @@ export async function getAgentHlBalance(
 } | null> {
   // Dedup: multiple callers for the same agent share one in-flight request
   return dedup(`agentHlBalance:${agentId}`, async () => {
+    await reconcileSpotToPerp(agentId);
     const { getAccountForAgent } = await import("./account-manager");
     const account = await getAccountForAgent(agentId);
     if (!account) return null;
@@ -1513,6 +1591,7 @@ export async function getAgentHlState(
 ): Promise<AgentHlState | null> {
   // Dedup: multiple concurrent callers for the same agent share one request
   return dedup(`agentHlState:${agentId}`, async () => {
+  await reconcileSpotToPerp(agentId);
   const { getAccountForAgent } = await import("./account-manager");
   const account = await getAccountForAgent(agentId);
   if (!account) return null;

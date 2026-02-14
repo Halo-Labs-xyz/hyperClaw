@@ -9,12 +9,19 @@ import {
 import { type Address } from "viem";
 import { getUserCapContext } from "@/lib/hclaw-policy";
 import { getVaultAddressIfDeployed } from "@/lib/env";
+import { getAgents } from "@/lib/store";
 
 type MonadNetwork = "mainnet" | "testnet";
 
 function parseNetwork(value: unknown): MonadNetwork | undefined {
   if (value === "mainnet" || value === "testnet") return value;
   return undefined;
+}
+
+function normalizeString(value: unknown): string | undefined {
+  if (typeof value !== "string") return undefined;
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? trimmed : undefined;
 }
 
 function summarizeVaultConfig() {
@@ -154,18 +161,27 @@ export async function POST(request: Request) {
 /**
  * GET /api/deposit
  *
- * Query deposit info.
+ * Query deposit info. Supports Privy identity and PKP-linked flows.
  *
  * Params:
  *   ?agentId=xxx - Get deposits for an agent
- *   ?user=0x... - Get deposits for a user
+ *   ?user=0x... - Get deposits for a user (wallet address)
+ *   ?ownerPrivyId=xxx - Get deposits for owner by Privy ID (linked to agent ownership)
  *   ?agentId=xxx&user=0x... - Get user's share percent in agent vault
  *   ?agentId=xxx&tvl=true - Get on-chain TVL for agent
+ *
+ * Headers (same as agents, strategy):
+ *   x-owner-privy-id - Privy user ID (alternative to ?ownerPrivyId=)
  */
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
   const agentId = searchParams.get("agentId");
   const user = searchParams.get("user") as Address | null;
+  const ownerPrivyId =
+    normalizeString(searchParams.get("ownerPrivyId")) ??
+    normalizeString(
+      request.headers.get("x-owner-privy-id") ?? request.headers.get("x-privy-user-id")
+    );
   const tvl = searchParams.get("tvl");
   const network = parseNetwork(searchParams.get("network"));
 
@@ -198,14 +214,44 @@ export async function GET(request: Request) {
       return NextResponse.json({ agentId, tvlUsd, deposits });
     }
 
-    // User deposits
+    // User deposits (by wallet address)
     if (user) {
       const deposits = await getDepositsForUser(user);
       return NextResponse.json({ user, deposits });
     }
 
+    // Owner deposits (by Privy ID) — linked to agent ownership and PKP signing flows
+    if (ownerPrivyId) {
+      const agents = await getAgents();
+      const ownedAgents = agents.filter(
+        (a) => a.telegram?.ownerPrivyId === ownerPrivyId && a.telegram?.ownerWalletAddress
+      );
+      const uniqueAddresses = [...new Set(
+        ownedAgents
+          .map((a) => a.telegram?.ownerWalletAddress)
+          .filter((a): a is Address => !!a)
+      )];
+      if (uniqueAddresses.length === 0) {
+        return NextResponse.json({
+          ownerPrivyId,
+          deposits: [],
+          message: "No linked wallet found for this Privy user",
+        });
+      }
+      const allDeposits: Awaited<ReturnType<typeof getDepositsForUser>> = [];
+      for (const addr of uniqueAddresses) {
+        const d = await getDepositsForUser(addr);
+        allDeposits.push(...d);
+      }
+      return NextResponse.json({
+        ownerPrivyId,
+        user: uniqueAddresses[0],
+        deposits: allDeposits,
+      });
+    }
+
     return NextResponse.json(
-      { error: "Provide agentId or user param" },
+      { error: "Provide agentId, user (0x address), or ownerPrivyId (Privy identity)" },
       { status: 400 }
     );
   } catch (error) {

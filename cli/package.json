@@ -1,0 +1,24 @@
+{
+  "name": "hyperclaw-cli",
+  "version": "1.0.0",
+  "description": "Professional CLI for HyperClaw Railway dapp and IronClaw",
+  "type": "module",
+  "bin": {
+    "hc": "./index.mjs"
+  },
+  "dependencies": {
+    "commander": "^12.1.0",
+    "chalk": "^5.3.0",
+    "inquirer": "^9.2.23",
+    "ora": "^8.1.1",
+    "dotenv": "^16.4.5",
+    "ink": "^5.1.0",
+    "ink-spinner": "^5.0.0",
+    "react": "^18.3.1"
+  },
+  "scripts": {
+    "start": "node index.mjs",
+    "tui": "node tui/index.mjs",
+    "link": "npm link"
+  }
+}

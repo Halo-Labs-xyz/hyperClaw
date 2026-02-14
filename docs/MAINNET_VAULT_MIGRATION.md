@@ -34,6 +34,9 @@ This runbook migrates HyperClaw from `HyperclawVaultV2.sol` to `HyperclawVaultV3
 1. Announce maintenance window and disable new deposits in UI.
 2. Deploy HCLAW stack (lock -> policy -> vault -> rewards -> treasury -> agentic vault):
    - `npm run deploy:hclaw-stack`
+   - **For buyback → lockup vault**: Deploy `HclawBuybackLock` first, then use its address as `HCLAW_BUYBACK_RECIPIENT`:
+     - `npm run deploy:hclaw-buyback-lock` (requires `NEXT_PUBLIC_HCLAW_LOCK_ADDRESS`)
+     - Set `HCLAW_BUYBACK_RECIPIENT=<HclawBuybackLock address>` before deploying the treasury router, or call `configureRecipients(buyback, incentive, reserve)` on the existing router
 3. Deploy `contracts/HyperclawVaultV3.sol` with:
    - `_hclawToken`
    - `_nadFunLens`

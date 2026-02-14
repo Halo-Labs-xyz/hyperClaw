@@ -1,3 +1,15 @@
+/**
+ * Mainnet Bridge (withdrawal-only in production)
+ *
+ * Deposit path: We do NOT bridge on deposit. The relay funds agent HL wallets
+ * directly from the pre-funded operator USDC on mainnet (see deposit-relay).
+ * bridgeDepositToHyperliquidAgent exists for manual/legacy use only.
+ *
+ * Withdrawal path: When user withdraws and is up, we realize on HL and send
+ * value to the user's Monad address via HyperUnit (bridgeWithdrawalToMonadUser).
+ * When user is down, vault settles in MON at fair price on Monad (no bridge).
+ */
+
 import {
   createWalletClient,
   http,
@@ -437,6 +449,10 @@ export function isMainnetBridgeEnabled(): boolean {
   return MAINNET_BRIDGE_ENABLED;
 }
 
+/**
+ * Bridge deposit from Monad to an HL agent wallet. NOT used in the main deposit
+ * flow; relay uses operator-funded USDC for fast deposits. Kept for manual/legacy.
+ */
 export async function bridgeDepositToHyperliquidAgent(params: {
   hlAddress: Address;
   sourceToken: Address;
@@ -629,6 +645,10 @@ export async function bridgeDepositToHyperliquidAgent(params: {
   }
 }
 
+/**
+ * Bridge withdrawal from HL to user's Monad address. Used only on withdrawal
+ * when user is up (realize on HL, then send value to Monad via HyperUnit).
+ */
 export async function bridgeWithdrawalToMonadUser(params: {
   agentId: string;
   userAddress: Address;

@@ -2,6 +2,7 @@
 .gitignore
 .next
 node_modules
+cli/node_modules
 npm-debug.log*
 pnpm-debug.log*
 yarn-error.log*

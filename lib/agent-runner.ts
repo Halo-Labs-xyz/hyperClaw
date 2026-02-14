@@ -561,6 +561,15 @@ async function executeTickInternal(agentId: string): Promise<TradeLog> {
       return holdLog;
     }
 
+    // 1.5 Reconcile spot→perp so direct HL deposits show up for trading
+    try {
+      const { reconcileSpotToPerp } = await import("./hyperliquid");
+      await reconcileSpotToPerp(agentId);
+    } catch (reconcileErr) {
+      const msg = reconcileErr instanceof Error ? reconcileErr.message : String(reconcileErr);
+      console.warn(`[Agent ${agentId}] reconcileSpotToPerp failed: ${msg.slice(0, 80)}`);
+    }
+
     // 2. Fetch current positions (agent's actual funded wallet)
     let accountState;
     try {

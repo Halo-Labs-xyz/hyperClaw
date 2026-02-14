@@ -1,14 +1,21 @@
 /**
  * Deposit Relay
  *
- * Relays Monad vault deposits into direct operator-funded HL USDC balances.
+ * No bridge on deposit (fast path like testnet). Vault keeps custody on Monad;
+ * operator pre-funds HL with USDC; relay credits agent HL wallet from operator.
  *
- * Flow:
- * 1. User deposits MON/ERC20 on Monad -> HyperclawVault emits Deposited event
- * 2. Relay detects event via polling (or called after tx confirmation)
- * 3. Relay records the deposit in the agent's share ledger
- * 4. Operator wallet sends equivalent USDC directly to the agent HL wallet
- * 5. Relay tracks proportional allocation per depositor
+ * Deposit flow:
+ * 1. User deposits MON (or other Monad asset) into Monad vault treasury.
+ * 2. Vault keeps those assets on Monad as custody/backing.
+ * 3. Relay gets fair-market value (oracle/feed), then operator funds the user's
+ *    HL agent wallet with equivalent USDC directly (no bridge).
+ * 4. Trading happens in USDC on HL without selling user deposit assets.
+ *
+ * Withdrawal (bridge used only here):
+ * - If user is down: vault returns value of remaining HL USDC as MON/chosen
+ *   asset at fair price (no bridge; settlement on Monad).
+ * - If user is up: realize value on HL (perps → spot, swap USDC → MON/asset),
+ *   then withdraw to user's Monad address via HyperUnit bridge.
  */
 
 import {
@@ -27,7 +34,6 @@ import { getAgent, updateAgent } from "./store";
 import { getAgentHlState, provisionAgentWallet } from "./hyperliquid";
 import { isMonadTestnet } from "./network";
 import {
-  bridgeDepositToHyperliquidAgent,
   bridgeWithdrawalToMonadUser,
   isMainnetBridgeEnabled,
 } from "./mainnet-bridge";
@@ -833,78 +839,34 @@ export async function processVaultTx(
             );
             record.hlFunded = false;
           } else if (usdValue > 0) {
-            const isMainnet = activeNetwork === "mainnet";
-            const isMonDeposit = tokenAddress.toLowerCase() === zeroAddress.toLowerCase();
-            const useBridge = isMainnet && isMainnetBridgeEnabled() && isMonDeposit;
-
             try {
-              // Ensure agent has HL wallet (create if needed)
-              const provisionResult = await provisionAgentWallet(agentIdHex, 0);
-              const hlAddress = provisionResult.address;
+              console.log(
+                `[DepositRelay] Operator funding for agent ${agentIdHex} with $${usdValue.toFixed(2)} USDC`
+              );
+              const hlResult = await provisionAgentWallet(agentIdHex, usdValue);
+              record.hlWalletAddress = hlResult.address;
+              record.hlFunded = hlResult.funded;
+              record.hlFundedAmount = hlResult.fundedAmount;
+              record.relayed = !!hlResult.funded;
+              // No bridge on deposit: operator HL wallet funds agent directly for fast deposits.
+              record.bridgeProvider = "none";
+              record.bridgeStatus = undefined;
+              record.bridgeDestination = undefined;
+              record.bridgeTxHash = undefined;
+              record.bridgeOrderId = undefined;
+              record.bridgeNote =
+                "No bridge on deposit; funded directly from pre-funded operator HL USDC.";
 
-              if (agent.hlAddress !== hlAddress) {
-                await updateAgent(agentIdHex, { hlAddress });
-                console.log(`[DepositRelay] Updated agent hlAddress to ${hlAddress}`);
+              console.log(
+                `[DepositRelay] HL wallet ${hlResult.address} funded=${hlResult.funded} amount=$${hlResult.fundedAmount}`
+              );
+
+              if (agent.hlAddress !== hlResult.address) {
+                await updateAgent(agentIdHex, { hlAddress: hlResult.address });
+                console.log(`[DepositRelay] Updated agent hlAddress to ${hlResult.address}`);
               }
 
-              let funded = false;
-
-              if (useBridge) {
-                try {
-                  const bridge = await bridgeDepositToHyperliquidAgent({
-                    hlAddress,
-                    sourceToken: tokenAddress,
-                    sourceAmountRaw: amount,
-                    sourceAmountRawLabel: amount.toString(),
-                  });
-                  record.bridgeProvider = bridge.provider;
-                  record.bridgeStatus = bridge.status;
-                  record.bridgeDestination = bridge.destinationAddress;
-                  record.bridgeTxHash = bridge.relayTxHash;
-                  record.bridgeOrderId = bridge.bridgeOrderId;
-                  record.bridgeNote = bridge.note;
-
-                  if (bridge.status === "submitted") {
-                    funded = true;
-                    record.hlWalletAddress = hlAddress;
-                    record.hlFunded = true;
-                    record.hlFundedAmount = usdValue;
-                    record.relayed = true;
-                    console.log(
-                      `[DepositRelay] Mainnet bridge ${bridge.provider} submitted for agent ${agentIdHex}: tx=${bridge.relayTxHash ?? "pending"}`
-                    );
-                  } else {
-                    console.warn(
-                      `[DepositRelay] Bridge returned status=${bridge.status}, falling back to operator USDC`
-                    );
-                  }
-                } catch (bridgeErr) {
-                  const msg = bridgeErr instanceof Error ? bridgeErr.message : String(bridgeErr);
-                  console.warn(`[DepositRelay] Bridge deposit failed: ${msg.slice(0, 120)}`);
-                }
-              }
-
-              if (!funded) {
-                console.log(
-                  `[DepositRelay] Operator funding for agent ${agentIdHex} with $${usdValue.toFixed(2)} USDC`
-                );
-                const hlResult = await provisionAgentWallet(agentIdHex, usdValue);
-                record.hlWalletAddress = hlResult.address;
-                record.hlFunded = hlResult.funded;
-                record.hlFundedAmount = hlResult.fundedAmount;
-                record.relayed = !!hlResult.funded;
-                if (!record.bridgeProvider) {
-                  record.bridgeProvider = "none";
-                  record.bridgeNote = "Funded directly from operator HL wallet";
-                }
-
-                console.log(
-                  `[DepositRelay] HL wallet ${hlResult.address} funded=${hlResult.funded} amount=$${hlResult.fundedAmount}`
-                );
-                funded = hlResult.funded;
-              }
-
-              shouldRetryFunding = !funded;
+              shouldRetryFunding = !hlResult.funded;
             } catch (hlErr) {
               const hlMsg = hlErr instanceof Error ? hlErr.message : String(hlErr);
               shouldRetryFunding = true;
