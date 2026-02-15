@@ -73,11 +73,18 @@ function getNetworkScopedAddress(
 
 export function getVaultAddressIfDeployed(network?: MonadNetwork): `0x${string}` | null {
   const defaultMainnet = process.env.NEXT_PUBLIC_MONAD_TESTNET === "false";
-  if (
-    MAINNET_VAULT_HOTFIX_ADDRESS &&
-    (network === "mainnet" || (network === undefined && defaultMainnet))
-  ) {
-    return MAINNET_VAULT_HOTFIX_ADDRESS;
+  // Only use the hotfix override when no explicit mainnet vault address is configured.
+  // This prevents a stale Railway variable from silently overriding the intended vault.
+  if (network === "mainnet" || (network === undefined && defaultMainnet)) {
+    const explicitMainnet = getAddressFromCandidates([
+      "MONAD_MAINNET_VAULT_ADDRESS",
+      "NEXT_PUBLIC_MONAD_MAINNET_VAULT_ADDRESS",
+      "NEXT_PUBLIC_VAULT_ADDRESS_MAINNET",
+      "NEXT_PUBLIC_VAULT_ADDRESS",
+    ]);
+    if (!explicitMainnet && MAINNET_VAULT_HOTFIX_ADDRESS) {
+      return MAINNET_VAULT_HOTFIX_ADDRESS;
+    }
   }
 
   return getNetworkScopedAddress(network, {

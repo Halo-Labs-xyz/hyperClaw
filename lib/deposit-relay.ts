@@ -101,6 +101,7 @@ const MAINNET_MON_ORACLE_FEED_MAX_DRIFT_PCT = Number.parseFloat(
 const MAINNET_MON_PRICE_OVERRIDE_USD = Number.parseFloat(
   process.env.MAINNET_MON_PRICE_OVERRIDE_USD || ""
 );
+const MAINNET_MON_PRICE_REQUIRE_MATCH = process.env.MAINNET_MON_PRICE_REQUIRE_MATCH === "true";
 
 /**
  * Fetch the live MON/USD price from CoinGecko or a DEX aggregator.
@@ -243,9 +244,11 @@ async function monToUsdc(
       Number.isFinite(MAINNET_MON_ORACLE_FEED_MAX_DRIFT_PCT) &&
       driftPct > MAINNET_MON_ORACLE_FEED_MAX_DRIFT_PCT
     ) {
-      throw new Error(
-        `MON price mismatch (oracle=${oracleBounded}, feed=${feedBounded}, drift=${driftPct.toFixed(2)}%)`
-      );
+      const msg = `MON price mismatch (oracle=${oracleBounded}, feed=${feedBounded}, drift=${driftPct.toFixed(2)}%)`;
+      if (MAINNET_MON_PRICE_REQUIRE_MATCH) {
+        throw new Error(msg);
+      }
+      console.warn(`[PriceFeed] ${msg}. Continuing with vault oracle price.`);
     }
     // Prefer the vault oracle when the two sources are consistent.
     monPrice = oracleBounded;
