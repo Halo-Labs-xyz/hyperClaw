@@ -102,6 +102,8 @@ const MAINNET_MON_PRICE_OVERRIDE_USD = Number.parseFloat(
   process.env.MAINNET_MON_PRICE_OVERRIDE_USD || ""
 );
 const MAINNET_MON_PRICE_REQUIRE_MATCH = process.env.MAINNET_MON_PRICE_REQUIRE_MATCH === "true";
+const MAINNET_MON_PRICE_PREFER_FEED_ON_MISMATCH =
+  process.env.MAINNET_MON_PRICE_PREFER_FEED_ON_MISMATCH !== "false";
 
 /**
  * Fetch the live MON/USD price from CoinGecko or a DEX aggregator.
@@ -188,13 +190,13 @@ async function monToUsdc(
   network?: MonadNetwork,
   client = getMonadClient(network),
   vaultAddress?: Address
-): Promise<{ usdValue: number; rate: number; fee: number }> {
+): Promise<{ usdValue: number; rate: number; fee: number; source: string }> {
   const monAmount = parseFloat(formatEther(amountWei));
   const useTestnet = network ? network === "testnet" : isMonadTestnet();
 
   if (useTestnet) {
     const usdValue = monAmount * TESTNET_MON_TO_USDC;
-    return { usdValue, rate: TESTNET_MON_TO_USDC, fee: 0 };
+    return { usdValue, rate: TESTNET_MON_TO_USDC, fee: 0, source: "testnet_fixed" };
   }
 
   // Mainnet: explicit override > reconciled oracle/feed.
@@ -212,7 +214,7 @@ async function monToUsdc(
     const grossUsdc = monAmount * overridePrice;
     const fee = grossUsdc * (RELAY_FEE_BPS / 10000);
     const usdValue = grossUsdc - fee;
-    return { usdValue: Math.max(0, usdValue), rate: overridePrice, fee };
+    return { usdValue: Math.max(0, usdValue), rate: overridePrice, fee, source: "override" };
   }
 
   // Mainnet: reconcile on-chain oracle with external feed to avoid bad $1 pricing.
@@ -237,6 +239,7 @@ async function monToUsdc(
     feedPrice !== null && isMonPriceWithinMainnetBounds(feedPrice) ? feedPrice : null;
 
   let monPrice: number | null = null;
+  let source: string = "unknown";
 
   if (oracleBounded !== null && feedBounded !== null) {
     const driftPct = calculatePctDrift(oracleBounded, feedBounded);
@@ -248,12 +251,24 @@ async function monToUsdc(
       if (MAINNET_MON_PRICE_REQUIRE_MATCH) {
         throw new Error(msg);
       }
-      console.warn(`[PriceFeed] ${msg}. Continuing with vault oracle price.`);
+      if (MAINNET_MON_PRICE_PREFER_FEED_ON_MISMATCH) {
+        console.warn(`[PriceFeed] ${msg}. Continuing with external feed price.`);
+        monPrice = feedBounded;
+        source = "feed_mismatch";
+      } else {
+        console.warn(`[PriceFeed] ${msg}. Continuing with vault oracle price.`);
+        monPrice = oracleBounded;
+        source = "oracle_mismatch";
+      }
     }
-    // Prefer the vault oracle when the two sources are consistent.
-    monPrice = oracleBounded;
+    // Prefer the vault oracle when the two sources are consistent (or when mismatch policy chose it above).
+    if (monPrice === null) {
+      monPrice = oracleBounded;
+      source = "oracle";
+    }
   } else {
     monPrice = oracleBounded ?? feedBounded;
+    source = oracleBounded !== null ? "oracle" : feedBounded !== null ? "feed" : "unknown";
   }
 
   if (monPrice === null) {
@@ -267,7 +282,7 @@ async function monToUsdc(
   const fee = grossUsdc * (RELAY_FEE_BPS / 10000);
   const usdValue = grossUsdc - fee;
 
-  return { usdValue: Math.max(0, usdValue), rate: monPrice, fee };
+  return { usdValue: Math.max(0, usdValue), rate: monPrice, fee, source };
 }
 
 async function getTokenDecimals(token: Address, client = getMonadClient()): Promise<number> {
@@ -348,17 +363,17 @@ async function erc20ToUsdc(
   client = getMonadClient(),
   network?: MonadNetwork,
   vaultAddress?: Address
-): Promise<{ usdValue: number; rate: number; fee: number }> {
+): Promise<{ usdValue: number; rate: number; fee: number; source: string }> {
   const lower = token.toLowerCase();
   const useTestnet = network ? network === "testnet" : isMonadTestnet();
   const decimals = await getTokenDecimals(token, client);
   const tokenAmount = parseFloat(formatUnits(amount, decimals));
   if (!Number.isFinite(tokenAmount) || tokenAmount <= 0) {
-    return { usdValue: 0, rate: 0, fee: 0 };
+    return { usdValue: 0, rate: 0, fee: 0, source: "invalid_amount" };
   }
 
   if (RELAY_STABLE_TOKENS.has(lower)) {
-    return { usdValue: normalizeUsd(tokenAmount), rate: 1, fee: 0 };
+    return { usdValue: normalizeUsd(tokenAmount), rate: 1, fee: 0, source: "stable_allowlist" };
   }
 
   const oraclePrice = await getVaultOracleTokenPriceUsd(token, client, vaultAddress);
@@ -367,12 +382,13 @@ async function erc20ToUsdc(
       usdValue: normalizeUsd(tokenAmount * oraclePrice),
       rate: oraclePrice,
       fee: 0,
+      source: "vault_oracle",
     };
   }
 
   if (useTestnet) {
     // Testnet fallback keeps local testing unblocked when no oracle price is set.
-    return { usdValue: normalizeUsd(tokenAmount), rate: 1, fee: 0 };
+    return { usdValue: normalizeUsd(tokenAmount), rate: 1, fee: 0, source: "testnet_fallback" };
   }
 
   throw new Error(
@@ -386,7 +402,7 @@ async function tokenAmountToUsdc(
   client = getMonadClient(),
   network?: MonadNetwork,
   vaultAddress?: Address
-): Promise<{ usdValue: number; rate: number; fee: number }> {
+): Promise<{ usdValue: number; rate: number; fee: number; source: string }> {
   if (token.toLowerCase() === zeroAddress) {
     const mon = await monToUsdc(amount, network, client, vaultAddress);
     return { ...mon, usdValue: normalizeUsd(mon.usdValue) };
@@ -803,7 +819,7 @@ export async function processVaultTx(
 
           console.log(
             `[DepositRelay] ${amountLabel} -> $${usdValue.toFixed(2)} USDC` +
-              ` (rate=${conversion.rate}, fee=$${conversion.fee.toFixed(2)})`
+              ` (rate=${conversion.rate}, fee=$${conversion.fee.toFixed(2)}, source=${conversion.source})`
           );
 
           const agent = await getAgent(agentIdHex);
