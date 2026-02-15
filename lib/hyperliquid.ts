@@ -1129,9 +1129,49 @@ export async function getAllAssets(): Promise<
 // USD Transfers (fund agent wallets)
 // ============================================
 
+const MIN_OPERATOR_SPOT_TRANSFER_USD = 0.01;
+
+/**
+ * Ensure the operator has at least `amount` USDC in spot (withdrawable).
+ * usdSend uses spot balance; if the operator's USDC is in perps, transfer perp → spot first.
+ */
+export async function ensureOperatorSpotBalance(amount: number): Promise<void> {
+  if (amount < MIN_OPERATOR_SPOT_TRANSFER_USD) return;
+  const pk = process.env.HYPERLIQUID_PRIVATE_KEY;
+  if (!pk) throw new Error("HYPERLIQUID_PRIVATE_KEY not set");
+  const operatorAddress = privateKeyToAccountCompat(pk as `0x${string}`).address as Address;
+
+  const [spotState, perpState] = await Promise.all([
+    getSpotState(operatorAddress),
+    getAccountState(operatorAddress),
+  ]);
+  const balances = (spotState as { balances?: Array<{ coin?: string; total?: string; hold?: string }> }).balances ?? [];
+  const usdc = balances.find((b) => (b.coin ?? "").toUpperCase() === "USDC");
+  const spotAvailable = usdc ? Math.max(0, parseFloat(usdc.total ?? "0") - parseFloat(usdc.hold ?? "0")) : 0;
+  const perpWithdrawable = Math.max(0, parseFloat((perpState as { withdrawable?: string }).withdrawable ?? "0"));
+
+  if (spotAvailable >= amount) return;
+
+  const needFromPerp = amount - spotAvailable;
+  if (perpWithdrawable < MIN_OPERATOR_SPOT_TRANSFER_USD) {
+    console.warn(
+      `[HL] Operator spot USDC ($${spotAvailable.toFixed(2)}) insufficient for $${amount.toFixed(2)} send; ` +
+        `perp withdrawable=$${perpWithdrawable.toFixed(2)} — move USDC to spot or add funds`
+    );
+    return;
+  }
+
+  const toTransfer = Math.min(needFromPerp, perpWithdrawable);
+  const amountStr = toTransfer.toFixed(6);
+  const exchange = getExchangeClient();
+  await exchange.usdClassTransfer({ amount: amountStr, toPerp: false });
+  console.log(`[HL] Operator perp→spot $${amountStr} for agent funding (spot was $${spotAvailable.toFixed(2)})`);
+}
+
 /**
  * Send USDC from the operator's HL account to a destination address.
  * Used to fund agent wallets 1:1 when users deposit MON on Monad.
+ * Ensures operator has enough spot USDC (moves from perp to spot if needed).
  *
  * @param destination - Agent's HL address
  * @param amount - USD amount (1 = $1)
@@ -1140,6 +1180,7 @@ export async function sendUsdToAgent(
   destination: Address,
   amount: number
 ): Promise<unknown> {
+  await ensureOperatorSpotBalance(amount);
   const exchange = getExchangeClient();
   // usdSend is used for deposit relay and is expected to be reliable. Wrap in retry/backoff
   // to tolerate transient HL HTTP timeouts and rate limits.
