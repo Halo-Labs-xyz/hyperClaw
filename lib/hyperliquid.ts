@@ -1131,9 +1131,27 @@ export async function getAllAssets(): Promise<
 
 const MIN_OPERATOR_SPOT_TRANSFER_USD = 0.01;
 
+/** USDC token string for sendAsset (e.g. "USDC:0x..."). Cached per network. */
+let usdcTokenForSendAsset: string | null = null;
+onNetworkChange(() => {
+  usdcTokenForSendAsset = null;
+});
+
+/**
+ * Resolve USDC token identifier for sendAsset (format "USDC:tokenId" from spotMeta).
+ */
+async function getUsdcTokenForSendAsset(): Promise<string | null> {
+  if (usdcTokenForSendAsset) return usdcTokenForSendAsset;
+  const { spotTokens } = await getAllMarkets();
+  const usdc = spotTokens.find((t) => t.name.toUpperCase() === "USDC");
+  if (!usdc?.tokenId) return null;
+  usdcTokenForSendAsset = `USDC:${usdc.tokenId}`;
+  return usdcTokenForSendAsset;
+}
+
 /**
  * Ensure the operator has at least `amount` USDC in spot (withdrawable).
- * usdSend uses spot balance; if the operator's USDC is in perps, transfer perp → spot first.
+ * Used only when sendAsset (perp→agent) is not used; usdSend requires spot.
  */
 export async function ensureOperatorSpotBalance(amount: number): Promise<void> {
   if (amount < MIN_OPERATOR_SPOT_TRANSFER_USD) return;
@@ -1170,8 +1188,8 @@ export async function ensureOperatorSpotBalance(amount: number): Promise<void> {
 
 /**
  * Send USDC from the operator's HL account to a destination address.
- * Used to fund agent wallets 1:1 when users deposit MON on Monad.
- * Ensures operator has enough spot USDC (moves from perp to spot if needed).
+ * Prefer sendAsset (operator perp → agent perp) so we send straight from perps;
+ * fall back to perp→spot then usdSend if sendAsset is unavailable or fails.
  *
  * @param destination - Agent's HL address
  * @param amount - USD amount (1 = $1)
@@ -1180,10 +1198,30 @@ export async function sendUsdToAgent(
   destination: Address,
   amount: number
 ): Promise<unknown> {
-  await ensureOperatorSpotBalance(amount);
   const exchange = getExchangeClient();
-  // usdSend is used for deposit relay and is expected to be reliable. Wrap in retry/backoff
-  // to tolerate transient HL HTTP timeouts and rate limits.
+  const token = await getUsdcTokenForSendAsset();
+
+  if (token) {
+    try {
+      const result = await withRetry(
+        () =>
+          exchange.sendAsset({
+            destination,
+            sourceDex: "",
+            destinationDex: "",
+            token,
+            amount: amount.toString(),
+          }),
+        { label: `sendAsset(perp→perp ${destination.slice(0, 8)})` }
+      );
+      return result;
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      console.warn(`[HL] sendAsset (perp→agent) failed: ${msg.slice(0, 120)} — falling back to spot send`);
+    }
+  }
+
+  await ensureOperatorSpotBalance(amount);
   return await withRetry(
     async () => {
       try {
