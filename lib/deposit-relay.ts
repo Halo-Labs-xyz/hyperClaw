@@ -527,6 +527,7 @@ interface DepositRecord {
   hlWalletAddress?: string;
   hlFunded?: boolean;
   hlFundedAmount?: number;
+  hlFundingError?: string;
   bridgeProvider?: "hyperunit" | "debridge" | "none";
   bridgeStatus?: "submitted" | "pending" | "failed";
   bridgeDestination?: Address;
@@ -611,6 +612,7 @@ function fromDepositRow(row: DepositRow): DepositRecord {
     hlWalletAddress: row.hl_wallet_address ?? undefined,
     hlFunded: row.hl_funded ?? undefined,
     hlFundedAmount: row.hl_funded_amount ?? undefined,
+    hlFundingError: undefined,
   };
 }
 
@@ -868,6 +870,19 @@ export async function processVaultTx(
               record.hlFunded = hlResult.funded;
               record.hlFundedAmount = hlResult.fundedAmount;
               record.relayed = !!hlResult.funded;
+              record.hlFundingError =
+                hlResult.funded
+                  ? undefined
+                  : (() => {
+                      const raw = hlResult.txResult;
+                      if (!raw) return "HL usdSend failed";
+                      if (typeof raw === "string") return raw.slice(0, 240);
+                      try {
+                        return JSON.stringify(raw).slice(0, 240);
+                      } catch {
+                        return String(raw).slice(0, 240);
+                      }
+                    })();
               // No bridge on deposit: operator HL wallet funds agent directly for fast deposits.
               record.bridgeProvider = "none";
               record.bridgeStatus = undefined;
@@ -880,6 +895,9 @@ export async function processVaultTx(
               console.log(
                 `[DepositRelay] HL wallet ${hlResult.address} funded=${hlResult.funded} amount=$${hlResult.fundedAmount}`
               );
+              if (!hlResult.funded && record.hlFundingError) {
+                console.warn(`[DepositRelay] HL funding failure detail: ${record.hlFundingError}`);
+              }
 
               if (agent.hlAddress !== hlResult.address) {
                 await updateAgent(agentIdHex, { hlAddress: hlResult.address });

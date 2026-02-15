@@ -1136,10 +1136,16 @@ export async function sendUsdToAgent(
   amount: number
 ): Promise<unknown> {
   const exchange = getExchangeClient();
-  return await exchange.usdSend({
-    destination,
-    amount: amount.toString(),
-  });
+  // usdSend is used for deposit relay and is expected to be reliable. Wrap in retry/backoff
+  // to tolerate transient HL HTTP timeouts and rate limits.
+  return await withRetry(
+    () =>
+      exchange.usdSend({
+        destination,
+        amount: amount.toString(),
+      }),
+    { label: `usdSend(${destination.slice(0, 8)})` }
+  );
 }
 
 /**

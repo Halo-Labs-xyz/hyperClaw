@@ -135,6 +135,7 @@ export async function POST(request: Request) {
         hlWalletAddress: record.hlWalletAddress || null,
         hlFunded: record.hlFunded || false,
         hlFundedAmount: record.hlFundedAmount || 0,
+        hlFundingError: record.hlFundingError ?? null,
         bridgeProvider: record.bridgeProvider ?? null,
         bridgeStatus: record.bridgeStatus ?? null,
         bridgeDestination: record.bridgeDestination ?? null,
