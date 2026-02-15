@@ -643,6 +643,50 @@ fund
   });
 
 fund
+  .command("operator-balance")
+  .description("Get operator wallet balance (perp + spot)")
+  .action(async () => {
+    const spinner = ora("Fetching operator balance...").start();
+    try {
+      const data = await apiFund({ action: "operator-balance" });
+      spinner.succeed("Operator balance");
+      console.log(chalk.cyan("\nOperator:"));
+      console.log("  Address:", data.operatorAddress ?? "N/A");
+      console.log("  Network:", data.network ?? "mainnet");
+      console.log(chalk.cyan("\nPerp:"));
+      console.log("  Account Value:", data.perp?.accountValue ?? "$0");
+      console.log("  Available:", data.perp?.availableBalance ?? "$0");
+      console.log("  Margin Used:", data.perp?.marginUsed ?? "$0");
+      console.log(chalk.cyan("\nSpot:"));
+      console.log("  USDC:", data.spot?.usdc ?? "N/A");
+      if (data.stale) console.log(chalk.yellow("\nStale:"), data.error ?? "unknown error");
+      console.log();
+    } catch (e) {
+      spinner.fail(e.message);
+      process.exit(1);
+    }
+  });
+
+fund
+  .command("disable-unified")
+  .description("Disable unified account mode on the operator wallet (required for usdSend)")
+  .action(async () => {
+    const spinner = ora("Disabling unified account mode...").start();
+    try {
+      const data = await apiFund({ action: "disable-unified" });
+      spinner.succeed("Unified account disabled");
+      console.log(chalk.cyan("\nOperator:"));
+      console.log("  Address:", data.operatorAddress ?? "N/A");
+      console.log("  Abstraction:", data.abstraction ?? "disabled");
+      console.log("  Network:", data.network ?? "mainnet");
+      console.log();
+    } catch (e) {
+      spinner.fail(e.message);
+      process.exit(1);
+    }
+  });
+
+fund
   .command("activate <agentId>")
   .description("Activate agent (start trading)")
   .action(async (agentId) => {

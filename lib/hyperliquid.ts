@@ -235,6 +235,11 @@ function getErrorMessage(error: unknown): string {
   return String(error);
 }
 
+function isUnifiedAccountActionDisabled(error: unknown): boolean {
+  const msg = getErrorMessage(error).toLowerCase();
+  return msg.includes("unified account") && msg.includes("action disabled");
+}
+
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
@@ -1139,13 +1144,38 @@ export async function sendUsdToAgent(
   // usdSend is used for deposit relay and is expected to be reliable. Wrap in retry/backoff
   // to tolerate transient HL HTTP timeouts and rate limits.
   return await withRetry(
-    () =>
-      exchange.usdSend({
-        destination,
-        amount: amount.toString(),
-      }),
+    async () => {
+      try {
+        return await exchange.usdSend({
+          destination,
+          amount: amount.toString(),
+        });
+      } catch (err) {
+        if (isUnifiedAccountActionDisabled(err)) {
+          console.warn("[HL] usdSend blocked by unified account mode; disabling and retrying once");
+          await disableUnifiedAccountForOperator();
+          return await exchange.usdSend({
+            destination,
+            amount: amount.toString(),
+          });
+        }
+        throw err;
+      }
+    },
     { label: `usdSend(${destination.slice(0, 8)})` }
   );
+}
+
+export async function disableUnifiedAccountForOperator(): Promise<{ operatorAddress: Address; result: unknown }> {
+  const pk = process.env.HYPERLIQUID_PRIVATE_KEY;
+  if (!pk) throw new Error("HYPERLIQUID_PRIVATE_KEY not set");
+  const operatorAddress = privateKeyToAccountCompat(pk as `0x${string}`).address as Address;
+  const exchange = getExchangeClient();
+  const result = await withRetry(
+    () => exchange.userSetAbstraction({ user: operatorAddress, abstraction: "disabled" }),
+    { label: "userSetAbstraction(disabled)" }
+  );
+  return { operatorAddress, result };
 }
 
 /**

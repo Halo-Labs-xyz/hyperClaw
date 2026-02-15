@@ -3,6 +3,8 @@ import {
   depositToVault,
   withdrawFromVault,
   getAccountState,
+  getSpotState,
+  disableUnifiedAccountForOperator,
   isTestnet,
   provisionAgentWallet,
   getAgentHlBalance,
@@ -12,6 +14,7 @@ import {
 import { getAccountForAgent } from "@/lib/account-manager";
 import { verifyApiKey, unauthorizedResponse } from "@/lib/auth";
 import { type Address } from "viem";
+import { privateKeyToAccount } from "viem/accounts";
 import { activateAgent, getLifecycleState } from "@/lib/agent-lifecycle";
 import { getAgent, updateAgent } from "@/lib/store";
 import { getVaultAddressIfDeployed } from "@/lib/env";
@@ -359,6 +362,80 @@ export async function POST(request: Request) {
         }
       }
 
+      // ========== Operator HL balance (perp + spot) ==========
+      case "operator-balance": {
+        const pk = process.env.HYPERLIQUID_PRIVATE_KEY;
+        if (!pk || pk === "your_operator_private_key_hex") {
+          return NextResponse.json(
+            { error: "HYPERLIQUID_PRIVATE_KEY not configured" },
+            { status: 400 }
+          );
+        }
+
+        const operatorAddress = privateKeyToAccount(pk as `0x${string}`).address as Address;
+
+        try {
+          const [perp, spot] = await Promise.all([
+            getAccountState(operatorAddress),
+            getSpotState(operatorAddress),
+          ]);
+
+          const balances = (spot as any)?.balances;
+          const usdcRow =
+            Array.isArray(balances)
+              ? balances.find((b: any) => String(b?.coin || "").toUpperCase() === "USDC")
+              : null;
+
+          const spotUsdcTotal =
+            usdcRow?.total ?? usdcRow?.balance ?? usdcRow?.available ?? usdcRow?.usdc ?? null;
+
+          return NextResponse.json({
+            operatorAddress,
+            perp: {
+              accountValue: perp.marginSummary?.accountValue || "0",
+              availableBalance: perp.withdrawable || "0",
+              marginUsed: perp.marginSummary?.totalMarginUsed || "0",
+            },
+            spot: {
+              usdc: spotUsdcTotal ?? null,
+              keys: Object.keys((spot as any) || {}),
+            },
+            network: isTestnet() ? "testnet" : "mainnet",
+          });
+        } catch (balError) {
+          const msg = balError instanceof Error ? balError.message : String(balError);
+          console.warn(`[Fund] operator-balance failed: ${msg.slice(0, 140)}`);
+          return NextResponse.json({
+            operatorAddress,
+            perp: { accountValue: "0", availableBalance: "0", marginUsed: "0" },
+            spot: { usdc: null, keys: [] as string[] },
+            stale: true,
+            error: msg.includes("timeout") ? "API timeout" : msg.slice(0, 140),
+            network: isTestnet() ? "testnet" : "mainnet",
+          });
+        }
+      }
+
+      // ========== Disable unified account abstraction on operator ==========
+      case "disable-unified": {
+        try {
+          const { operatorAddress, result } = await disableUnifiedAccountForOperator();
+          return NextResponse.json({
+            success: true,
+            operatorAddress,
+            abstraction: "disabled",
+            result,
+            network: isTestnet() ? "testnet" : "mainnet",
+          });
+        } catch (e) {
+          const msg = e instanceof Error ? e.message : String(e);
+          return NextResponse.json(
+            { error: msg.slice(0, 200), network: isTestnet() ? "testnet" : "mainnet" },
+            { status: 500 }
+          );
+        }
+      }
+
       // ========== System status ==========
       case "status": {
         return NextResponse.json({
@@ -420,7 +497,7 @@ export async function POST(request: Request) {
 
       default:
         return NextResponse.json(
-          { error: "Unknown action. Use: provision, fund, activate, agent-balance, agent-state, deposit, withdraw, balance, status" },
+          { error: "Unknown action. Use: provision, fund, activate, agent-balance, agent-state, deposit, withdraw, balance, operator-balance, disable-unified, status" },
           { status: 400 }
         );
     }
