@@ -115,7 +115,7 @@ const TOOLS: McpTool[] = [
         agent_id: { type: "string", description: "Required for activate/deactivate" },
         tick_interval_ms: {
           type: "number",
-          description: "Optional; runner tick interval in ms (clamped to 30-60 minutes).",
+          description: "Optional; runner tick interval in ms (clamped to 1-15 minutes).",
         },
       },
       required: ["action"],

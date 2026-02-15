@@ -44,7 +44,7 @@ export async function GET() {
 interface LifecycleAction {
   action: "init" | "activate" | "deactivate" | "health" | "heal" | "stop-all";
   agentId?: string;
-  tickIntervalMs?: number; // clamped to 30-60 minutes by runner
+  tickIntervalMs?: number; // clamped to 1-15 minutes by runner
 }
 
 export async function POST(req: NextRequest) {

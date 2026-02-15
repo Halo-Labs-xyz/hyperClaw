@@ -1229,6 +1229,12 @@ export async function getTradeDecision(params: {
   aggressiveness?: number; // 0-100, higher = more willing to take trades
   indicator?: IndicatorConfig; // Key indicator for decision making
   historicalPrices?: Record<string, number[]>; // coin -> price history
+  // Liveness: force at least one trade within a deadline window.
+  mustTrade?: {
+    enabled: boolean;
+    deadlineMs: number;
+    reason: string;
+  };
   // Agent identity and strategy
   agentName?: string;
   agentStrategy?: string; // The agent's custom strategy description
@@ -1310,6 +1316,22 @@ Use this recent evaluation to adapt position sizing, confidence thresholds, and 
 `;
   }
 
+  let mustTradeSection = "";
+  if (params.mustTrade?.enabled) {
+    const deadlineIso = new Date(params.mustTrade.deadlineMs).toISOString();
+    mustTradeSection = `
+=== LIVENESS CONSTRAINT (MANDATORY) ===
+You must produce at least one NON-"hold" trade decision before ${deadlineIso}.
+Reason: ${params.mustTrade.reason}
+
+Rules:
+- Do NOT output action "hold".
+- Choose ONE actionable decision: "long", "short", or "close".
+- Keep leverage low (1-2x) unless there is extremely strong evidence otherwise.
+- Prefer the strongest opportunity within allowed markets; if uncertain, trade SMALL rather than holding.
+`;
+  }
+
   const userPrompt = `CURRENT MARKET DATA:
 ${params.markets
   .filter((m) => params.allowedMarkets.includes(m.coin))
@@ -1337,6 +1359,7 @@ ACCOUNT:
 - Max leverage: ${params.maxLeverage}x (IMPORTANT: leverage must be an integer between 1 and ${params.maxLeverage})
 - Allowed markets: ${params.allowedMarkets.join(", ")}
 - Aggressiveness: ${params.aggressiveness ?? 50}% (higher = more willing to take trades even with weaker signals)
+${mustTradeSection}
 ${strategySection}
 ${autonomousEvaluationSection}
 ${(params.aggressiveness ?? 50) >= 80 ? 'NOTE: High aggressiveness - be willing to take trades with moderate signals. Do not require strong momentum.' : ''}

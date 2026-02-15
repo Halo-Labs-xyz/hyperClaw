@@ -30,6 +30,7 @@ import {
 import { getPrivateKeyForAgent } from "./account-manager";
 import type { TradeLog, AgentRunnerState, PlaceOrderParams } from "./types";
 import { randomBytes } from "crypto";
+import { getAgentTradeMeta, recordAgentExecutedTrade, recordAgentForceAttempt } from "./trade-meta";
 
 // ============================================
 // Runner State
@@ -71,8 +72,9 @@ const AGENT_GLOBAL_TICK_CONCURRENCY = Math.max(
   1,
   parseInt(process.env.AGENT_GLOBAL_TICK_CONCURRENCY || "1", 10)
 );
-const AGENT_TICK_MIN_FLOOR_MS = 30 * 60 * 1000;
-const AGENT_TICK_MAX_CEIL_MS = 60 * 60 * 1000;
+// Keep max <= 15m so "must trade every 15m" is schedulable.
+const AGENT_TICK_MIN_FLOOR_MS = 60 * 1000;
+const AGENT_TICK_MAX_CEIL_MS = 15 * 60 * 1000;
 const AGENT_TICK_MIN_INTERVAL_ENV = Number.parseInt(
   process.env.AGENT_TICK_MIN_INTERVAL_MS || "",
   10
@@ -105,6 +107,20 @@ const AGENT_MIN_ORDER_NOTIONAL_USD = Math.max(
   1,
   parseFloat(process.env.AGENT_MIN_ORDER_NOTIONAL_USD || "10")
 );
+const AGENT_MUST_TRADE_INTERVAL_MS = Math.max(
+  60_000,
+  parseInt(process.env.AGENT_MUST_TRADE_INTERVAL_MS || "900000", 10)
+);
+const AGENT_MUST_TRADE_MIN_ORDER_NOTIONAL_USD = Math.max(
+  0.01,
+  parseFloat(
+    process.env.AGENT_MUST_TRADE_MIN_ORDER_NOTIONAL_USD || String(AGENT_MIN_ORDER_NOTIONAL_USD)
+  )
+);
+const AGENT_MUST_TRADE_FORCE_COOLDOWN_MS = Math.max(
+  0,
+  parseInt(process.env.AGENT_MUST_TRADE_FORCE_COOLDOWN_MS || "60000", 10)
+);
 const TESTNET_FORCE_CONTINUOUS_EXECUTION =
   process.env.TESTNET_FORCE_CONTINUOUS_EXECUTION !== "false";
 const TESTNET_MIN_CONFIDENCE_OVERRIDE = (() => {
@@ -119,6 +135,55 @@ const TESTNET_MIN_ORDER_NOTIONAL_USD = (() => {
 })();
 /** When true, never skip trades: minConfidence=0, min notional=$0.01. Default true. */
 const AGENT_NEVER_SKIP_TRADES = process.env.AGENT_NEVER_SKIP_TRADES !== "false";
+
+function findMarketPriceUsd(markets: Array<{ coin: string; price: number }>, coin: string): number {
+  const m = markets.find((x) => x.coin.toUpperCase() === coin.toUpperCase());
+  const p = Number(m?.price ?? 0);
+  return Number.isFinite(p) ? p : 0;
+}
+
+function pickBestAllowedMarketWithPrice(
+  markets: Array<{ coin: string; price: number }>,
+  allowed: string[]
+): string | null {
+  const allowedUpper = new Set(allowed.map((m) => m.toUpperCase()));
+  for (const m of markets) {
+    if (!allowedUpper.has(m.coin.toUpperCase())) continue;
+    if (Number(m.price) > 0) return m.coin.toUpperCase();
+  }
+  return allowed[0] ? allowed[0].toUpperCase() : null;
+}
+
+function pickLargestOpenPositionAsset(
+  positions: Array<{ coin: string; size: number; entryPrice: number }>,
+  markets: Array<{ coin: string; price: number }>
+): string | null {
+  let best: { coin: string; notional: number } | null = null;
+  for (const p of positions) {
+    const size = Math.abs(Number(p.size) || 0);
+    if (!(size > 0)) continue;
+    const px = findMarketPriceUsd(markets, p.coin) || Number(p.entryPrice) || 0;
+    const notional = size * px;
+    if (!best || notional > best.notional) best = { coin: p.coin.toUpperCase(), notional };
+  }
+  return best?.coin ?? null;
+}
+
+function inferDirectionFromHistory(
+  asset: string,
+  historicalPrices?: Record<string, number[]>
+): "long" | "short" {
+  const series = historicalPrices?.[asset] || historicalPrices?.[asset.toUpperCase()] || [];
+  const a = Number(series.at(-2) ?? 0);
+  const b = Number(series.at(-1) ?? 0);
+  if (Number.isFinite(a) && Number.isFinite(b) && a > 0 && b > 0) return b >= a ? "long" : "short";
+  return "long";
+}
+
+function clampSizeFraction(x: number): number {
+  if (!Number.isFinite(x)) return 0;
+  return Math.max(0, Math.min(1, x));
+}
 
 function parsePositiveInt(raw: string | undefined): number | null {
   if (!raw) return null;
@@ -406,7 +471,7 @@ export async function startAgent(
   consecutiveFailures.set(agentId, 0);
   decisionCadence.set(agentId, { lastDecisionAtMs: 0, lastThrottleLogAtMs: 0 });
 
-  // Agent execution cadence is bounded to 30-60 minutes.
+  // Agent execution cadence is bounded to 1-15 minutes.
   const interval = setInterval(() => {
     const failures = consecutiveFailures.get(agentId) || 0;
     // Adaptive backoff: if many consecutive failures, skip some ticks
@@ -608,6 +673,40 @@ async function executeTickInternal(agentId: string): Promise<TradeLog> {
 
     const availableBalance = parseFloat(accountState.withdrawable || "0");
 
+    // Must-trade liveness: ensure at least one executed trade every 15 minutes.
+    // Trigger when overdue OR when the next tick would miss the deadline.
+    // If the autonomous runner is not active (no in-memory state), assume the next tick could be as late as the
+    // configured max interval.
+    let mustTrade = false;
+    let mustTradeDeadlineMs = 0;
+    let mustTradeReason = "";
+    let tradeMeta = { lastExecutedAt: 0, lastForceAttemptAt: 0 };
+    try {
+      tradeMeta = await getAgentTradeMeta(agentId);
+      const refMs = (tradeMeta.lastExecutedAt > 0 ? tradeMeta.lastExecutedAt : agent.createdAt) || 0;
+      const nowMs = Date.now();
+      mustTradeDeadlineMs = refMs + AGENT_MUST_TRADE_INTERVAL_MS;
+      const overdue = nowMs >= mustTradeDeadlineMs;
+      const horizonMs = state?.intervalMs ?? AGENT_TICK_MAX_INTERVAL_MS;
+      const wouldMiss = nowMs + horizonMs >= mustTradeDeadlineMs;
+      const cooldownOk = nowMs - (tradeMeta.lastForceAttemptAt || 0) >= AGENT_MUST_TRADE_FORCE_COOLDOWN_MS;
+      mustTrade = Boolean(canExecute && cooldownOk && (overdue || wouldMiss));
+      if (mustTrade) {
+        const minsLeft = Math.max(0, Math.round((mustTradeDeadlineMs - nowMs) / 60000));
+        mustTradeReason = overdue
+          ? `Overdue: last executed trade older than ${Math.round(AGENT_MUST_TRADE_INTERVAL_MS / 60000)}m.`
+          : `Deadline approaching: next tick could miss ${Math.round(AGENT_MUST_TRADE_INTERVAL_MS / 60000)}m trade window (${minsLeft}m left).`;
+        // Record the force attempt immediately to prevent thundering-herd overrides.
+        try {
+          await recordAgentForceAttempt(agentId, nowMs);
+        } catch (metaErr) {
+          console.warn(`[Agent ${agentId}] Failed to persist must-trade attempt:`, metaErr);
+        }
+      }
+    } catch (metaErr) {
+      console.warn(`[Agent ${agentId}] Failed to load trade meta:`, metaErr);
+    }
+
     // 3. Fetch historical prices if indicator is enabled
     const historicalPrices: Record<string, number[]> = {};
     if (agent.indicator?.enabled && agent.markets.length > 0) {
@@ -681,6 +780,13 @@ async function executeTickInternal(agentId: string): Promise<TradeLog> {
       agentId,
       autonomousEvaluation,
       agentApiKeys,
+      mustTrade: mustTrade
+        ? {
+            enabled: true,
+            deadlineMs: mustTradeDeadlineMs || Date.now() + AGENT_MUST_TRADE_INTERVAL_MS,
+            reason: mustTradeReason || "Trade liveness requirement active.",
+          }
+        : undefined,
     });
 
     const minConfidence = AGENT_NEVER_SKIP_TRADES
@@ -697,6 +803,50 @@ async function executeTickInternal(agentId: string): Promise<TradeLog> {
     decision.size = Math.max(0, Math.min(decision.size || 0, maxSizeByRisk));
     decision.confidence = Math.max(0, Math.min(1, decision.confidence || 0));
     decision.leverage = Math.max(1, Math.min(agent.maxLeverage, Math.round(decision.leverage || 1)));
+
+    // Must-trade override: if we're at risk of missing the 15m trade window, do not allow "hold".
+    // Also ensure the size is large enough to clear typical exchange minimum notional.
+    if (mustTrade) {
+      const forcedAsset =
+        pickBestAllowedMarketWithPrice(markets, agent.markets) || decision.asset || agent.markets[0] || "BTC";
+
+      if (decision.action === "hold") {
+        const hasOpen = positions.some((p) => Math.abs(p.size) > 0);
+        const canOpenNew = Number.isFinite(availableBalance) && availableBalance >= AGENT_MUST_TRADE_MIN_ORDER_NOTIONAL_USD;
+        const closeAsset = hasOpen ? pickLargestOpenPositionAsset(positions, markets) : null;
+
+        if (hasOpen && (!canOpenNew || !forcedAsset)) {
+          decision = {
+            action: "close",
+            asset: (closeAsset || forcedAsset || agent.markets[0] || "BTC").toUpperCase(),
+            size: 0,
+            leverage: 1,
+            confidence: Math.max(decision.confidence, 0.01),
+            reasoning: `Must-trade override: closing position to satisfy 15m trade liveness. ${mustTradeReason}`,
+          };
+        } else if (forcedAsset) {
+          const action = inferDirectionFromHistory(forcedAsset, Object.keys(historicalPrices).length ? historicalPrices : undefined);
+          const minFrac =
+            availableBalance > 0
+              ? AGENT_MUST_TRADE_MIN_ORDER_NOTIONAL_USD / availableBalance
+              : 1;
+          decision = {
+            action,
+            asset: forcedAsset.toUpperCase(),
+            size: clampSizeFraction(Math.min(maxSizeByRisk, Math.max(0.01, minFrac))),
+            leverage: 1,
+            confidence: Math.max(decision.confidence, 0.01),
+            reasoning: `Must-trade override: forced ${action} to satisfy 15m trade liveness. ${mustTradeReason}`,
+          };
+        }
+      } else if (decision.action === "long" || decision.action === "short") {
+        const minFrac =
+          availableBalance > 0 ? AGENT_MUST_TRADE_MIN_ORDER_NOTIONAL_USD / availableBalance : 1;
+        decision.size = Math.max(decision.size, clampSizeFraction(Math.min(maxSizeByRisk, minFrac)));
+        decision.leverage = Math.max(1, Math.min(decision.leverage, 2));
+        if (!decision.asset) decision.asset = forcedAsset.toUpperCase();
+      }
+    }
 
     if (decision.action !== "hold" && !allowedMarkets.has(decision.asset)) {
       decision = {
@@ -900,6 +1050,14 @@ async function executeTickInternal(agentId: string): Promise<TradeLog> {
     };
 
     await appendTradeLog(tradeLog);
+
+    if (executed) {
+      try {
+        await recordAgentExecutedTrade(agentId, tradeLog.timestamp);
+      } catch (metaErr) {
+        console.warn(`[Agent ${agentId}] Failed to persist last executed trade timestamp:`, metaErr);
+      }
+    }
 
     // 5b. Store in Supermemory for future context
     try {
@@ -1118,6 +1276,13 @@ export async function executeApprovedTrade(
   };
 
   await appendTradeLog(tradeLog);
+  if (executed) {
+    try {
+      await recordAgentExecutedTrade(agentId, tradeLog.timestamp);
+    } catch (metaErr) {
+      console.warn(`[Agent ${agentId}] Failed to persist last executed trade timestamp:`, metaErr);
+    }
+  }
   await updateAgent(agentId, {
     totalTrades: agent.totalTrades + (executed ? 1 : 0),
   });

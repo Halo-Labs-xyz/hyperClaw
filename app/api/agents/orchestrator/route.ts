@@ -1,8 +1,9 @@
 import { NextResponse } from "next/server";
 import { getAgents } from "@/lib/store";
 
-const AGENT_TICK_MIN_FLOOR_MS = 30 * 60 * 1000;
-const AGENT_TICK_MAX_CEIL_MS = 60 * 60 * 1000;
+// Orchestrator cadence bounds. Keep max <= 15m so a "must trade every 15m" policy is enforceable.
+const AGENT_TICK_MIN_FLOOR_MS = 60 * 1000;
+const AGENT_TICK_MAX_CEIL_MS = 15 * 60 * 1000;
 const AGENT_TICK_MIN_INTERVAL_ENV = Number.parseInt(
   process.env.AGENT_TICK_MIN_INTERVAL_MS || "",
   10
