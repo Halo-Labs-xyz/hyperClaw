@@ -1057,6 +1057,47 @@ export async function executeOrder(
 }
 
 // ============================================
+// Spot ↔ Perps Transfer (usdClassTransfer)
+// ============================================
+// Move USDC between spot account and perps margin on Hyperliquid.
+
+/**
+ * Transfer USDC from spot to perps margin.
+ * Use after bridging to HL — funds arrive in spot; move to perps to trade.
+ *
+ * @param amount - USD amount (1 = $1)
+ * @param exchange - Optional; defaults to operator wallet
+ */
+export async function transferSpotToPerps(
+  amount: number,
+  exchange?: ExchangeClient
+): Promise<unknown> {
+  const exchangeClient = exchange ?? getExchangeClient();
+  return await exchangeClient.usdClassTransfer({
+    amount: String(amount),
+    toPerp: true,
+  });
+}
+
+/**
+ * Transfer USDC from perps margin to spot account.
+ * Use before withdrawing — withdraw happens from spot.
+ *
+ * @param amount - USD amount (1 = $1)
+ * @param exchange - Optional; defaults to operator wallet
+ */
+export async function transferPerpsToSpot(
+  amount: number,
+  exchange?: ExchangeClient
+): Promise<unknown> {
+  const exchangeClient = exchange ?? getExchangeClient();
+  return await exchangeClient.usdClassTransfer({
+    amount: String(amount),
+    toPerp: false,
+  });
+}
+
+// ============================================
 // Vault Operations (Hyperliquid native vaults)
 // ============================================
 

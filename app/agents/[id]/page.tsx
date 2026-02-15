@@ -170,14 +170,24 @@ export default function AgentDetailPage() {
   const [depositToken, setDepositToken] = useState<MonadToken>(MONAD_TOKENS[0]);
   const [depositAmount, setDepositAmount] = useState("");
   const [depositing, setDepositing] = useState(false);
-  const [bridgeFunding, setBridgeFunding] = useState(false);
-  const [directUnitFunding, setDirectUnitFunding] = useState(false);
   const [depositTxHash, setDepositTxHash] = useState<`0x${string}` | undefined>();
   const [depositStatus, setDepositStatus] = useState<string>("");
   const [depositPhase, setDepositPhase] = useState<TxUiPhase>("idle");
   const [submittedDepositApproveTxHash, setSubmittedDepositApproveTxHash] = useState<`0x${string}` | undefined>();
   const [submittedDepositTxHash, setSubmittedDepositTxHash] = useState<`0x${string}` | undefined>();
   const [depositTxNetwork, setDepositTxNetwork] = useState<"testnet" | "mainnet" | null>(null);
+  // LI.FI bridge: Monad MON/USDC → HL USDC spot
+  const [lifiQuote, setLifiQuote] = useState<{
+    toAmount?: string;
+    toAmountMin?: string;
+    transactionRequest?: { to: string; data: string; value?: string; chainId: number };
+  } | null>(null);
+  const [lifiQuoteLoading, setLifiQuoteLoading] = useState(false);
+  const [lifiQuoteError, setLifiQuoteError] = useState<string | null>(null);
+  const [lifiBridging, setLifiBridging] = useState(false);
+  const [lifiTxHash, setLifiTxHash] = useState<string | null>(null);
+  const [lifiPhase, setLifiPhase] = useState<TxUiPhase>("idle");
+  const [lifiTransferToPerpsLoading, setLifiTransferToPerpsLoading] = useState(false);
   const [capPreview, setCapPreview] = useState<{
     baseCapUsd: number;
     boostedCapUsd: number;
@@ -251,21 +261,6 @@ export default function AgentDetailPage() {
   const isMonBelowMinDeposit =
     depositToken.symbol === "MON" &&
     (!Number.isFinite(parsedDepositAmount) || parsedDepositAmount < MIN_MON_DEPOSIT);
-  const canUseEmergencyBridgeFund =
-    process.env.NEXT_PUBLIC_ENABLE_EMERGENCY_BRIDGE_FUND === "true" &&
-    isOwner &&
-    depositToken.symbol === "MON" &&
-    !!depositAmount &&
-    Number.isFinite(parsedDepositAmount) &&
-    parsedDepositAmount > 0;
-  const canUseDirectUnitDeposit =
-    process.env.NEXT_PUBLIC_ENABLE_DIRECT_UNIT_DEPOSIT === "true" &&
-    isOwner &&
-    depositToken.symbol === "MON" &&
-    !!depositAmount &&
-    Number.isFinite(parsedDepositAmount) &&
-    parsedDepositAmount > 0;
-
   // Settings state
   const [saving, setSaving] = useState(false);
   const [pausing, setPausing] = useState(false);
@@ -820,96 +815,99 @@ export default function AgentDetailPage() {
     }
   };
 
-  const handleEmergencyBridgeFund = async () => {
-    if (!canUseEmergencyBridgeFund || !address) return;
-    setBridgeFunding(true);
-    setDepositPhase("syncing");
-    setDepositStatus("Submitting emergency Unit bridge funding...");
-
+  const handleLifiQuote = useCallback(async () => {
+    if (!address || !depositAmount || parseFloat(depositAmount) <= 0) return;
+    if (depositToken.symbol !== "MON" && depositToken.symbol !== "USDC") return;
+    setLifiQuoteLoading(true);
+    setLifiQuoteError(null);
+    setLifiQuote(null);
     try {
-      const res = await fetch(`/api/agents/${agentId}/bridge-fund`, {
+      const fromAmount =
+        depositToken.symbol === "MON"
+          ? parseUnits(depositAmount, 18).toString()
+          : parseUnits(depositAmount, depositToken.decimals).toString();
+      const toAddr = agent?.hlAddress || address; // bridge to agent's HL wallet or self
+      const params = new URLSearchParams({
+        fromToken: depositToken.symbol,
+        fromAmount,
+        fromAddress: address,
+        toAddress: toAddr,
+        useTestnet: String(monadTestnet),
+      });
+      const res = await fetch(`/api/lifi/quote?${params}`);
+      const data = await res.json();
+      if (!res.ok) {
+        setLifiQuoteError(data?.error || "Failed to get quote");
+        return;
+      }
+      const q = data?.quote;
+      if (!q) {
+        setLifiQuoteError("No route found");
+        return;
+      }
+      setLifiQuote({
+        toAmount: q.estimate?.toAmount ?? q.action?.toAmount,
+        toAmountMin: q.estimate?.toAmountMin,
+        transactionRequest: q.transactionRequest,
+      });
+    } catch (err) {
+      setLifiQuoteError(err instanceof Error ? err.message : "Failed to get quote");
+    } finally {
+      setLifiQuoteLoading(false);
+    }
+  }, [address, depositAmount, depositToken, agent?.hlAddress, monadTestnet]);
+
+  const handleLifiBridge = useCallback(async () => {
+    if (!lifiQuote?.transactionRequest || !address) return;
+    setLifiBridging(true);
+    setLifiPhase("switching");
+    setLifiTxHash(null);
+    try {
+      await switchChainAsync({ chainId: lifiQuote.transactionRequest.chainId });
+      setLifiPhase("signing");
+      const tx = lifiQuote.transactionRequest;
+      const hash = await sendTransactionAsync({
+        to: tx.to as Address,
+        data: tx.data as `0x${string}`,
+        value: tx.value ? BigInt(tx.value) : BigInt(0),
+        chainId: tx.chainId,
+      });
+      setLifiTxHash(hash);
+      setLifiPhase("confirming");
+    } catch (err) {
+      setLifiPhase("error");
+      setLifiQuoteError(err instanceof Error ? err.message : "Transaction failed");
+    } finally {
+      setLifiBridging(false);
+    }
+  }, [lifiQuote, address, switchChainAsync, sendTransactionAsync]);
+
+  const handleLifiTransferToPerps = useCallback(async () => {
+    const amt = lifiQuote?.toAmountMin
+      ? parseFloat(lifiQuote.toAmountMin) / 1e6
+      : parseFloat(lifiQuote?.toAmount ?? "0") / 1e6;
+    if (!Number.isFinite(amt) || amt <= 0) return;
+    setLifiTransferToPerpsLoading(true);
+    try {
+      const res = await fetch(`/api/agents/${agentId}/lifi-transfer-spot-to-perps`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          "x-owner-wallet-address": address.toLowerCase(),
+          "x-owner-wallet-address": address ?? "",
           ...(user?.id ? { "x-owner-privy-id": user.id } : {}),
         },
-        body: JSON.stringify({ monAmount: depositAmount }),
+        body: JSON.stringify({ amount: Math.floor(amt * 100) / 100 }),
       });
       const data = await res.json();
-      if (!res.ok || !data?.success) {
-        setDepositPhase("error");
-        setDepositStatus(
-          data?.error ||
-            data?.bridgeNote ||
-            "Emergency bridge funding failed."
-        );
-        return;
-      }
-
-      setDepositPhase("confirmed");
-      setDepositStatus(
-        `Emergency bridge submitted via ${data.bridgeProvider}. ` +
-          `Tx ${data.bridgeTxHash ? shortenTxHash(data.bridgeTxHash) : "pending"}`
-      );
+      if (!res.ok) throw new Error(data?.error || "Transfer failed");
+      setLifiQuote(null);
       fetchAgent();
     } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      setDepositPhase("error");
-      setDepositStatus(`Emergency bridge funding failed: ${msg.slice(0, 160)}`);
+      setLifiQuoteError(err instanceof Error ? err.message : "Transfer failed");
     } finally {
-      setBridgeFunding(false);
+      setLifiTransferToPerpsLoading(false);
     }
-  };
-
-  const handleDirectUnitDeposit = async () => {
-    if (!canUseDirectUnitDeposit || !address) return;
-    setDirectUnitFunding(true);
-    setDepositPhase("switching");
-    setDepositStatus("Resolving Unit deposit address...");
-
-    try {
-      const addrRes = await fetch(`/api/agents/${agentId}/unit-deposit-address`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "x-owner-wallet-address": address.toLowerCase(),
-          ...(user?.id ? { "x-owner-privy-id": user.id } : {}),
-        },
-      });
-      const addrData = await addrRes.json();
-      if (!addrRes.ok || !addrData?.unitDepositAddress) {
-        setDepositPhase("error");
-        setDepositStatus(addrData?.error || "Failed to resolve Unit deposit address");
-        return;
-      }
-
-      await switchChainAsync({ chainId: vaultChainId });
-      setDepositPhase("signing");
-      setDepositStatus("Check wallet and sign direct Unit deposit transaction...");
-
-      const txHash = await sendTransactionAsync({
-        to: addrData.unitDepositAddress as Address,
-        value: parseEther(depositAmount),
-        chainId: vaultChainId,
-      });
-
-      setDepositPhase("confirmed");
-      setDepositStatus(
-        `Direct Unit deposit submitted: ${shortenTxHash(txHash)}. ` +
-          "Track settlement in Hyperunit operations."
-      );
-      setDepositTxNetwork(activeNetwork);
-      setSubmittedDepositTxHash(txHash);
-      fetchAgent();
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      setDepositPhase("error");
-      setDepositStatus(`Direct Unit deposit failed: ${msg.slice(0, 180)}`);
-    } finally {
-      setDirectUnitFunding(false);
-    }
-  };
+  }, [lifiQuote, agentId, address, user?.id, fetchAgent]);
 
   const handleWithdraw = async () => {
     if (!address || !userShares || !totalShares || totalShares === BigInt(0)) return;
@@ -2157,28 +2155,73 @@ export default function AgentDetailPage() {
                         </span>
                       ) : `Deposit ${depositToken.symbol}`}
                     </button>
-                    {canUseEmergencyBridgeFund && (
-                      <button
-                        onClick={handleEmergencyBridgeFund}
-                        disabled={bridgeFunding || depositing}
-                        className="w-full py-2.5 text-xs rounded-xl border border-warning/30 text-warning hover:bg-warning/10 transition-colors disabled:opacity-60"
-                      >
-                        {bridgeFunding ? "Submitting Emergency Bridge..." : "Emergency Bridge Fund (Bypass Vault)"}
-                      </button>
-                    )}
-                    {canUseDirectUnitDeposit && (
-                      <button
-                        onClick={handleDirectUnitDeposit}
-                        disabled={directUnitFunding || depositing || bridgeFunding}
-                        className="w-full py-2.5 text-xs rounded-xl border border-accent/30 text-accent hover:bg-accent/10 transition-colors disabled:opacity-60"
-                      >
-                        {directUnitFunding ? "Awaiting Signature..." : "Direct Unit Deposit (Sign Wallet Tx)"}
-                      </button>
-                    )}
                   </div>
                 ) : (
                   <div className="text-center text-muted text-sm py-4 bg-surface rounded-xl border border-card-border">
                     Connect wallet to deposit
+                  </div>
+                )}
+
+                {/* LI.FI Bridge: Monad MON/USDC → HL USDC spot (primary path for mainnet) */}
+                {(depositToken.symbol === "MON" || depositToken.symbol === "USDC") && isConnected && (
+                  <div className="mt-6 pt-5 border-t border-card-border">
+                    <p className="text-xs font-medium text-muted uppercase tracking-wider mb-3">
+                      Bridge via LI.FI
+                    </p>
+                    <p className="text-xs text-dim mb-3">
+                      Bridge {depositToken.symbol} from Monad → USDC spot on Hyperliquid. Then transfer spot → perps to trade.
+                    </p>
+                    <div className="space-y-2">
+                      <button
+                        onClick={handleLifiQuote}
+                        disabled={lifiQuoteLoading || !depositAmount || parseFloat(depositAmount) <= 0}
+                        className="w-full py-2.5 text-xs rounded-xl border border-accent/30 text-accent hover:bg-accent/10 transition-colors disabled:opacity-60"
+                      >
+                        {lifiQuoteLoading ? "Fetching quote..." : "Get LI.FI Quote"}
+                      </button>
+                      {lifiQuote && (
+                        <div className="p-3 rounded-xl border border-card-border bg-surface/60 space-y-2">
+                          <div className="text-xs flex justify-between">
+                            <span className="text-dim">Est. USDC received</span>
+                            <span className="mono-nums text-foreground">
+                              {lifiQuote.toAmount ? (parseFloat(lifiQuote.toAmount) / 1e6).toFixed(2) : "—"} USDC
+                            </span>
+                          </div>
+                          <button
+                            onClick={handleLifiBridge}
+                            disabled={lifiBridging || !lifiQuote.transactionRequest}
+                            className="w-full py-2.5 text-xs rounded-lg bg-accent/20 text-accent hover:bg-accent/30 transition-colors disabled:opacity-60"
+                          >
+                            {lifiBridging
+                              ? lifiPhase === "signing"
+                                ? "Awaiting signature..."
+                                : lifiPhase === "confirming"
+                                ? "Confirming..."
+                                : "Bridging..."
+                              : "Execute Bridge"}
+                          </button>
+                          {lifiTxHash && (
+                            <p className="text-[10px] text-dim">
+                              Tx: {shortenTxHash(lifiTxHash)} — funds will arrive in HL spot shortly.
+                            </p>
+                          )}
+                          {isOwner && lifiQuote && lifiQuote.toAmountMin && (
+                            <button
+                              onClick={handleLifiTransferToPerps}
+                              disabled={lifiTransferToPerpsLoading || !agent?.hlAddress}
+                              className="w-full py-2 text-[10px] rounded-lg border border-muted/30 text-muted hover:bg-muted/10 transition-colors disabled:opacity-60"
+                            >
+                              {lifiTransferToPerpsLoading
+                                ? "Transferring spot → perps..."
+                                : "Transfer to Perps (agent wallet)"}
+                            </button>
+                          )}
+                        </div>
+                      )}
+                      {lifiQuoteError && (
+                        <p className="text-xs text-danger">{lifiQuoteError}</p>
+                      )}
+                    </div>
                   </div>
                 )}
 

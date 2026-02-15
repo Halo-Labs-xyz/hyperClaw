@@ -61,7 +61,8 @@ flowchart LR
     Wallet_U -->|deposit MON / ERC20| Vault
     Hclaw -.->|tier caps deposit size| Vault
     Vault -->|confirmed tx| Relay
-    Relay -->|mainnet: Hyperunit/deBridge<br/>testnet: usdSend| HLWallet
+    Relay -->|mainnet: provision only<br/>testnet: usdSend| HLWallet
+    User -->|Bridge via LI.FI| HLWallet
     Store -->|decrypt agent key| Runner
     Runner -->|fetch market data| Stream
     Stream -->|L2 book, mids,<br/>funding, fills| AI
@@ -78,7 +79,7 @@ flowchart LR
 1. User deposits MON or ERC20 into `HyperclawVault` on Monad. `$HCLAW` market cap sets the deposit cap tier.
 2. Deposit relay picks up the confirmed tx and funds the agent wallet:
    - testnet: operator `usdSend`
-   - mainnet: bridge relay via Hyperunit with deBridge fallback/quote
+   - mainnet: provision HL wallet only; users bridge via LI.FI in Deposit tab
 3. Agent runner ticks on a configurable interval. Each tick: pulls live market data from Hyperliquid WebSocket streams, passes it to the AI brain, receives a structured trade decision.
 4. If confidence exceeds the agent's threshold, the runner places a full order set (market entry + stop-loss + take-profit) on Hyperliquid using the agent's own wallet.
 5. In semi-auto mode, the decision is sent to Telegram first as an approval request. The user approves or rejects via inline buttons before execution.
@@ -793,23 +794,7 @@ cp .env.example .env.local
 | `NEXT_PUBLIC_HYPERLIQUID_TESTNET`    | No       | `"true"` for HL testnet (default: mirrors Monad)      |
 | `RELAY_FEE_BPS`                      | No       | Deposit relay fee in basis points (default: 100 = 1%) |
 | `RELAY_STABLE_TOKENS`                | No       | Comma-separated mainnet ERC20 addresses allowed for $1 relay pricing |
-| `MAINNET_BRIDGE_ENABLED`             | No       | Enable mainnet bridge funding/withdraw relay           |
-| `MAINNET_BRIDGE_PREFER_DEBRIDGE`     | No       | Try deBridge execution before Hyperunit                |
-| `HYPERUNIT_API_URL`                  | No       | Hyperunit API base URL                                 |
-| `HYPERUNIT_MONAD_CHAIN`              | No       | Hyperunit source chain slug for Monad                  |
-| `HYPERUNIT_HYPERLIQUID_CHAIN`        | No       | Hyperunit destination chain slug for Hyperliquid       |
-| `HYPERUNIT_DEPOSIT_ASSET`            | No       | Hyperunit asset slug for mainnet deposit relays        |
-| `HYPERUNIT_WITHDRAW_ASSET`           | No       | Hyperunit asset slug for mainnet withdrawal relays     |
-| `RELAY_MONAD_PRIVATE_KEY`            | No       | Monad signer for bridge tx submission (fallback: `MONAD_PRIVATE_KEY`) |
-| `DEBRIDGE_API_URL`                   | No       | deBridge DLN API base URL                              |
-| `DEBRIDGE_API_KEY`                   | No       | deBridge API key (if required by account tier)         |
-| `DEBRIDGE_MONAD_CHAIN_ID`            | No       | deBridge source chain id for Monad                     |
-| `DEBRIDGE_HYPERLIQUID_CHAIN_ID`      | No       | deBridge destination chain id for Hyperliquid          |
-| `DEBRIDGE_MONAD_TOKEN_IN`            | No       | deBridge source token address/id                       |
-| `DEBRIDGE_HYPERLIQUID_TOKEN_OUT`     | No       | deBridge destination token address/id                  |
-| `DEBRIDGE_SLIPPAGE`                  | No       | deBridge slippage percent                              |
-| `DEBRIDGE_PREPEND_OPERATING_EXPENSE` | No       | deBridge operating expense behavior                    |
-| `DEBRIDGE_AFFILIATE_FEE_PERCENT`     | No       | Optional deBridge affiliate fee percent                |
+| `LIFI_API_KEY`                       | No       | LI.FI API key (portal.li.fi); higher rate limits       |
 | `OPENAI_API_KEY`                     | Yes      | API key for the AI trading brain                      |
 | `GEMINI_API_KEY`                     | No       | Gemini API key used in model fallback chain           |
 | `AI_MODEL_CHAIN`                     | No       | Ordered `provider:model` fallback list for AI decisions |
@@ -1000,7 +985,7 @@ Checks launch-blocker config for production cutover:
 - `ALLOW_RUNTIME_NETWORK_SWITCH=false`
 - Builder config set on HL mainnet
 - `RELAY_STABLE_TOKENS` set for Monad mainnet ERC20 relay deposits
-- Mainnet bridge config valid when `MAINNET_BRIDGE_ENABLED=true`
+- Users bridge MON/USDC → HL USDC via LI.FI in Deposit tab
 - Required API keys and vault address format
 
 ---
