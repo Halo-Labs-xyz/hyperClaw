@@ -89,7 +89,8 @@ let monPriceCache: { price: number; timestamp: number } | null = null;
 const PRICE_CACHE_TTL = 30_000; // 30 seconds
 
 const MAINNET_MON_MIN_PRICE_USD = Number.parseFloat(
-  process.env.MAINNET_MON_MIN_PRICE_USD || "1.05"
+  // Default must not block legitimate prices. Keep a tiny floor to filter out zeros.
+  process.env.MAINNET_MON_MIN_PRICE_USD || "0.0001"
 );
 const MAINNET_MON_MAX_PRICE_USD = Number.parseFloat(
   process.env.MAINNET_MON_MAX_PRICE_USD || "100000"
@@ -215,31 +216,47 @@ async function monToUsdc(
 
   // Mainnet: reconcile on-chain oracle with external feed to avoid bad $1 pricing.
   const oracleCandidate = await getVaultOracleTokenPriceUsd(zeroAddress, client, vaultAddress);
-  const feedCandidate = await fetchMonPrice();
+  let feedCandidate: number | null = null;
+  try {
+    feedCandidate = await fetchMonPrice();
+  } catch (err) {
+    // Do not hard-fail deposits when the on-chain oracle is available.
+    // External feeds can be flaky/rate-limited in production environments.
+    const msg = err instanceof Error ? err.message : String(err);
+    console.warn(`[PriceFeed] External MON price fetch failed: ${msg.slice(0, 160)}`);
+    feedCandidate = null;
+  }
   const oraclePrice = isFinitePositive(oracleCandidate ?? NaN) ? Number(oracleCandidate) : null;
-  const feedPrice = isFinitePositive(feedCandidate) ? feedCandidate : null;
+  const feedPrice = isFinitePositive(feedCandidate ?? NaN) ? Number(feedCandidate) : null;
+
+  // Apply bounds per-candidate so a single bad source doesn't block deposits.
+  const oracleBounded =
+    oraclePrice !== null && isMonPriceWithinMainnetBounds(oraclePrice) ? oraclePrice : null;
+  const feedBounded =
+    feedPrice !== null && isMonPriceWithinMainnetBounds(feedPrice) ? feedPrice : null;
 
   let monPrice: number | null = null;
 
-  if (oraclePrice !== null && feedPrice !== null) {
-    const driftPct = calculatePctDrift(oraclePrice, feedPrice);
+  if (oracleBounded !== null && feedBounded !== null) {
+    const driftPct = calculatePctDrift(oracleBounded, feedBounded);
     if (
       Number.isFinite(MAINNET_MON_ORACLE_FEED_MAX_DRIFT_PCT) &&
       driftPct > MAINNET_MON_ORACLE_FEED_MAX_DRIFT_PCT
     ) {
       throw new Error(
-        `MON price mismatch (oracle=${oraclePrice}, feed=${feedPrice}, drift=${driftPct.toFixed(2)}%)`
+        `MON price mismatch (oracle=${oracleBounded}, feed=${feedBounded}, drift=${driftPct.toFixed(2)}%)`
       );
     }
-    monPrice = feedPrice;
+    // Prefer the vault oracle when the two sources are consistent.
+    monPrice = oracleBounded;
   } else {
-    monPrice = feedPrice ?? oraclePrice;
+    monPrice = oracleBounded ?? feedBounded;
   }
 
-  if (monPrice === null || !isMonPriceWithinMainnetBounds(monPrice)) {
+  if (monPrice === null) {
     throw new Error(
-      `Invalid mainnet MON price ${monPrice ?? "n/a"} outside bounds ` +
-        `[${MAINNET_MON_MIN_PRICE_USD}, ${MAINNET_MON_MAX_PRICE_USD}]`
+      `Invalid mainnet MON price (oracle=${oraclePrice ?? "n/a"}, feed=${feedPrice ?? "n/a"}) ` +
+        `outside bounds [${MAINNET_MON_MIN_PRICE_USD}, ${MAINNET_MON_MAX_PRICE_USD}]`
     );
   }
 

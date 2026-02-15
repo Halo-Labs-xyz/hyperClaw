@@ -13,10 +13,11 @@ const PLACEHOLDER_VALUES = [
   "your_agent_private_key_hex",
 ];
 
-// Temporary production override while validating mainnet deposit/withdraw end-to-end.
+// Optional production override for mainnet vault address.
+// IMPORTANT: Do not default this to a hardcoded address. If this value is wrong,
+// users will be instructed to deposit into the wrong vault.
 const MAINNET_VAULT_HOTFIX_ADDRESS = normalizeHexAddress(
-  process.env.NEXT_PUBLIC_MAINNET_VAULT_HOTFIX_ADDRESS ||
-    "0x56C1093B0e960d5e0df987Ca9f85471a0945B50F"
+  process.env.NEXT_PUBLIC_MAINNET_VAULT_HOTFIX_ADDRESS
 );
 
 export function isEnvSet(value: string | undefined | null): boolean {
