@@ -1220,7 +1220,6 @@ export async function reconcileSpotToPerp(agentId: string): Promise<void> {
     const agentSpots = agent.markets.filter((m) => spotNames.has(m));
     const perpsOnly = agentSpots.length === 0;
     const spotsOnly = agentPerps.length === 0;
-    const both = agentPerps.length > 0 && agentSpots.length > 0;
 
     if (spotsOnly) return; // leave all in spot
 
@@ -1233,7 +1232,8 @@ export async function reconcileSpotToPerp(agentId: string): Promise<void> {
     const available = Math.max(0, total - hold);
     if (available < MIN_SPOT_TRANSFER_USD) return;
 
-    const toTransfer = both ? available * 0.5 : available;
+    // spotsOnly returned above, so remaining cases are perpsOnly (100%) or both (50%).
+    const toTransfer = perpsOnly ? available : available * 0.5;
     if (toTransfer < MIN_SPOT_TRANSFER_USD) return;
 
     const amountStr = toTransfer.toFixed(6);
@@ -1249,7 +1249,7 @@ export async function reconcileSpotToPerp(agentId: string): Promise<void> {
     await exchange.usdClassTransfer({ amount: amountStr, toPerp: true });
     reconcileSpotToPerpLastAt.set(agentId, now);
     console.log(
-      `[HL] reconcileSpotToPerp agent=${agentId} $${amountStr} spot→perp (${both ? "50% split" : "perps-only"})`
+      `[HL] reconcileSpotToPerp agent=${agentId} $${amountStr} spot→perp (${perpsOnly ? "perps-only" : "50% split"})`
     );
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);

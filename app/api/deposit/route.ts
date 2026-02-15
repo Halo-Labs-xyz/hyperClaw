@@ -226,11 +226,10 @@ export async function GET(request: Request) {
       const ownedAgents = agents.filter(
         (a) => a.telegram?.ownerPrivyId === ownerPrivyId && a.telegram?.ownerWalletAddress
       );
-      const uniqueAddresses = [...new Set(
-        ownedAgents
-          .map((a) => a.telegram?.ownerWalletAddress)
-          .filter((a): a is Address => !!a)
-      )];
+      const addresses = ownedAgents
+        .map((a) => a.telegram?.ownerWalletAddress)
+        .filter((a): a is Address => !!a);
+      const uniqueAddresses = Array.from(new Set(addresses));
       if (uniqueAddresses.length === 0) {
         return NextResponse.json({
           ownerPrivyId,
