@@ -170,6 +170,7 @@ export interface TradeLog {
     fillPrice: number;
     fillSize: number;
     status: "filled" | "partial" | "rejected";
+    reason?: string;
   };
 }
 

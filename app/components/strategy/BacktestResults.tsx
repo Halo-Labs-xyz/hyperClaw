@@ -3,6 +3,13 @@
 import { useState } from "react";
 import type { TradeLog } from "@/lib/types";
 
+function getSkippedReason(trade: TradeLog): string {
+  if (trade.executed) return "";
+  const explicit = trade.executionResult?.reason?.trim();
+  if (explicit) return explicit;
+  return trade.decision.reasoning?.trim() || "No skip reason provided.";
+}
+
 function ReasoningCell({ reasoning }: { reasoning?: string }) {
   const [expanded, setExpanded] = useState(false);
   const text = reasoning?.trim() || "—";
@@ -157,7 +164,12 @@ export function BacktestResults({ trades, startTime, endTime }: Props) {
                   {trade.executed ? (
                     <span className="text-success">Yes</span>
                   ) : (
-                    <span className="text-muted">No</span>
+                    <div className="space-y-1">
+                      <span className="text-muted">No</span>
+                      <div className="text-[10px] text-danger/90 max-w-[180px] leading-snug">
+                        {getSkippedReason(trade)}
+                      </div>
+                    </div>
                   )}
                 </td>
                 <td className="px-4 py-2 text-xs text-muted max-w-[200px]">

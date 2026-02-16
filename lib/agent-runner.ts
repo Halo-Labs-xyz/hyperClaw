@@ -105,8 +105,8 @@ const AGENT_AUTONOMOUS_BACKTEST_LOOKBACK = Math.max(
   parseInt(process.env.AGENT_AUTONOMOUS_BACKTEST_LOOKBACK || "60", 10)
 );
 const AGENT_MIN_ORDER_NOTIONAL_USD = Math.max(
-  1,
-  parseFloat(process.env.AGENT_MIN_ORDER_NOTIONAL_USD || "10")
+  0.01,
+  parseFloat(process.env.AGENT_MIN_ORDER_NOTIONAL_USD || "0.01")
 );
 const AGENT_MUST_TRADE_INTERVAL_MS = Math.max(
   60_000,
@@ -127,12 +127,7 @@ const TESTNET_FORCE_CONTINUOUS_EXECUTION =
 const MAINNET_FORCE_CONTINUOUS_EXECUTION =
   process.env.MAINNET_FORCE_CONTINUOUS_EXECUTION !== "false";
 const AGENT_EXECUTION_MIN_CONFIDENCE = 0.1;
-const TESTNET_MIN_ORDER_NOTIONAL_USD = (() => {
-  const parsed = parseFloat(process.env.TESTNET_MIN_ORDER_NOTIONAL_USD || "1");
-  if (!Number.isFinite(parsed)) return 1;
-  return Math.max(0, parsed);
-})();
-/** When true, relaxes notional gate to $0.01. Confidence gate still enforces 10% minimum. */
+/** When true, hold decisions are force-remapped to keep autonomous execution continuous. */
 const AGENT_NEVER_SKIP_TRADES = process.env.AGENT_NEVER_SKIP_TRADES !== "false";
 
 function findMarketPriceUsd(markets: Array<{ coin: string; price: number }>, coin: string): number {
@@ -1036,14 +1031,8 @@ async function executeTickInternal(agentId: string): Promise<TradeLog> {
         let targetNotionalUsd = decision.action === "close"
           ? closeNotionalUsd
           : availableBalance * decision.size;
-        const minOrderNotionalUsd = AGENT_NEVER_SKIP_TRADES
-          ? 0.01
-          : forceContinuousExecution && isTestnetAgent(agent)
-            ? TESTNET_MIN_ORDER_NOTIONAL_USD
-            : AGENT_MIN_ORDER_NOTIONAL_USD;
-
-        if (forceTradeAttempt && decision.action !== "close" && targetNotionalUsd < minOrderNotionalUsd) {
-          targetNotionalUsd = minOrderNotionalUsd;
+        if (forceTradeAttempt && decision.action !== "close" && targetNotionalUsd <= 0) {
+          targetNotionalUsd = AGENT_MIN_ORDER_NOTIONAL_USD;
         }
 
         const orderSize = decision.action === "close"
@@ -1060,20 +1049,9 @@ async function executeTickInternal(agentId: string): Promise<TradeLog> {
             fillPrice: price,
             fillSize: 0,
             status: "rejected",
+            reason: skipReason,
           };
           console.warn(`[Agent ${agentId}] SKIPPING: Invalid order size: ${orderSize} (notional=${targetNotionalUsd}, price=${price})`);
-        } else if (!forceTradeAttempt && decision.action !== "close" && targetNotionalUsd < minOrderNotionalUsd) {
-          const skipReason = `Execution skipped: notional $${targetNotionalUsd.toFixed(2)} below minimum $${minOrderNotionalUsd.toFixed(2)}.`;
-          decision.reasoning = appendExecutionContext(decision.reasoning, skipReason);
-          executionResult = {
-            orderId: "market",
-            fillPrice: price,
-            fillSize: orderSize,
-            status: "rejected",
-          };
-          console.warn(
-            `[Agent ${agentId}] SKIPPING: Notional $${targetNotionalUsd.toFixed(2)} below minimum $${minOrderNotionalUsd.toFixed(2)}`
-          );
         } else {
           console.log(`[Agent ${agentId}] Order size valid: ${orderSize}`);
           const isBuy =
@@ -1184,6 +1162,7 @@ async function executeTickInternal(agentId: string): Promise<TradeLog> {
           fillPrice: 0,
           fillSize: 0,
           status: "rejected",
+          reason: summary || "Execution failed",
         };
         if (state) {
           state.errors.push({

@@ -149,6 +149,15 @@ function ReasoningCell({ reasoning }: { reasoning?: string }) {
   );
 }
 
+function getSkippedReason(trade: TradeLog): string {
+  if (trade.executed) return "";
+  const explicit = trade.executionResult?.reason?.trim();
+  if (explicit) return explicit;
+  const fallback = trade.decision.reasoning?.trim();
+  if (fallback) return fallback;
+  return "No skip reason provided.";
+}
+
 function CopyAddressButton({ address }: { address: string }) {
   const [copied, setCopied] = useState(false);
   const copy = () => {
@@ -1989,7 +1998,12 @@ export default function AgentDetailPage() {
                               {trade.executed ? (
                                 <span className="chip chip-active text-[10px]">Executed</span>
                               ) : (
-                                <span className="chip chip-stopped text-[10px]">Skipped</span>
+                                <div className="space-y-1">
+                                  <span className="chip chip-stopped text-[10px]">Skipped</span>
+                                  <div className="text-[10px] text-danger/90 max-w-[220px] leading-snug">
+                                    {getSkippedReason(trade)}
+                                  </div>
+                                </div>
                               )}
                             </td>
                             <td className="px-5 py-3.5 text-dim text-xs max-w-[200px]">
