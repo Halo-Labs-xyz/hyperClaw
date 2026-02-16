@@ -29,7 +29,7 @@ import {
   getHistoricalPrices,
 } from "./hyperliquid";
 import { getPrivateKeyForAgent } from "./account-manager";
-import type { TradeLog, AgentRunnerState, PlaceOrderParams } from "./types";
+import type { TradeLog, AgentRunnerState, PlaceOrderParams, TradeDecision } from "./types";
 import { randomBytes } from "crypto";
 import { getAgentTradeMeta, recordAgentExecutedTrade, recordAgentForceAttempt } from "./trade-meta";
 
@@ -1441,6 +1441,219 @@ export async function executeApprovedTrade(
     totalTrades: agent.totalTrades + (executed ? 1 : 0),
   });
   await clearPendingApproval(agentId);
+
+  return tradeLog;
+}
+
+/**
+ * Execute a specific trade decision immediately.
+ * Used for "Execute Now" retries on skipped trades.
+ */
+export async function executeTradeDecisionNow(
+  agentId: string,
+  decisionInput: TradeDecision,
+  options?: { sourceTradeId?: string }
+): Promise<TradeLog> {
+  const agent = await getAgent(agentId);
+  if (!agent) throw new Error(`Agent ${agentId} not found`);
+
+  const decision: TradeDecision = {
+    ...decisionInput,
+    asset: String(decisionInput.asset || "").toUpperCase(),
+    size: clampSizeFraction(Number(decisionInput.size || 0)),
+    leverage: Math.max(1, Math.min(agent.maxLeverage, Math.round(Number(decisionInput.leverage || 1)))),
+    confidence: Math.max(0, Math.min(1, Number(decisionInput.confidence || 0))),
+    reasoning: String(decisionInput.reasoning || "").trim(),
+  };
+
+  const contextNote = options?.sourceTradeId
+    ? `Execute-now retry from skipped trade ${options.sourceTradeId}.`
+    : "Execute-now retry from skipped trade.";
+  decision.reasoning = appendExecutionContext(decision.reasoning, contextNote);
+
+  if (decision.action === "hold") {
+    throw new Error("Cannot execute a hold decision");
+  }
+
+  if (!agent.markets.some((m) => m.toUpperCase() === decision.asset)) {
+    throw new Error(`Trade asset ${decision.asset} is not in agent allowed markets`);
+  }
+
+  const { getAccountForAgent, isPKPAccount } = await import("./account-manager");
+  const agentAccount = await getAccountForAgent(agentId);
+  const hlAddress = agentAccount?.address ?? agent.hlAddress;
+  const isPKP = agentAccount ? await isPKPAccount(agentId) : false;
+  let agentExchange: ReturnType<typeof getExchangeClientForAgent> | null = null;
+  let pkpExchange: Awaited<ReturnType<typeof getExchangeClientForPKP>> | null = null;
+
+  if (!isPKP) {
+    const agentPk = await getPrivateKeyForAgent(agentId);
+    agentExchange = agentPk ? getExchangeClientForAgent(agentPk) : null;
+  } else {
+    pkpExchange = await getExchangeClientForPKP(agentId);
+  }
+
+  if (!isPKP && !agentExchange) {
+    throw new Error("No HL key found for agent");
+  }
+
+  let executed = false;
+  let executionResult: TradeLog["executionResult"] = undefined;
+
+  try {
+    const markets = await getEnrichedMarketData();
+    const accountState = await getAccountState(hlAddress);
+    const balance = getTradableBalanceSnapshot(accountState);
+    const availableBalance = balance.tradableUsd;
+    const assetIndex = await getAssetIndex(decision.asset);
+
+    if (isPKP && pkpExchange) {
+      try {
+        await updateLeverage(assetIndex, decision.leverage, true, pkpExchange);
+      } catch (levErr) {
+        console.warn(`[Agent ${agentId}] Execute-now PKP leverage update failed, continuing:`, levErr);
+      }
+    } else if (agentExchange) {
+      try {
+        await updateLeverage(assetIndex, decision.leverage, true, agentExchange);
+      } catch (levErr) {
+        console.warn(`[Agent ${agentId}] Execute-now leverage update failed, continuing:`, levErr);
+      }
+    }
+
+    const capitalToUse = availableBalance * decision.size;
+    let price = markets.find((m) => m.coin === decision.asset)?.price || 0;
+    if (!(price > 0)) {
+      const mids = await getAllMids();
+      price = parseUsd(mids[decision.asset]);
+    }
+
+    const positions = (accountState.assetPositions || [])
+      .filter((p) => parseFloat(p.position.szi) !== 0)
+      .map((p) => ({ coin: p.position.coin, size: parseFloat(p.position.szi) }));
+
+    const matchingPosition = positions.find((p) => p.coin === decision.asset);
+    const orderSize = decision.action === "close"
+      ? Math.abs(matchingPosition?.size ?? 0)
+      : (price > 0 ? capitalToUse / price : 0);
+
+    if (!(orderSize > 0)) {
+      throw new Error(
+        `Execute-now skipped due invalid order size ${orderSize} (tradable=${availableBalance}, price=${price})`
+      );
+    }
+
+    const isBuy =
+      decision.action === "long" ||
+      (decision.action === "close" &&
+        (positions.find((p) => p.coin === decision.asset)?.size ?? 0) < 0);
+    const side = isBuy ? "buy" : "sell";
+
+    const entryParams: PlaceOrderParams = {
+      coin: decision.asset,
+      side: decision.action === "close" ? side : (decision.action === "long" ? "buy" : "sell"),
+      size: orderSize,
+      orderType: "market",
+      reduceOnly: decision.action === "close",
+      slippagePercent: 1,
+    };
+
+    if (isPKP) {
+      const { executeOrderWithPKP } = await import("./lit-signing");
+      await executeOrderWithPKP(agentId, entryParams);
+    } else if (agentExchange) {
+      await executeOrder(entryParams, agentExchange, { skipBuilder: true });
+    }
+
+    executed = true;
+    executionResult = {
+      orderId: "market",
+      fillPrice: price,
+      fillSize: orderSize,
+      status: "filled",
+    };
+
+    if (decision.stopLoss && decision.action !== "close") {
+      const slSide = decision.action === "long" ? "sell" : "buy";
+      const slParams: PlaceOrderParams = {
+        coin: decision.asset,
+        side: slSide,
+        size: orderSize,
+        orderType: "stop-loss",
+        price: decision.stopLoss,
+        triggerPrice: decision.stopLoss,
+        isTpsl: true,
+        reduceOnly: true,
+      };
+      try {
+        if (isPKP) {
+          const { executeOrderWithPKP } = await import("./lit-signing");
+          await executeOrderWithPKP(agentId, slParams);
+        } else if (agentExchange) {
+          await executeOrder(slParams, agentExchange, { skipBuilder: true });
+        }
+      } catch (slErr) {
+        console.warn(`[Agent ${agentId}] Execute-now stop-loss placement failed:`, slErr);
+      }
+    }
+
+    if (decision.takeProfit && decision.action !== "close") {
+      const tpSide = decision.action === "long" ? "sell" : "buy";
+      const tpParams: PlaceOrderParams = {
+        coin: decision.asset,
+        side: tpSide,
+        size: orderSize,
+        orderType: "take-profit",
+        price: decision.takeProfit,
+        triggerPrice: decision.takeProfit,
+        isTpsl: true,
+        reduceOnly: true,
+      };
+      try {
+        if (isPKP) {
+          const { executeOrderWithPKP } = await import("./lit-signing");
+          await executeOrderWithPKP(agentId, tpParams);
+        } else if (agentExchange) {
+          await executeOrder(tpParams, agentExchange, { skipBuilder: true });
+        }
+      } catch (tpErr) {
+        console.warn(`[Agent ${agentId}] Execute-now take-profit placement failed:`, tpErr);
+      }
+    }
+  } catch (err) {
+    const summary = summarizeExecutionError(err);
+    decision.reasoning = appendExecutionContext(decision.reasoning, `Execution failed: ${summary}.`);
+    executionResult = {
+      orderId: "market",
+      fillPrice: 0,
+      fillSize: 0,
+      status: "rejected",
+      reason: summary || "Execution failed",
+    };
+  }
+
+  const tradeLog: TradeLog = {
+    id: randomBytes(8).toString("hex"),
+    agentId,
+    timestamp: Date.now(),
+    decision,
+    executed,
+    executionResult,
+  };
+
+  await appendTradeLog(tradeLog);
+
+  if (executed) {
+    try {
+      await recordAgentExecutedTrade(agentId, tradeLog.timestamp);
+    } catch (metaErr) {
+      console.warn(`[Agent ${agentId}] Failed to persist last executed trade timestamp:`, metaErr);
+    }
+  }
+
+  await updateAgent(agentId, {
+    totalTrades: agent.totalTrades + (executed ? 1 : 0),
+  });
 
   return tradeLog;
 }

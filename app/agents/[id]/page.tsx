@@ -297,6 +297,8 @@ export default function AgentDetailPage() {
 
   // Agent tick (manual trigger)
   const [ticking, setTicking] = useState(false);
+  const [executingTradeId, setExecutingTradeId] = useState<string | null>(null);
+  const [tradeActionStatus, setTradeActionStatus] = useState<{ type: "success" | "error"; message: string } | null>(null);
   
   // Runner/Lifecycle state
   const [lifecycle, setLifecycle] = useState<{
@@ -580,6 +582,40 @@ export default function AgentDetailPage() {
       setCapPreviewLoading(false);
     }
   }, [activeNetwork, address, agentId]);
+
+  const handleExecuteSkippedTradeNow = useCallback(async (trade: TradeLog) => {
+    if (trade.executed || trade.decision.action === "hold") return;
+
+    setTradeActionStatus(null);
+    setExecutingTradeId(trade.id);
+    try {
+      const res = await fetch(`/api/agents/${agentId}/trades/execute`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ tradeId: trade.id }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        throw new Error(
+          (data && typeof data.error === "string" && data.error) ||
+          "Failed to execute skipped trade"
+        );
+      }
+
+      setTradeActionStatus({
+        type: "success",
+        message: `Executed ${trade.decision.action.toUpperCase()} ${trade.decision.asset} in real time.`,
+      });
+      await fetchAgent();
+    } catch (e) {
+      setTradeActionStatus({
+        type: "error",
+        message: e instanceof Error ? e.message : "Failed to execute skipped trade",
+      });
+    } finally {
+      setExecutingTradeId(null);
+    }
+  }, [agentId, fetchAgent]);
 
   useEffect(() => {
     fetchAgent();
@@ -1940,6 +1976,15 @@ export default function AgentDetailPage() {
 
           {tab === "trades" && (
             <div className="card rounded-2xl overflow-hidden">
+              {tradeActionStatus && (
+                <div className={`px-5 py-3 text-xs border-b border-card-border ${
+                  tradeActionStatus.type === "success"
+                    ? "bg-success/10 text-success"
+                    : "bg-danger/10 text-danger"
+                }`}>
+                  {tradeActionStatus.message}
+                </div>
+              )}
               {trades.length === 0 ? (
                 <div className="p-16 text-center">
                   <div className="w-14 h-14 rounded-2xl bg-surface border border-card-border flex items-center justify-center mx-auto mb-4">
@@ -2003,6 +2048,16 @@ export default function AgentDetailPage() {
                                   <div className="text-[10px] text-danger/90 max-w-[220px] leading-snug">
                                     {getSkippedReason(trade)}
                                   </div>
+                                  {trade.decision.action !== "hold" && (
+                                    <button
+                                      type="button"
+                                      onClick={() => void handleExecuteSkippedTradeNow(trade)}
+                                      disabled={executingTradeId === trade.id}
+                                      className="mt-1 inline-flex items-center gap-1 px-2 py-1 rounded-md border border-accent/35 bg-accent/10 text-accent text-[10px] font-semibold hover:bg-accent/20 disabled:opacity-50 disabled:cursor-not-allowed"
+                                    >
+                                      {executingTradeId === trade.id ? "Executing..." : "Execute Now"}
+                                    </button>
+                                  )}
                                 </div>
                               )}
                             </td>
