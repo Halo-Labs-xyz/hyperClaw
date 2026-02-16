@@ -22,7 +22,8 @@ import { createLitClient, type LitClient } from "@lit-protocol/lit-client";
 import { nagaDev, nagaTest, naga } from "@lit-protocol/networks";
 import { createAuthManager, storagePlugins } from "@lit-protocol/auth";
 import { privateKeyToAccount } from "viem/accounts";
-import type { Address } from "viem";
+import { AUTH_METHOD_SCOPE, AUTH_METHOD_TYPE } from "@lit-protocol/constants";
+import { type Address, getAddress, keccak256, stringToBytes } from "viem";
 import * as os from "os";
 import * as path from "path";
 
@@ -86,6 +87,7 @@ function getNetworkModule(networkName: string) {
 
 let litClient: LitClient | null = null;
 let authManager: ReturnType<typeof createAuthManager> | null = null;
+const ensuredPkpSignScope = new Set<string>();
 
 const DEFAULT_CONFIG: LitConfig = {
   network: "naga-dev",
@@ -164,13 +166,98 @@ export function getOperatorAccount() {
   return privateKeyToAccount(privateKey as `0x${string}`);
 }
 
+type PkpIdentifier = { tokenId: string } | { pubkey: string } | { address: string };
+
+function buildPkpIdentifier(params: {
+  tokenId?: string;
+  pubkey?: string;
+  address?: string;
+}): PkpIdentifier {
+  if (params.tokenId) return { tokenId: params.tokenId };
+  if (params.pubkey) return { pubkey: params.pubkey };
+  if (params.address) return { address: params.address };
+  throw new Error("PKP identifier is required");
+}
+
+function toPkpIdentifierKey(identifier: PkpIdentifier): string {
+  if ("tokenId" in identifier) return `token:${identifier.tokenId}`;
+  if ("pubkey" in identifier) return `pubkey:${identifier.pubkey}`;
+  return `address:${identifier.address}`;
+}
+
+function getEthWalletAuthMethodId(address: string): `0x${string}` {
+  const checksumAddress = getAddress(address);
+  const messageBytes = stringToBytes(`${checksumAddress}:lit`);
+  return keccak256(messageBytes);
+}
+
+export async function ensureOperatorPkpSignScope(params: {
+  tokenId?: string;
+  pubkey?: string;
+  address?: string;
+}): Promise<void> {
+  const identifier = buildPkpIdentifier(params);
+  const identifierKey = toPkpIdentifierKey(identifier);
+  if (ensuredPkpSignScope.has(identifierKey)) {
+    return;
+  }
+
+  const client = await getLitClient();
+  const account = getOperatorAccount();
+  const authMethodId = getEthWalletAuthMethodId(account.address);
+
+  const permissionsManager = await client.getPKPPermissionsManager({
+    pkpIdentifier: identifier,
+    account,
+  });
+  const permissions = await permissionsManager.getPermissionsContext();
+
+  const operatorAuthMethod = permissions.authMethods.find(
+    (method: { authMethodType: bigint; id: string; scopes?: string[] }) =>
+      Number(method.authMethodType) === AUTH_METHOD_TYPE.EthWallet &&
+      method.id.toLowerCase() === authMethodId.toLowerCase()
+  );
+
+  if (!operatorAuthMethod) {
+    await permissionsManager.addPermittedAuthMethod({
+      authMethodType: AUTH_METHOD_TYPE.EthWallet,
+      authMethodId,
+      userPubkey: "0x",
+      scopes: ["sign-anything"],
+    });
+    console.log(`[Lit] Added EthWallet auth method with sign-anything scope for ${identifierKey}`);
+    ensuredPkpSignScope.add(identifierKey);
+    return;
+  }
+
+  const hasSignAnything = operatorAuthMethod.scopes?.includes("sign-anything") ?? false;
+  if (!hasSignAnything) {
+    await permissionsManager.addPermittedAuthMethodScope({
+      authMethodType: AUTH_METHOD_TYPE.EthWallet,
+      authMethodId,
+      scopeId: AUTH_METHOD_SCOPE.SignAnything,
+    });
+    console.log(`[Lit] Added sign-anything scope for existing EthWallet auth method on ${identifierKey}`);
+  }
+
+  ensuredPkpSignScope.add(identifierKey);
+}
+
 /**
  * Create auth context for the operator
  */
-export async function getOperatorAuthContext() {
+export async function getOperatorAuthContext(params?: {
+  tokenId?: string;
+  pubkey?: string;
+  address?: string;
+}) {
   const client = await getLitClient();
   const manager = getAuthManager();
   const account = getOperatorAccount();
+
+  if (params?.tokenId || params?.pubkey || params?.address) {
+    await ensureOperatorPkpSignScope(params);
+  }
 
   const authContext = await manager.createEoaAuthContext({
     config: { account },
@@ -215,6 +302,7 @@ export async function mintPKP(): Promise<MintedPKP> {
     txHash: mintResult.txHash,
   };
 
+  await ensureOperatorPkpSignScope({ tokenId: pkp.tokenId });
   console.log(`[Lit] PKP minted: ${pkp.ethAddress}`);
 
   return pkp;
@@ -251,7 +339,11 @@ export async function executeLitAction(params: {
   jsParams: Record<string, unknown>;
 }): Promise<LitActionResult> {
   const client = await getLitClient();
-  const authContext = await getOperatorAuthContext();
+  const pkpPublicKey =
+    typeof params.jsParams?.pkpPublicKey === "string" ? params.jsParams.pkpPublicKey : undefined;
+  const authContext = await getOperatorAuthContext(
+    pkpPublicKey ? { pubkey: pkpPublicKey } : undefined
+  );
 
   const result = await client.executeJs({
     ...(params.ipfsId ? { ipfsId: params.ipfsId } : { code: params.code }),
@@ -278,7 +370,7 @@ export async function signWithPKP(params: {
   toSign: Uint8Array;
 }): Promise<{ signature: string; recid: number }> {
   const client = await getLitClient();
-  const authContext = await getOperatorAuthContext();
+  const authContext = await getOperatorAuthContext({ pubkey: params.pkpPublicKey });
 
   const result = await client.chain.ethereum.pkpSign({
     pubKey: params.pkpPublicKey,

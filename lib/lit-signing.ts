@@ -216,7 +216,10 @@ export async function signMessageWithPKP(
     const result = await client.chain.ethereum.pkpSign({
       pubKey: pkpInfo.publicKey,
       toSign,
-      authContext: await getOperatorAuthContext(),
+      authContext: await getOperatorAuthContext({
+        tokenId: pkpInfo.tokenId,
+        pubkey: pkpInfo.publicKey,
+      }),
     });
 
     const resultWithRecovery = result as {

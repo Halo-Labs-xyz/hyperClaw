@@ -449,6 +449,14 @@ export function isMainnetBridgeEnabled(): boolean {
   return MAINNET_BRIDGE_ENABLED;
 }
 
+function getOperatorHyperliquidAddress(): Address {
+  const operatorPk = process.env.HYPERLIQUID_PRIVATE_KEY?.trim();
+  if (!operatorPk || !/^0x[a-fA-F0-9]{64}$/.test(operatorPk)) {
+    throw new Error("HYPERLIQUID_PRIVATE_KEY is missing or invalid");
+  }
+  return privateKeyToAccount(operatorPk as `0x${string}`).address;
+}
+
 /**
  * Bridge deposit from Monad to an HL agent wallet. NOT used in the main deposit
  * flow; relay uses operator-funded USDC for fast deposits. Kept for manual/legacy.
@@ -689,6 +697,38 @@ export async function bridgeWithdrawalToMonadUser(params: {
       status: "failed",
       destinationAddress: userAddress,
       note: `Withdrawal bridge failed: ${msg.slice(0, 160)}`,
+    };
+  }
+}
+
+/**
+ * Return USDC from an agent HL wallet back to the operator HL wallet.
+ * Used when a withdrawal is <= user deposited principal and no user bridge
+ * payout should be sent from the agent wallet.
+ */
+export async function returnAgentUsdToOperator(params: {
+  agentId: string;
+  usdAmount: number;
+}): Promise<BridgeExecution> {
+  const { agentId, usdAmount } = params;
+
+  try {
+    const operatorAddress = getOperatorHyperliquidAddress();
+    const result = await sendUsdFromAgent(agentId, operatorAddress, usdAmount);
+    const txHash = extractLikelyTxHash(result);
+    return {
+      provider: "none",
+      status: "submitted",
+      destinationAddress: operatorAddress,
+      relayTxHash: txHash,
+      note: "Returned agent USDC to operator HL wallet",
+    };
+  } catch (error) {
+    const msg = error instanceof Error ? error.message : String(error);
+    return {
+      provider: "none",
+      status: "failed",
+      note: `Operator return failed: ${msg.slice(0, 160)}`,
     };
   }
 }

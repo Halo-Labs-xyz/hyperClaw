@@ -236,19 +236,6 @@ function getRiskMaxSizeFraction(riskLevel: "conservative" | "moderate" | "aggres
   }
 }
 
-function getConfiguredMinConfidence(agent: {
-  riskLevel: "conservative" | "moderate" | "aggressive";
-  autonomy?: { aggressiveness?: number; minConfidence?: number };
-}): number {
-  const explicit = agent.autonomy?.minConfidence;
-  if (typeof explicit === "number" && Number.isFinite(explicit)) {
-    return Math.max(0, Math.min(1, explicit));
-  }
-  const aggressiveness = Math.max(0, Math.min(100, agent.autonomy?.aggressiveness ?? 50));
-  const derived = 1 - (aggressiveness / 100) * 0.5;
-  return Math.max(0, Math.min(1, derived));
-}
-
 function getDecisionCadence(agentId: string): { lastDecisionAtMs: number; lastThrottleLogAtMs: number } {
   const existing = decisionCadence.get(agentId);
   if (existing) return existing;

@@ -48,9 +48,67 @@ type TxUiPhase =
   | "confirmed"
   | "error";
 
+type WithdrawalPnlStatus = "profit" | "loss" | "flat";
+type WithdrawalBridgeProvider = "hyperunit" | "debridge" | "none";
+type WithdrawalBridgeStatus = "submitted" | "pending" | "failed";
+
+type WithdrawalSyncDetails = {
+  agentId: string;
+  user: string;
+  shares: string;
+  monAmount: string;
+  txHash: string;
+  settlementUsd: number | null;
+  vaultUsdValue: number | null;
+  hlAccountValueUsd: number | null;
+  sharePercent: number | null;
+  pnlUsd: number | null;
+  pnlStatus: WithdrawalPnlStatus | null;
+  settlementMode: "hl_share_equity" | "vault_value_fallback" | null;
+  relayed: boolean;
+  bridgeProvider: WithdrawalBridgeProvider | null;
+  bridgeStatus: WithdrawalBridgeStatus | null;
+  bridgeDestination: string | null;
+  bridgeTxHash: string | null;
+  bridgeOrderId: string | null;
+  bridgeNote: string | null;
+};
+
+type DepositSyncResponse = {
+  success?: boolean;
+  eventType?: "deposit" | "withdrawal";
+  withdrawal?: Partial<WithdrawalSyncDetails>;
+  error?: string;
+};
+
 function shortenTxHash(hash: string): string {
   if (!hash) return hash;
   return `${hash.slice(0, 10)}...${hash.slice(-8)}`;
+}
+
+function buildHyperliquidExplorerTxUrl(txHash: string): string {
+  return `https://app.hyperliquid.xyz/explorer/tx/${txHash}`;
+}
+
+function buildHyperunitOperationsUrl(destinationAddress: string): string {
+  const base = (process.env.NEXT_PUBLIC_HYPERUNIT_API_URL || "https://api.hyperunit.xyz").replace(/\/$/, "");
+  return `${base}/operations/${destinationAddress}`;
+}
+
+function formatSignedUsdCompact(value: number): string {
+  const abs = Math.abs(value).toLocaleString(undefined, { maximumFractionDigits: 2, minimumFractionDigits: 2 });
+  if (value > 0) return `+$${abs}`;
+  if (value < 0) return `-$${abs}`;
+  return `$${abs}`;
+}
+
+function formatMonFromWei(value: string): string {
+  try {
+    const mon = Number(formatEther(BigInt(value)));
+    return mon.toLocaleString(undefined, { maximumFractionDigits: 6 });
+  } catch {
+    return value;
+  }
 }
 
 function formatContractError(error: unknown): string {
@@ -196,6 +254,7 @@ export default function AgentDetailPage() {
   const [withdrawPhase, setWithdrawPhase] = useState<TxUiPhase>("idle");
   const [submittedWithdrawTxHash, setSubmittedWithdrawTxHash] = useState<`0x${string}` | undefined>();
   const [withdrawTxNetwork, setWithdrawTxNetwork] = useState<"testnet" | "mainnet" | null>(null);
+  const [withdrawSyncDetails, setWithdrawSyncDetails] = useState<WithdrawalSyncDetails | null>(null);
 
   // HL wallet balance and positions
   const [hlBalance, setHlBalance] = useState<{
@@ -641,20 +700,54 @@ export default function AgentDetailPage() {
         body: JSON.stringify({ txHash: withdrawTxHash, network: activeNetwork }),
       })
         .then((res) => res.json())
-        .then((data) => {
-          if (data.success && data.eventType === "withdrawal") {
+        .then((data: DepositSyncResponse) => {
+          if (data.success && data.eventType === "withdrawal" && data.withdrawal) {
             const w = data.withdrawal;
+            const details: WithdrawalSyncDetails = {
+              agentId: typeof w.agentId === "string" ? w.agentId : agentId,
+              user: typeof w.user === "string" ? w.user : "",
+              shares: typeof w.shares === "string" ? w.shares : "0",
+              monAmount: typeof w.monAmount === "string" ? w.monAmount : "0",
+              txHash: typeof w.txHash === "string" ? w.txHash : withdrawTxHash,
+              settlementUsd: typeof w.settlementUsd === "number" ? w.settlementUsd : null,
+              vaultUsdValue: typeof w.vaultUsdValue === "number" ? w.vaultUsdValue : null,
+              hlAccountValueUsd: typeof w.hlAccountValueUsd === "number" ? w.hlAccountValueUsd : null,
+              sharePercent: typeof w.sharePercent === "number" ? w.sharePercent : null,
+              pnlUsd: typeof w.pnlUsd === "number" ? w.pnlUsd : null,
+              pnlStatus:
+                w.pnlStatus === "profit" || w.pnlStatus === "loss" || w.pnlStatus === "flat"
+                  ? w.pnlStatus
+                  : null,
+              settlementMode:
+                w.settlementMode === "hl_share_equity" || w.settlementMode === "vault_value_fallback"
+                  ? w.settlementMode
+                  : null,
+              relayed: typeof w.relayed === "boolean" ? w.relayed : false,
+              bridgeProvider:
+                w.bridgeProvider === "hyperunit" || w.bridgeProvider === "debridge" || w.bridgeProvider === "none"
+                  ? w.bridgeProvider
+                  : null,
+              bridgeStatus:
+                w.bridgeStatus === "submitted" || w.bridgeStatus === "pending" || w.bridgeStatus === "failed"
+                  ? w.bridgeStatus
+                  : null,
+              bridgeDestination: typeof w.bridgeDestination === "string" ? w.bridgeDestination : null,
+              bridgeTxHash: typeof w.bridgeTxHash === "string" ? w.bridgeTxHash : null,
+              bridgeOrderId: typeof w.bridgeOrderId === "string" ? w.bridgeOrderId : null,
+              bridgeNote: typeof w.bridgeNote === "string" ? w.bridgeNote : null,
+            };
+            setWithdrawSyncDetails(details);
             const settlementInfo =
-              typeof w?.settlementUsd === "number"
-                ? ` Settlement $${Number(w.settlementUsd).toFixed(2)} (${w?.pnlStatus || "flat"}${
-                    typeof w?.pnlUsd === "number"
-                      ? ` ${Number(w.pnlUsd) >= 0 ? "+" : ""}$${Number(w.pnlUsd).toFixed(2)}`
+              typeof details.settlementUsd === "number"
+                ? ` Settlement $${Number(details.settlementUsd).toFixed(2)} (${details.pnlStatus || "flat"}${
+                    typeof details.pnlUsd === "number"
+                      ? ` ${Number(details.pnlUsd) >= 0 ? "+" : ""}$${Number(details.pnlUsd).toFixed(2)}`
                       : ""
                   }).`
                 : "";
-            const bridgeInfo = w?.bridgeProvider
-              ? ` Bridge ${w.bridgeProvider}: ${w.bridgeStatus || "pending"}${
-                  w.bridgeTxHash ? ` (${String(w.bridgeTxHash).slice(0, 10)}...)` : ""
+            const bridgeInfo = details.bridgeProvider
+              ? ` Bridge ${details.bridgeProvider}: ${details.bridgeStatus || "pending"}${
+                  details.bridgeTxHash ? ` (${String(details.bridgeTxHash).slice(0, 10)}...)` : ""
                 }.${w.bridgeNote ? ` ${w.bridgeNote}` : ""}`
               : "";
             setWithdrawPhase("confirmed");
@@ -662,9 +755,11 @@ export default function AgentDetailPage() {
               `Withdrawal confirmed and synced.${settlementInfo}${bridgeInfo ? ` ${bridgeInfo}` : ""}`
             );
           } else if (data.success) {
+            setWithdrawSyncDetails(null);
             setWithdrawPhase("confirmed");
             setWithdrawStatus("Withdrawal confirmed.");
           } else {
+            setWithdrawSyncDetails(null);
             setWithdrawPhase("error");
             setWithdrawStatus(`Withdrawal confirmed on-chain. Relay note: ${data.error || "sync pending"}`);
           }
@@ -673,6 +768,7 @@ export default function AgentDetailPage() {
           fetchCapPreview();
         })
         .catch(() => {
+          setWithdrawSyncDetails(null);
           setWithdrawPhase("confirmed");
           setWithdrawStatus("Withdrawal confirmed on-chain. Relay sync pending.");
           fetchAgent();
@@ -687,6 +783,7 @@ export default function AgentDetailPage() {
   useEffect(() => {
     if (!withdrawConfirmError || !withdrawTxHash) return;
     const reason = formatContractError(withdrawConfirmErrorDetail);
+    setWithdrawSyncDetails(null);
     setWithdrawPhase("error");
     setWithdrawStatus(`Withdrawal transaction reverted: ${reason}`);
     setWithdrawing(false);
@@ -858,6 +955,7 @@ export default function AgentDetailPage() {
     setWithdrawing(true);
     setWithdrawPhase("switching");
     setWithdrawStatus("");
+    setWithdrawSyncDetails(null);
     setSubmittedWithdrawTxHash(undefined);
     setWithdrawTxNetwork(activeNetwork);
     try {
@@ -1216,6 +1314,38 @@ export default function AgentDetailPage() {
   const submittedWithdrawTxUrl = submittedWithdrawTxHash
     ? buildMonadVisionTxUrl(submittedWithdrawTxHash)
     : null;
+  const syncedWithdrawTxUrl = withdrawSyncDetails?.txHash
+    ? buildMonadVisionTxUrl(withdrawSyncDetails.txHash)
+    : null;
+  const bridgeTxUrl = withdrawSyncDetails?.bridgeTxHash
+    ? withdrawSyncDetails.bridgeProvider === "debridge"
+      ? buildMonadVisionTxUrl(withdrawSyncDetails.bridgeTxHash)
+      : buildHyperliquidExplorerTxUrl(withdrawSyncDetails.bridgeTxHash)
+    : null;
+  const bridgeOpsUrl =
+    withdrawSyncDetails?.bridgeProvider === "hyperunit" && withdrawSyncDetails.bridgeDestination
+      ? buildHyperunitOperationsUrl(withdrawSyncDetails.bridgeDestination)
+      : null;
+  const isPositivePnlWithdrawal =
+    withdrawPhase === "confirmed" && withdrawSyncDetails?.pnlStatus === "profit";
+  const settlementModeLabel =
+    withdrawSyncDetails?.settlementMode === "hl_share_equity"
+      ? "HL share-equity"
+      : withdrawSyncDetails?.settlementMode === "vault_value_fallback"
+      ? "Vault value fallback"
+      : "Settlement";
+  const bridgeStepTone =
+    withdrawSyncDetails?.bridgeStatus === "failed"
+      ? "text-danger"
+      : withdrawSyncDetails?.bridgeStatus === "submitted"
+      ? "text-success"
+      : "text-warning";
+  const payoutStepTone =
+    withdrawSyncDetails?.bridgeStatus === "failed"
+      ? "text-danger"
+      : withdrawSyncDetails?.bridgeStatus === "submitted"
+      ? "text-warning"
+      : "text-muted";
   const attestationExplorerUrl = agent.aipAttestation?.txHash
     ? agent.aipAttestation.explorerUrl ?? buildMonadVisionTxUrl(agent.aipAttestation.txHash)
     : null;
@@ -2156,7 +2286,7 @@ export default function AgentDetailPage() {
                         Max
                       </button>
                     </div>
-                    {(withdrawStatus || submittedWithdrawTxHash) && (
+                    {(withdrawStatus || submittedWithdrawTxHash || isPositivePnlWithdrawal) && (
                       <div className={`mb-2 p-2.5 rounded-lg border text-xs space-y-1.5 ${withdrawStatusTone}`}>
                         {withdrawStatus && (
                           <div className="flex items-start gap-2">
@@ -2183,6 +2313,123 @@ export default function AgentDetailPage() {
                             ) : (
                               submittedWithdrawTxHash
                             )}
+                          </div>
+                        )}
+                        {isPositivePnlWithdrawal && withdrawSyncDetails && (
+                          <div className="rounded-lg border border-success/30 bg-success/5 p-3 text-foreground space-y-2">
+                            <div className="flex items-center justify-between">
+                              <span className="text-[11px] uppercase tracking-wider font-semibold text-success">
+                                Profit Withdrawal Decal
+                              </span>
+                              <span className="mono-nums text-success font-semibold">
+                                {formatSignedUsdCompact(withdrawSyncDetails.pnlUsd || 0)}
+                              </span>
+                            </div>
+
+                            <div className="grid grid-cols-2 gap-2 text-[11px]">
+                              <div className="rounded-md border border-success/20 bg-black/20 p-2">
+                                <p className="text-dim uppercase tracking-wider">Agent</p>
+                                <p className="font-medium truncate">{agent.name}</p>
+                                <p className="text-dim mono-nums">{agent.id}</p>
+                              </div>
+                              <div className="rounded-md border border-success/20 bg-black/20 p-2">
+                                <p className="text-dim uppercase tracking-wider">PnL + Share</p>
+                                <p className="font-medium mono-nums">{formatSignedUsdCompact(withdrawSyncDetails.pnlUsd || 0)}</p>
+                                <p className="text-dim mono-nums">
+                                  {typeof withdrawSyncDetails.sharePercent === "number"
+                                    ? `${withdrawSyncDetails.sharePercent.toFixed(4)}% shares`
+                                    : "share% unavailable"}
+                                </p>
+                              </div>
+                            </div>
+
+                            <div className="space-y-2 text-[11px]">
+                              <div className="flex items-start gap-2">
+                                <span className="inline-block mt-1 w-2 h-2 rounded-full bg-success shrink-0" />
+                                <div>
+                                  <p className="font-medium">1. Vault releases MON</p>
+                                  <p className="text-dim">
+                                    Released {formatMonFromWei(withdrawSyncDetails.monAmount)} MON from vault shares.
+                                  </p>
+                                  {syncedWithdrawTxUrl && (
+                                    <a
+                                      href={syncedWithdrawTxUrl}
+                                      target="_blank"
+                                      rel="noreferrer"
+                                      className="underline text-accent hover:text-accent/80"
+                                    >
+                                      Monad explorer: {shortenTxHash(withdrawSyncDetails.txHash)}
+                                    </a>
+                                  )}
+                                </div>
+                              </div>
+
+                              <div className="flex items-start gap-2">
+                                <span className="inline-block mt-1 w-2 h-2 rounded-full bg-success shrink-0" />
+                                <div>
+                                  <p className="font-medium">2. Hyperunit settlement path</p>
+                                  <p className="text-dim">
+                                    {settlementModeLabel}: perps value is settled through spot USDC liquidity before payout routing.
+                                  </p>
+                                  <p className="text-dim mono-nums">
+                                    Settlement {formatSignedUsdCompact(withdrawSyncDetails.settlementUsd || 0)}
+                                    {typeof withdrawSyncDetails.vaultUsdValue === "number"
+                                      ? ` vs vault value ${formatSignedUsdCompact(withdrawSyncDetails.vaultUsdValue)}`
+                                      : ""}
+                                  </p>
+                                </div>
+                              </div>
+
+                              <div className="flex items-start gap-2">
+                                <span className={`inline-block mt-1 w-2 h-2 rounded-full shrink-0 ${bridgeStepTone === "text-success" ? "bg-success" : bridgeStepTone === "text-danger" ? "bg-danger" : "bg-warning"}`} />
+                                <div>
+                                  <p className="font-medium">3. Bridge execution</p>
+                                  <p className="text-dim">
+                                    Provider: {withdrawSyncDetails.bridgeProvider || "none"} ({withdrawSyncDetails.bridgeStatus || "pending"}).
+                                  </p>
+                                  {bridgeTxUrl && withdrawSyncDetails.bridgeTxHash && (
+                                    <a
+                                      href={bridgeTxUrl}
+                                      target="_blank"
+                                      rel="noreferrer"
+                                      className="underline text-accent hover:text-accent/80 break-all"
+                                    >
+                                      Bridge tx: {shortenTxHash(withdrawSyncDetails.bridgeTxHash)}
+                                    </a>
+                                  )}
+                                  {bridgeOpsUrl && (
+                                    <a
+                                      href={bridgeOpsUrl}
+                                      target="_blank"
+                                      rel="noreferrer"
+                                      className="underline text-accent hover:text-accent/80 break-all block"
+                                    >
+                                      Hyperunit operations
+                                    </a>
+                                  )}
+                                </div>
+                              </div>
+
+                              <div className="flex items-start gap-2">
+                                <span className={`inline-block mt-1 w-2 h-2 rounded-full shrink-0 ${payoutStepTone === "text-warning" ? "bg-warning" : payoutStepTone === "text-danger" ? "bg-danger" : "bg-dim"}`} />
+                                <div>
+                                  <p className="font-medium">4. Wallet payout</p>
+                                  <p className="text-dim">
+                                    Destination {withdrawSyncDetails.user ? `${withdrawSyncDetails.user.slice(0, 6)}...${withdrawSyncDetails.user.slice(-4)}` : "wallet"}
+                                    {withdrawSyncDetails.bridgeDestination
+                                      ? ` via ${withdrawSyncDetails.bridgeDestination.slice(0, 6)}...${withdrawSyncDetails.bridgeDestination.slice(-4)}`
+                                      : ""}.
+                                  </p>
+                                  {withdrawSyncDetails.bridgeNote && (
+                                    <p className="text-dim">{withdrawSyncDetails.bridgeNote}</p>
+                                  )}
+                                </div>
+                              </div>
+                            </div>
+
+                            <div className="pt-1 text-[11px] text-dim">
+                              Markets: {agent.markets.join(", ")} | Risk: {agent.riskLevel} | Autonomy: {agent.autonomy?.mode ?? "semi"}
+                            </div>
                           </div>
                         )}
                       </div>

@@ -448,7 +448,10 @@ export async function getExchangeClientForPKP(agentId: string): Promise<Exchange
   }
 
   const client = await getLitClient();
-  const authContext = await getOperatorAuthContext();
+  const authContext = await getOperatorAuthContext({
+    tokenId: pkpInfo.tokenId,
+    pubkey: pkpInfo.publicKey,
+  });
   // eslint-disable-next-line @typescript-eslint/no-require-imports
   const { arbitrum, arbitrumSepolia } = require("viem/chains");
   const wallet = await client.getPkpViemAccount({

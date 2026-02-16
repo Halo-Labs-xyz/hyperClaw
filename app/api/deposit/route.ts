@@ -99,6 +99,12 @@ export async function POST(request: Request) {
           bridgeTxHash: result.withdrawal.bridgeTxHash ?? null,
           bridgeOrderId: result.withdrawal.bridgeOrderId ?? null,
           bridgeNote: result.withdrawal.bridgeNote ?? null,
+          userDepositedUsd: result.withdrawal.userDepositedUsd ?? null,
+          operatorReturnUsd: result.withdrawal.operatorReturnUsd ?? null,
+          operatorReturnStatus: result.withdrawal.operatorReturnStatus ?? null,
+          operatorReturnDestination: result.withdrawal.operatorReturnDestination ?? null,
+          operatorReturnTxHash: result.withdrawal.operatorReturnTxHash ?? null,
+          operatorReturnNote: result.withdrawal.operatorReturnNote ?? null,
         },
       });
     }

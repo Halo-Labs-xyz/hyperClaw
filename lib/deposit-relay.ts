@@ -36,6 +36,7 @@ import { isMonadTestnet } from "./network";
 import {
   bridgeWithdrawalToMonadUser,
   isMainnetBridgeEnabled,
+  returnAgentUsdToOperator,
 } from "./mainnet-bridge";
 import {
   type DepositRow,
@@ -580,6 +581,12 @@ interface WithdrawalRecord {
   bridgeTxHash?: string;
   bridgeOrderId?: string;
   bridgeNote?: string;
+  userDepositedUsd?: number;
+  operatorReturnUsd?: number;
+  operatorReturnStatus?: "submitted" | "failed" | "skipped";
+  operatorReturnDestination?: Address;
+  operatorReturnTxHash?: string;
+  operatorReturnNote?: string;
 }
 
 type VaultTxRecord =
@@ -1097,7 +1104,40 @@ export async function processVaultTx(
           withdrawal.pnlUsd = pnlUsd;
           withdrawal.pnlStatus = pnlUsd > 0.01 ? "profit" : pnlUsd < -0.01 ? "loss" : "flat";
 
-          if (isMainnet && isMainnetBridgeEnabled() && settlementUsd > 0) {
+          const userDeposits = await getDepositsForUser(userAddress);
+          const userDepositedUsd = normalizeUsd(
+            userDeposits
+              .filter((deposit) => deposit.agentId === agentIdHex)
+              .reduce((sum, deposit) => sum + deposit.usdValue, 0)
+          );
+          withdrawal.userDepositedUsd = userDepositedUsd;
+          const withdrewWithinDepositedPrincipal =
+            userDepositedUsd > 0 && (withdrawal.vaultUsdValue || 0) <= userDepositedUsd + 0.01;
+
+          if (settlementUsd > 0 && withdrewWithinDepositedPrincipal) {
+            const operatorReturn = await returnAgentUsdToOperator({
+              agentId: agentIdHex,
+              usdAmount: settlementUsd,
+            });
+            withdrawal.operatorReturnUsd = settlementUsd;
+            withdrawal.operatorReturnStatus =
+              operatorReturn.status === "submitted" ? "submitted" : "failed";
+            withdrawal.operatorReturnDestination = operatorReturn.destinationAddress;
+            withdrawal.operatorReturnTxHash = operatorReturn.relayTxHash;
+            withdrawal.operatorReturnNote = operatorReturn.note;
+            withdrawal.relayed = operatorReturn.status === "submitted";
+
+            if (operatorReturn.status !== "submitted") {
+              shouldRetryWithdrawalRelay = true;
+            }
+
+            console.log(
+              `[DepositRelay] Returned agent USDC to operator status=${operatorReturn.status}` +
+                ` amount=$${settlementUsd.toFixed(2)}` +
+                (operatorReturn.relayTxHash ? ` tx=${operatorReturn.relayTxHash}` : "") +
+                (operatorReturn.note ? ` note=${operatorReturn.note}` : "")
+            );
+          } else if (isMainnet && isMainnetBridgeEnabled() && settlementUsd > 0) {
             try {
               const bridge = await bridgeWithdrawalToMonadUser({
                 agentId: agentIdHex,
@@ -1137,6 +1177,7 @@ export async function processVaultTx(
             }
           } else {
             // Testnet and non-bridge paths do not need an outbound HL transfer.
+            withdrawal.operatorReturnStatus = "skipped";
             withdrawal.relayed = true;
           }
 
