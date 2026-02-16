@@ -159,9 +159,9 @@ export function disconnectLit(): void {
  * Get operator account from environment
  */
 export function getOperatorAccount() {
-  const privateKey = process.env.HYPERLIQUID_PRIVATE_KEY;
+  const privateKey = process.env.LIT_OPERATOR_PRIVATE_KEY || process.env.HYPERLIQUID_PRIVATE_KEY;
   if (!privateKey) {
-    throw new Error("HYPERLIQUID_PRIVATE_KEY not set");
+    throw new Error("LIT_OPERATOR_PRIVATE_KEY or HYPERLIQUID_PRIVATE_KEY not set");
   }
   return privateKeyToAccount(privateKey as `0x${string}`);
 }
@@ -191,6 +191,47 @@ function getEthWalletAuthMethodId(address: string): `0x${string}` {
   return keccak256(messageBytes);
 }
 
+function getErrorMessage(error: unknown): string {
+  if (error instanceof Error && error.message) return error.message;
+  if (typeof error === "string") return error;
+  return String(error);
+}
+
+function isNotPkpNftOwnerError(error: unknown): boolean {
+  const message = getErrorMessage(error).toLowerCase();
+  return message.includes("not pkp nft owner");
+}
+
+function formatPkpOwnerMismatchError(identifierKey: string, operatorAddress: string): string {
+  return `[Lit] PKP ownership mismatch for ${identifierKey}: operator ${operatorAddress} is not the PKP NFT owner. Set LIT_OPERATOR_PRIVATE_KEY (or HYPERLIQUID_PRIVATE_KEY) to the PKP owner key, or reprovision the agent PKP.`;
+}
+
+async function operatorOwnsPkp(
+  client: LitClient,
+  operatorAddress: Address,
+  identifier: PkpIdentifier
+): Promise<boolean | null> {
+  try {
+    const ownedPkps = await client.viewPKPsByAddress({
+      ownerAddress: operatorAddress,
+    });
+    return ownedPkps.some((pkp: { tokenId: bigint; pubkey: string; ethAddress: string }) => {
+      if ("tokenId" in identifier) {
+        return String(pkp.tokenId) === identifier.tokenId;
+      }
+      if ("pubkey" in identifier) {
+        return pkp.pubkey.toLowerCase() === identifier.pubkey.toLowerCase();
+      }
+      return pkp.ethAddress.toLowerCase() === identifier.address.toLowerCase();
+    });
+  } catch (error) {
+    console.warn(
+      `[Lit] Failed to preflight PKP ownership check: ${getErrorMessage(error).slice(0, 200)}`
+    );
+    return null;
+  }
+}
+
 export async function ensureOperatorPkpSignScope(params: {
   tokenId?: string;
   pubkey?: string;
@@ -205,6 +246,7 @@ export async function ensureOperatorPkpSignScope(params: {
   const client = await getLitClient();
   const account = getOperatorAccount();
   const authMethodId = getEthWalletAuthMethodId(account.address);
+  const ownershipErrorMessage = formatPkpOwnerMismatchError(identifierKey, account.address);
 
   const permissionsManager = await client.getPKPPermissionsManager({
     pkpIdentifier: identifier,
@@ -219,12 +261,24 @@ export async function ensureOperatorPkpSignScope(params: {
   );
 
   if (!operatorAuthMethod) {
-    await permissionsManager.addPermittedAuthMethod({
-      authMethodType: AUTH_METHOD_TYPE.EthWallet,
-      authMethodId,
-      userPubkey: "0x",
-      scopes: ["sign-anything"],
-    });
+    const ownsPkp = await operatorOwnsPkp(client, account.address, identifier);
+    if (ownsPkp === false) {
+      throw new Error(ownershipErrorMessage);
+    }
+
+    try {
+      await permissionsManager.addPermittedAuthMethod({
+        authMethodType: AUTH_METHOD_TYPE.EthWallet,
+        authMethodId,
+        userPubkey: "0x",
+        scopes: ["sign-anything"],
+      });
+    } catch (error) {
+      if (isNotPkpNftOwnerError(error)) {
+        throw new Error(ownershipErrorMessage);
+      }
+      throw error;
+    }
     console.log(`[Lit] Added EthWallet auth method with sign-anything scope for ${identifierKey}`);
     ensuredPkpSignScope.add(identifierKey);
     return;
@@ -232,11 +286,23 @@ export async function ensureOperatorPkpSignScope(params: {
 
   const hasSignAnything = operatorAuthMethod.scopes?.includes("sign-anything") ?? false;
   if (!hasSignAnything) {
-    await permissionsManager.addPermittedAuthMethodScope({
-      authMethodType: AUTH_METHOD_TYPE.EthWallet,
-      authMethodId,
-      scopeId: AUTH_METHOD_SCOPE.SignAnything,
-    });
+    const ownsPkp = await operatorOwnsPkp(client, account.address, identifier);
+    if (ownsPkp === false) {
+      throw new Error(ownershipErrorMessage);
+    }
+
+    try {
+      await permissionsManager.addPermittedAuthMethodScope({
+        authMethodType: AUTH_METHOD_TYPE.EthWallet,
+        authMethodId,
+        scopeId: AUTH_METHOD_SCOPE.SignAnything,
+      });
+    } catch (error) {
+      if (isNotPkpNftOwnerError(error)) {
+        throw new Error(ownershipErrorMessage);
+      }
+      throw error;
+    }
     console.log(`[Lit] Added sign-anything scope for existing EthWallet auth method on ${identifierKey}`);
   }
 

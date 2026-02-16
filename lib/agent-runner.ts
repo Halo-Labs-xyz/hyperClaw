@@ -183,6 +183,16 @@ function clampSizeFraction(x: number): number {
   return Math.max(0, Math.min(1, x));
 }
 
+function summarizeExecutionError(error: unknown): string {
+  const message = error instanceof Error ? error.message : String(error);
+  return message.replace(/\s+/g, " ").trim().slice(0, 300);
+}
+
+function isPkpOwnershipError(error: unknown): boolean {
+  const message = summarizeExecutionError(error).toLowerCase();
+  return message.includes("not pkp nft owner") || message.includes("pkp ownership mismatch");
+}
+
 function parsePositiveInt(raw: string | undefined): number | null {
   if (!raw) return null;
   const parsed = Number.parseInt(raw, 10);
@@ -1083,12 +1093,16 @@ async function executeTickInternal(agentId: string): Promise<TradeLog> {
           }
         }
       } catch (execError) {
-        console.error(`[Agent ${agentId}] EXCEPTION in trade execution:`, execError);
-        console.error(`[Agent ${agentId}] Full error:`, JSON.stringify(execError, Object.getOwnPropertyNames(execError)));
+        const summary = summarizeExecutionError(execError);
+        if (isPkpOwnershipError(execError)) {
+          console.error(`[Agent ${agentId}] PKP authorization failed: ${summary}`);
+        } else {
+          console.error(`[Agent ${agentId}] Trade execution failed: ${summary}`);
+        }
         if (state) {
           state.errors.push({
             timestamp: Date.now(),
-            message: execError instanceof Error ? execError.message : "Execution failed",
+            message: summary || "Execution failed",
           });
           // Keep last 50 errors
           if (state.errors.length > 50) state.errors = state.errors.slice(-50);
