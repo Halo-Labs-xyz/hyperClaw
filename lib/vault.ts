@@ -153,6 +153,20 @@ export const VAULT_ABI = [
 
 export const HCLAW_LOCK_ABI = [
   {
+    inputs: [],
+    name: "owner",
+    outputs: [{ name: "", type: "address" }],
+    stateMutability: "view",
+    type: "function",
+  },
+  {
+    inputs: [],
+    name: "paused",
+    outputs: [{ name: "", type: "bool" }],
+    stateMutability: "view",
+    type: "function",
+  },
+  {
     inputs: [
       { name: "amount", type: "uint256" },
       { name: "durationDays", type: "uint16" },

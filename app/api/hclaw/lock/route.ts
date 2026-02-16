@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { type Address, parseEther } from "viem";
+import { type Address, createPublicClient, http, parseUnits } from "viem";
 import {
   buildLockWriteRequest,
   durationToTier,
@@ -10,6 +10,8 @@ import {
   tierToRebateBps,
 } from "@/lib/hclaw-lock";
 import { getNetworkState } from "@/lib/network";
+import { getHclawAddressIfSet } from "@/lib/env";
+import { ERC20_ABI } from "@/lib/vault";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -30,6 +32,42 @@ function parseDuration(value: unknown): 30 | 90 | 180 | null {
 function parseNetwork(value: unknown): "mainnet" | "testnet" | null {
   if (value === "mainnet" || value === "testnet") return value;
   return null;
+}
+
+function getMonadRpcUrl(network: "mainnet" | "testnet"): string {
+  const mainnetRpc =
+    process.env.MONAD_MAINNET_RPC_URL ||
+    process.env.NEXT_PUBLIC_MONAD_MAINNET_RPC_URL ||
+    "https://rpc.monad.xyz";
+  const testnetRpc =
+    process.env.MONAD_TESTNET_RPC_URL ||
+    process.env.NEXT_PUBLIC_MONAD_TESTNET_RPC_URL ||
+    "https://testnet-rpc.monad.xyz";
+  return network === "testnet" ? testnetRpc : mainnetRpc;
+}
+
+async function getTokenDecimals(network: "mainnet" | "testnet", token: Address | null): Promise<number> {
+  if (!token) return 18;
+  try {
+    const client = createPublicClient({
+      chain: {
+        id: network === "testnet" ? 10143 : 143,
+        name: network === "testnet" ? "Monad Testnet" : "Monad",
+        nativeCurrency: { name: "MON", symbol: "MON", decimals: 18 },
+        rpcUrls: { default: { http: [getMonadRpcUrl(network)] } },
+      },
+      transport: http(getMonadRpcUrl(network)),
+    });
+    const decimals = (await client.readContract({
+      address: token,
+      abi: ERC20_ABI,
+      functionName: "decimals",
+    })) as number;
+    if (!Number.isFinite(decimals) || decimals <= 0 || decimals > 36) return 18;
+    return decimals;
+  } catch {
+    return 18;
+  }
 }
 
 function serializeArg(arg: unknown): unknown {
@@ -133,12 +171,15 @@ export async function POST(request: Request) {
           );
         }
 
+        const token = getHclawAddressIfSet(network);
+        const decimals = await getTokenDecimals(network, token);
+
         const req = buildLockWriteRequest({
           action: "lock",
-          amountWei: parseEther(String(amount)),
+          amountWei: parseUnits(String(amount), decimals),
           durationDays,
         }, network);
-        return NextResponse.json({ network, tx: serializeTxRequest(req) });
+        return NextResponse.json({ network, token, decimals, tx: serializeTxRequest(req) });
       }
 
       if (txAction === "extendLock") {
@@ -167,12 +208,15 @@ export async function POST(request: Request) {
           return NextResponse.json({ error: "lockId and amount > 0 are required" }, { status: 400 });
         }
 
+        const token = getHclawAddressIfSet(network);
+        const decimals = await getTokenDecimals(network, token);
+
         const req = buildLockWriteRequest({
           action: "increaseLock",
           lockId,
-          amountWei: parseEther(String(amount)),
+          amountWei: parseUnits(String(amount), decimals),
         }, network);
-        return NextResponse.json({ network, tx: serializeTxRequest(req) });
+        return NextResponse.json({ network, token, decimals, tx: serializeTxRequest(req) });
       }
 
       if (txAction === "unlock") {

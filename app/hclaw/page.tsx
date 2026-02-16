@@ -218,6 +218,15 @@ export default function HclawHubPage() {
     query: { enabled: Boolean(resolvedHclawTokenAddress && address) },
   });
 
+  const { data: hclawDecimalsRaw } = useReadContract({
+    chainId: activeChainId,
+    address: resolvedHclawTokenAddress,
+    abi: ERC20_ABI,
+    functionName: "decimals",
+    args: resolvedHclawTokenAddress ? [] : undefined,
+    query: { enabled: Boolean(resolvedHclawTokenAddress) },
+  });
+
   const {
     data: hclawAllowanceRaw,
     refetch: refetchHclawAllowance,
@@ -233,10 +242,15 @@ export default function HclawHubPage() {
     query: { enabled: Boolean(resolvedHclawTokenAddress && address && resolvedHclawLockAddress) },
   });
 
+  const hclawDecimals = useMemo(() => {
+    const n = Number(hclawDecimalsRaw ?? 18);
+    return Number.isFinite(n) && n > 0 && n <= 36 ? n : 18;
+  }, [hclawDecimalsRaw]);
+
   const hclawBalance = useMemo(() => {
     const raw = (hclawBalanceRaw as bigint | undefined) ?? BigInt(0);
-    return Number(formatUnits(raw, 18));
-  }, [hclawBalanceRaw]);
+    return Number(formatUnits(raw, hclawDecimals));
+  }, [hclawBalanceRaw, hclawDecimals]);
 
   const loadHubData = useCallback(async () => {
     setLoading(true);
@@ -342,6 +356,7 @@ export default function HclawHubPage() {
       const preflightBody = await preflight.json();
       const deployed = Boolean(preflightBody?.contract?.deployed);
       const compatible = preflightBody?.contract?.compatible !== false;
+      const paused = Boolean(preflightBody?.contract?.paused);
       if (preflightBody?.contract) {
         setData((prev) => ({ ...prev, lockContract: preflightBody.contract }));
       }
@@ -359,6 +374,10 @@ export default function HclawHubPage() {
         );
         return;
       }
+      if (paused) {
+        setLockStatus(`Lock contract is paused on ${activeNetwork}.`);
+        return;
+      }
     } catch {
       setLockStatus("Lock preflight failed. Try Refresh and retry.");
       return;
@@ -374,7 +393,7 @@ export default function HclawHubPage() {
     setLockStatus("");
 
     try {
-      const amountWei = parseUnits(String(amount), 18);
+      const amountWei = parseUnits(String(amount), hclawDecimals);
       const allowance = (hclawAllowanceRaw as bigint | undefined) ?? BigInt(0);
 
       if (allowance < amountWei) {

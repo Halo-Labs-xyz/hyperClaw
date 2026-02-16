@@ -216,11 +216,14 @@ async function getUserLockIdsFromEvents(params: {
 
 function classifyReadProbeFailure(reason: string): "soft" | "hard" {
   const msg = reason.toLowerCase();
-  if (
-    msg.includes("reverted") ||
-    msg.includes("execution reverted") ||
-    msg.includes("out of gas")
-  ) {
+  // Read-probe functions on HclawLock are view-only and should not revert.
+  // Treat contract-level reverts as incompatibility, otherwise the UI proceeds and
+  // users burn gas on a guaranteed revert.
+  if (msg.includes("reverted") || msg.includes("execution reverted")) {
+    return "hard";
+  }
+  // Allow transient infra failures to degrade without blocking the UI.
+  if (msg.includes("timeout") || msg.includes("econnreset") || msg.includes("429")) {
     return "soft";
   }
   if (
@@ -265,7 +268,7 @@ function classifyLockProbeFailure(reason: string): "soft" | "hard" {
 async function getLockCompatibility(
   network: MonadNetwork | undefined,
   address: Address
-): Promise<{ deployed: boolean; compatible: boolean; reason?: string }> {
+): Promise<{ deployed: boolean; compatible: boolean; reason?: string; paused?: boolean; owner?: Address }> {
   const networkKey = network ?? (isMonadTestnet() ? "testnet" : "mainnet");
   const cacheKey = `${networkKey}:${address.toLowerCase()}`;
   const cached = lockCompatCache.get(cacheKey);
@@ -283,6 +286,19 @@ async function getLockCompatibility(
 
     // Verify core read-only surface used by policy and lock actions.
     // Some deployed contracts may not expose lock-id enumeration.
+    const [owner, paused] = await Promise.all([
+      client.readContract({
+        address,
+        abi: HCLAW_LOCK_ABI,
+        functionName: "owner",
+      }) as Promise<Address>,
+      client.readContract({
+        address,
+        abi: HCLAW_LOCK_ABI,
+        functionName: "paused",
+      }) as Promise<boolean>,
+    ]);
+
     await Promise.all([
       client.readContract({
         address,
@@ -325,7 +341,7 @@ async function getLockCompatibility(
       }
     }
 
-    const value = { deployed: true, compatible: true };
+    const value = { deployed: true, compatible: true, owner, paused };
     lockCompatCache.set(cacheKey, { value, expiresAt: Date.now() + LOCK_COMPAT_CACHE_TTL_MS });
     return value;
   } catch (error) {
@@ -345,6 +361,8 @@ export async function getLockContractStatus(network?: MonadNetwork): Promise<{
   deployed: boolean;
   compatible: boolean;
   reason?: string;
+  paused?: boolean;
+  owner?: Address;
 }> {
   const address = getHclawLockAddressIfSet(network);
   if (!address) return { address: null, deployed: false, compatible: false, reason: "Address not configured" };
