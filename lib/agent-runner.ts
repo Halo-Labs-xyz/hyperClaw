@@ -123,6 +123,8 @@ const AGENT_MUST_TRADE_FORCE_COOLDOWN_MS = Math.max(
 );
 const TESTNET_FORCE_CONTINUOUS_EXECUTION =
   process.env.TESTNET_FORCE_CONTINUOUS_EXECUTION !== "false";
+const MAINNET_FORCE_CONTINUOUS_EXECUTION =
+  process.env.MAINNET_FORCE_CONTINUOUS_EXECUTION !== "false";
 const AGENT_EXECUTION_MIN_CONFIDENCE = 0.1;
 const TESTNET_MIN_ORDER_NOTIONAL_USD = (() => {
   const parsed = parseFloat(process.env.TESTNET_MIN_ORDER_NOTIONAL_USD || "1");
@@ -222,6 +224,14 @@ function getAgentDeploymentNetwork(agent: {
 
 function isTestnetAgent(agent: { autonomy?: { deploymentNetwork?: string } }): boolean {
   return getAgentDeploymentNetwork(agent) === "testnet";
+}
+
+function shouldForceContinuousExecution(agent: {
+  autonomy?: { deploymentNetwork?: string };
+}): boolean {
+  return isTestnetAgent(agent)
+    ? TESTNET_FORCE_CONTINUOUS_EXECUTION
+    : MAINNET_FORCE_CONTINUOUS_EXECUTION;
 }
 
 function getRiskMaxSizeFraction(riskLevel: "conservative" | "moderate" | "aggressive"): number {
@@ -436,7 +446,7 @@ export async function startAgent(
 
   const agent = await getAgent(agentId);
   if (!agent) throw new Error(`Agent ${agentId} not found`);
-  const skipAdaptiveBackoff = TESTNET_FORCE_CONTINUOUS_EXECUTION && isTestnetAgent(agent);
+  const skipAdaptiveBackoff = shouldForceContinuousExecution(agent);
 
   const tickInterval = resolveTickIntervalMs(intervalMs);
 
@@ -508,8 +518,7 @@ export async function executeTick(agentId: string): Promise<TradeLog> {
 async function executeTickInternal(agentId: string): Promise<TradeLog> {
   const agent = await getAgent(agentId);
   if (!agent) throw new Error(`Agent ${agentId} not found`);
-  const testnetContinuousExecution =
-    TESTNET_FORCE_CONTINUOUS_EXECUTION && isTestnetAgent(agent);
+  const forceContinuousExecution = shouldForceContinuousExecution(agent);
 
   const state = runnerStates.get(agentId);
 
@@ -544,7 +553,7 @@ async function executeTickInternal(agentId: string): Promise<TradeLog> {
   const ex = agentExchange ?? undefined;
   const cadenceIntervalMs = state?.intervalMs ?? AGENT_TICK_MIN_INTERVAL_MS;
   const cadence = evaluateDecisionCadence(agentId, Date.now(), cadenceIntervalMs);
-  if (cadence.shouldThrottle) {
+  if (!forceContinuousExecution && cadence.shouldThrottle) {
     const holdLog: TradeLog = {
       id: randomBytes(8).toString("hex"),
       agentId,
@@ -777,6 +786,7 @@ async function executeTickInternal(agentId: string): Promise<TradeLog> {
     const maxSizeByRisk = getRiskMaxSizeFraction(agent.riskLevel);
     const hasPositionForAsset = (asset: string) =>
       positions.some((p) => p.coin.toUpperCase() === asset.toUpperCase() && Math.abs(p.size) > 0);
+    const forceTradeAttempt = forceContinuousExecution && canExecute && AGENT_NEVER_SKIP_TRADES;
 
     decision.asset = String(decision.asset || "").toUpperCase();
     decision.size = Math.max(0, Math.min(decision.size || 0, maxSizeByRisk));
@@ -828,31 +838,94 @@ async function executeTickInternal(agentId: string): Promise<TradeLog> {
     }
 
     if (decision.action !== "hold" && !allowedMarkets.has(decision.asset)) {
+      if (forceTradeAttempt) {
+        const fallbackAsset = pickBestAllowedMarketWithPrice(markets, agent.markets) || agent.markets[0] || "BTC";
+        decision.asset = fallbackAsset.toUpperCase();
+        decision.reasoning = `${decision.reasoning || ""} Forced market remap to allowed asset ${decision.asset}.`.trim();
+      } else {
+        decision = {
+          action: "hold",
+          asset: agent.markets[0] || "BTC",
+          size: 0,
+          leverage: 1,
+          confidence: 0,
+          reasoning: `Blocked trade on disallowed market ${decision.asset}.`,
+        };
+      }
+    }
+
+    if (decision.action === "close" && !hasPositionForAsset(decision.asset)) {
+      if (forceTradeAttempt) {
+        const fallbackAsset =
+          pickBestAllowedMarketWithPrice(markets, agent.markets) || decision.asset || agent.markets[0] || "BTC";
+        const action = inferDirectionFromHistory(
+          fallbackAsset,
+          Object.keys(historicalPrices).length > 0 ? historicalPrices : undefined
+        );
+        const minFrac =
+          availableBalance > 0 ? AGENT_MUST_TRADE_MIN_ORDER_NOTIONAL_USD / availableBalance : maxSizeByRisk;
+        decision = {
+          action,
+          asset: fallbackAsset.toUpperCase(),
+          size: clampSizeFraction(Math.min(maxSizeByRisk, Math.max(0.01, minFrac))),
+          leverage: Math.max(1, Math.min(decision.leverage, 2)),
+          confidence: Math.max(minConfidence, decision.confidence || 0),
+          reasoning: `Close remapped to forced ${action} due no open position on ${decision.asset}.`,
+        };
+      } else {
+        decision = {
+          action: "hold",
+          asset: decision.asset || agent.markets[0] || "BTC",
+          size: 0,
+          leverage: 1,
+          confidence: 0,
+          reasoning: `Close requested with no open position on ${decision.asset}.`,
+        };
+      }
+    }
+
+    if (decision.action !== "hold" && decision.confidence < minConfidence) {
+      if (forceTradeAttempt) {
+        decision.confidence = minConfidence;
+        decision.reasoning = `${decision.reasoning || ""} Confidence floor override applied (${minConfidence.toFixed(2)}).`.trim();
+      } else {
+        decision = {
+          action: "hold",
+          asset: decision.asset || agent.markets[0] || "BTC",
+          size: 0,
+          leverage: 1,
+          confidence: decision.confidence,
+          reasoning: `Confidence ${decision.confidence.toFixed(2)} below min ${minConfidence.toFixed(2)}.`,
+        };
+      }
+    }
+
+    if (forceTradeAttempt && decision.action === "hold") {
+      const forcedAsset =
+        pickLargestOpenPositionAsset(positions, markets) ||
+        pickBestAllowedMarketWithPrice(markets, agent.markets) ||
+        agent.markets[0] ||
+        "BTC";
+      const hasOpen = positions.some((p) => Math.abs(p.size) > 0);
+      const shouldClose = hasOpen && availableBalance < AGENT_MUST_TRADE_MIN_ORDER_NOTIONAL_USD;
+      const forcedAction = shouldClose
+        ? "close"
+        : inferDirectionFromHistory(
+            forcedAsset,
+            Object.keys(historicalPrices).length > 0 ? historicalPrices : undefined
+          );
+      const minFrac =
+        availableBalance > 0 ? AGENT_MUST_TRADE_MIN_ORDER_NOTIONAL_USD / availableBalance : maxSizeByRisk;
+
       decision = {
-        action: "hold",
-        asset: agent.markets[0] || "BTC",
-        size: 0,
+        action: forcedAction,
+        asset: forcedAsset.toUpperCase(),
+        size: forcedAction === "close"
+          ? 0
+          : clampSizeFraction(Math.min(maxSizeByRisk, Math.max(0.01, minFrac))),
         leverage: 1,
-        confidence: 0,
-        reasoning: `Blocked trade on disallowed market ${decision.asset}.`,
-      };
-    } else if (decision.action === "close" && !hasPositionForAsset(decision.asset)) {
-      decision = {
-        action: "hold",
-        asset: decision.asset || agent.markets[0] || "BTC",
-        size: 0,
-        leverage: 1,
-        confidence: 0,
-        reasoning: `Close requested with no open position on ${decision.asset}.`,
-      };
-    } else if (decision.action !== "hold" && decision.confidence < minConfidence) {
-      decision = {
-        action: "hold",
-        asset: decision.asset || agent.markets[0] || "BTC",
-        size: 0,
-        leverage: 1,
-        confidence: decision.confidence,
-        reasoning: `Confidence ${decision.confidence.toFixed(2)} below min ${minConfidence.toFixed(2)}.`,
+        confidence: Math.max(minConfidence, decision.confidence || 0),
+        reasoning: `Continuous execution override: forcing ${forcedAction} on ${forcedAsset}.`,
       };
     }
 
@@ -887,28 +960,33 @@ async function executeTickInternal(agentId: string): Promise<TradeLog> {
 
         // Calculate order size with safety checks
         const matchingPosition = positions.find((p) => p.coin === decision.asset);
-        const capitalToUse = decision.action === "close"
-          ? Math.abs(matchingPosition?.size ?? 0) * (markets.find((m) => m.coin === decision.asset)?.price || 0)
-          : availableBalance * decision.size;
         const price =
           markets.find((m) => m.coin === decision.asset)?.price || 0;
-        const orderSize = decision.action === "close"
-          ? Math.abs(matchingPosition?.size ?? 0)
-          : (price > 0 ? capitalToUse / price : 0);
-
-        console.log(`[Agent ${agentId}] Order calculation: capital=$${capitalToUse}, price=$${price}, size=${orderSize}`);
-
+        const closeNotionalUsd = Math.abs(matchingPosition?.size ?? 0) * price;
+        let targetNotionalUsd = decision.action === "close"
+          ? closeNotionalUsd
+          : availableBalance * decision.size;
         const minOrderNotionalUsd = AGENT_NEVER_SKIP_TRADES
           ? 0.01
-          : testnetContinuousExecution
+          : forceContinuousExecution && isTestnetAgent(agent)
             ? TESTNET_MIN_ORDER_NOTIONAL_USD
             : AGENT_MIN_ORDER_NOTIONAL_USD;
 
+        if (forceTradeAttempt && decision.action !== "close" && targetNotionalUsd < minOrderNotionalUsd) {
+          targetNotionalUsd = minOrderNotionalUsd;
+        }
+
+        const orderSize = decision.action === "close"
+          ? Math.abs(matchingPosition?.size ?? 0)
+          : (price > 0 ? targetNotionalUsd / price : 0);
+
+        console.log(`[Agent ${agentId}] Order calculation: notional=$${targetNotionalUsd}, price=$${price}, size=${orderSize}`);
+
         if (!isFinite(orderSize) || isNaN(orderSize) || orderSize <= 0) {
-          console.warn(`[Agent ${agentId}] SKIPPING: Invalid order size: ${orderSize} (capital=${capitalToUse}, price=${price})`);
-        } else if (decision.action !== "close" && capitalToUse < minOrderNotionalUsd) {
+          console.warn(`[Agent ${agentId}] SKIPPING: Invalid order size: ${orderSize} (notional=${targetNotionalUsd}, price=${price})`);
+        } else if (!forceTradeAttempt && decision.action !== "close" && targetNotionalUsd < minOrderNotionalUsd) {
           console.warn(
-            `[Agent ${agentId}] SKIPPING: Notional $${capitalToUse.toFixed(2)} below minimum $${minOrderNotionalUsd.toFixed(2)}`
+            `[Agent ${agentId}] SKIPPING: Notional $${targetNotionalUsd.toFixed(2)} below minimum $${minOrderNotionalUsd.toFixed(2)}`
           );
         } else {
           console.log(`[Agent ${agentId}] Order size valid: ${orderSize}`);
