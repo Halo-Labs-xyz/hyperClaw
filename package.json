@@ -28,6 +28,8 @@
     "deploy:hclaw-stack": "node scripts/deploy-hclaw-stack.mjs",
     "deploy:hclaw-buyback-lock": "node scripts/deploy-hclaw-buyback-lock.mjs",
     "hclaw:epoch:close": "node scripts/close-hclaw-epoch.mjs",
+    "hclaw:epoch:keeper": "node scripts/hclaw-epoch-keeper.mjs",
+    "hclaw:ops:check": "node scripts/hclaw-ops-check.mjs",
     "hclaw:report": "node scripts/hclaw-weekly-report.mjs",
     "hclaw:backfill": "node scripts/backfill-hclaw-day0.mjs",
     "docker:up": "bash scripts/docker-stack.sh up",

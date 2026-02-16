@@ -127,6 +127,7 @@ type AgentSummary = {
   totalTrades: number;
   winRate: number;
   vaultTvlUsd: number;
+  isVaultInitialized?: boolean;
 };
 
 function formatUsd(value: number): string {
@@ -1106,10 +1107,12 @@ export default function AgentDetailPage() {
               <div className="text-xs text-muted mb-2 uppercase tracking-wider">Total PnL</div>
               <div className={`text-lg md:text-xl font-bold mono-nums ${pnlTone}`}>{formatUsd(summaryAgent.totalPnl)}</div>
             </div>
-            <div className="card rounded-2xl p-4 md:p-5">
-              <div className="text-xs text-muted mb-2 uppercase tracking-wider">Vault TVL</div>
-              <div className="text-lg md:text-xl font-bold mono-nums">${summaryAgent.vaultTvlUsd.toLocaleString()}</div>
-            </div>
+            {summaryAgent.isVaultInitialized ? (
+              <div className="card rounded-2xl p-4 md:p-5">
+                <div className="text-xs text-muted mb-2 uppercase tracking-wider">Vault TVL</div>
+                <div className="text-lg md:text-xl font-bold mono-nums">${summaryAgent.vaultTvlUsd.toLocaleString()}</div>
+              </div>
+            ) : null}
             <div className="card rounded-2xl p-4 md:p-5">
               <div className="text-xs text-muted mb-2 uppercase tracking-wider">Total Trades</div>
               <div className="text-lg md:text-xl font-bold mono-nums">{summaryAgent.totalTrades}</div>
@@ -1189,6 +1192,7 @@ export default function AgentDetailPage() {
 
   const autonomyInfo = AUTONOMY_LABELS[agent.autonomy?.mode ?? "semi"];
   const hasPendingApproval = agent.pendingApproval?.status === "pending";
+  const showVaultTvl = Boolean(agent.vaultSocial?.isOpenVault);
   const isDepositBusy = ["switching", "signing", "confirming", "syncing"].includes(depositPhase);
   const isWithdrawBusy = ["switching", "signing", "confirming", "syncing"].includes(withdrawPhase);
   const depositStatusTone =
@@ -1537,7 +1541,9 @@ export default function AgentDetailPage() {
                 : "-",
               color: totalUnrealizedPnl >= 0 ? "text-success" : "text-danger",
             },
-            { label: "Vault TVL", value: `$${agent.vaultTvlUsd.toLocaleString()}`, color: "text-foreground" },
+            ...(showVaultTvl
+              ? [{ label: "Vault TVL", value: `$${agent.vaultTvlUsd.toLocaleString()}`, color: "text-foreground" }]
+              : []),
             {
               label: hlBalance?.stale ? "HL Balance (stale)" : "HL Balance",
               value: hlBalance?.hasWallet

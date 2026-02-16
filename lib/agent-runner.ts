@@ -123,17 +123,13 @@ const AGENT_MUST_TRADE_FORCE_COOLDOWN_MS = Math.max(
 );
 const TESTNET_FORCE_CONTINUOUS_EXECUTION =
   process.env.TESTNET_FORCE_CONTINUOUS_EXECUTION !== "false";
-const TESTNET_MIN_CONFIDENCE_OVERRIDE = (() => {
-  const parsed = parseFloat(process.env.TESTNET_MIN_CONFIDENCE_OVERRIDE || "0");
-  if (!Number.isFinite(parsed)) return 0;
-  return Math.max(0, Math.min(1, parsed));
-})();
+const AGENT_EXECUTION_MIN_CONFIDENCE = 0.1;
 const TESTNET_MIN_ORDER_NOTIONAL_USD = (() => {
   const parsed = parseFloat(process.env.TESTNET_MIN_ORDER_NOTIONAL_USD || "1");
   if (!Number.isFinite(parsed)) return 1;
   return Math.max(0, parsed);
 })();
-/** When true, never skip trades: minConfidence=0, min notional=$0.01. Default true. */
+/** When true, relaxes notional gate to $0.01. Confidence gate still enforces 10% minimum. */
 const AGENT_NEVER_SKIP_TRADES = process.env.AGENT_NEVER_SKIP_TRADES !== "false";
 
 function findMarketPriceUsd(markets: Array<{ coin: string; price: number }>, coin: string): number {
@@ -789,11 +785,7 @@ async function executeTickInternal(agentId: string): Promise<TradeLog> {
         : undefined,
     });
 
-    const minConfidence = AGENT_NEVER_SKIP_TRADES
-      ? 0
-      : testnetContinuousExecution
-        ? Math.min(getConfiguredMinConfidence(agent), TESTNET_MIN_CONFIDENCE_OVERRIDE)
-        : getConfiguredMinConfidence(agent);
+    const minConfidence = AGENT_EXECUTION_MIN_CONFIDENCE;
     const allowedMarkets = new Set(agent.markets.map((m) => m.toUpperCase()));
     const maxSizeByRisk = getRiskMaxSizeFraction(agent.riskLevel);
     const hasPositionForAsset = (asset: string) =>

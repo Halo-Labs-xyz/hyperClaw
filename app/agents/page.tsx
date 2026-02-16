@@ -19,6 +19,7 @@ type ExploreAgent = {
   markets: string[];
   riskLevel: "conservative" | "moderate" | "aggressive";
   vaultTvlUsd: number;
+  isVaultInitialized?: boolean;
 };
 
 function formatMarkets(markets: string[]): string {
@@ -218,7 +219,9 @@ export default function AgentsPage() {
                     </span>
                     <div className="text-right">
                       <div className={`font-medium capitalize ${riskClass(agent.riskLevel)}`}>{agent.riskLevel}</div>
-                      <div className="text-dim mono-nums">TVL ${agent.vaultTvlUsd.toLocaleString()}</div>
+                      {agent.isVaultInitialized ? (
+                        <div className="text-dim mono-nums">TVL ${agent.vaultTvlUsd.toLocaleString()}</div>
+                      ) : null}
                     </div>
                   </div>
                 </div>

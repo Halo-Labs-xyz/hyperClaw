@@ -596,10 +596,12 @@ export default function ArenaPage() {
                       <p className="text-[10px] text-dim uppercase tracking-wider mb-1">Win Rate</p>
                       <p className="text-lg font-bold mono-nums">{(selectedAgent.winRate * 100).toFixed(1)}%</p>
                     </div>
-                    <div className="bg-surface rounded-xl p-3 border border-card-border">
-                      <p className="text-[10px] text-dim uppercase tracking-wider mb-1">Vault TVL</p>
-                      <p className="text-lg font-bold mono-nums">${selectedAgent.vaultTvlUsd.toLocaleString()}</p>
-                    </div>
+                    {selectedAgent.vaultSocial?.isOpenVault ? (
+                      <div className="bg-surface rounded-xl p-3 border border-card-border">
+                        <p className="text-[10px] text-dim uppercase tracking-wider mb-1">Vault TVL</p>
+                        <p className="text-lg font-bold mono-nums">${selectedAgent.vaultTvlUsd.toLocaleString()}</p>
+                      </div>
+                    ) : null}
                     <div className="bg-surface rounded-xl p-3 border border-card-border">
                       <p className="text-[10px] text-dim uppercase tracking-wider mb-1">Markets</p>
                       <p className="text-sm font-semibold truncate">{selectedAgent.markets.join(", ")}</p>

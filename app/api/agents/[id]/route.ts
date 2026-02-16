@@ -115,6 +115,7 @@ export async function GET(
           totalTrades: agent.totalTrades,
           winRate: agent.winRate,
           vaultTvlUsd: agent.vaultTvlUsd,
+          isVaultInitialized: Boolean(agent.vaultSocial?.isOpenVault),
         },
         viewer: { isOwner },
       });

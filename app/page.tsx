@@ -313,7 +313,10 @@ export default function Dashboard() {
     );
   }
 
-  const totalTvl = agents.reduce((sum, a) => sum + a.vaultTvlUsd, 0);
+  const totalTvl = agents.reduce(
+    (sum, a) => sum + (a.vaultSocial?.isOpenVault ? a.vaultTvlUsd : 0),
+    0
+  );
   const totalPnl = (() => {
     const fromWallets = agentWallets.reduce(
       (sum, w) => sum + (typeof w.totalPnl === "number" ? w.totalPnl : 0),
@@ -767,10 +770,12 @@ function _AgentCard({ agent, hlWallet }: {
               {pnl >= 0 ? "+" : ""}${pnl.toLocaleString()}
             </span>
           </div>
-          <div className="flex justify-between">
-            <span className="text-dim">TVL</span>
-            <span className="font-medium mono-nums">${agent.vaultTvlUsd.toLocaleString()}</span>
-          </div>
+          {agent.vaultSocial?.isOpenVault ? (
+            <div className="flex justify-between">
+              <span className="text-dim">TVL</span>
+              <span className="font-medium mono-nums">${agent.vaultTvlUsd.toLocaleString()}</span>
+            </div>
+          ) : null}
           <div className="flex justify-between">
             <span className="text-dim">Trades</span>
             <span className="font-medium mono-nums">{agent.totalTrades}</span>

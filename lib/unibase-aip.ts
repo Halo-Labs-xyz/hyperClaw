@@ -30,6 +30,8 @@ function isAttestationRequired(): boolean {
   return parseBool(process.env.MONAD_AGENT_ATTESTATION_REQUIRED, false);
 }
 
+const AGENT_EXECUTION_MIN_CONFIDENCE = 0.1;
+
 // ============================================
 // Types - AIP SDK Interface
 // ============================================
@@ -443,7 +445,7 @@ export function createAgentHandler(hyperClawAgentId: string): AgentHandler {
       
       response += `\n**Reasoning:** ${decision.reasoning}`;
 
-      if (agent.autonomy.mode === "full" && decision.confidence >= (agent.autonomy.minConfidence || 0.6)) {
+      if (agent.autonomy.mode === "full" && decision.confidence >= AGENT_EXECUTION_MIN_CONFIDENCE) {
         response += `\n\n✅ *Agent will execute this trade automatically.*`;
       } else if (agent.autonomy.mode === "semi") {
         response += `\n\n⏳ *Trade proposal awaiting approval.*`;

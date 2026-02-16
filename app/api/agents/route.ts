@@ -154,6 +154,7 @@ export async function GET(request: Request) {
           markets: a.markets,
           riskLevel: a.riskLevel,
           vaultTvlUsd: a.vaultTvlUsd,
+          isVaultInitialized: Boolean(a.vaultSocial?.isOpenVault),
         })),
       });
     }
