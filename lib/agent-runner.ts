@@ -19,6 +19,7 @@ import {
 import { getTradeDecision } from "./ai";
 import {
   getEnrichedMarketData,
+  getAllMids,
   getAccountState,
   executeOrder,
   updateLeverage,
@@ -181,6 +182,46 @@ function inferDirectionFromHistory(
 function clampSizeFraction(x: number): number {
   if (!Number.isFinite(x)) return 0;
   return Math.max(0, Math.min(1, x));
+}
+
+function parseUsd(value: unknown): number {
+  const parsed = Number.parseFloat(String(value ?? ""));
+  if (!Number.isFinite(parsed)) return 0;
+  return Math.max(0, parsed);
+}
+
+function getTradableBalanceSnapshot(accountState: {
+  withdrawable?: string;
+  marginSummary?: { accountValue?: string; totalMarginUsed?: string };
+}): {
+  withdrawableUsd: number;
+  accountValueUsd: number;
+  marginUsedUsd: number;
+  freeCollateralUsd: number;
+  tradableUsd: number;
+} {
+  const withdrawableUsd = parseUsd(accountState.withdrawable);
+  const accountValueUsd = parseUsd(accountState.marginSummary?.accountValue);
+  const marginUsedUsd = parseUsd(accountState.marginSummary?.totalMarginUsed);
+  const freeCollateralUsd = Math.max(0, accountValueUsd - marginUsedUsd);
+  const conservativeCollateralUsd = marginUsedUsd > 0 ? freeCollateralUsd : accountValueUsd;
+  const tradableUsd = Math.max(withdrawableUsd, conservativeCollateralUsd);
+  return {
+    withdrawableUsd,
+    accountValueUsd,
+    marginUsedUsd,
+    freeCollateralUsd,
+    tradableUsd,
+  };
+}
+
+function appendExecutionContext(reasoning: string, context: string): string {
+  const base = (reasoning || "").trim();
+  const detail = context.trim();
+  if (!detail) return base;
+  if (!base) return detail;
+  if (base.includes(detail)) return base;
+  return `${base} ${detail}`;
 }
 
 function summarizeExecutionError(error: unknown): string {
@@ -673,7 +714,8 @@ async function executeTickInternal(agentId: string): Promise<TradeLog> {
         leverage: parseFloat(String(p.position.leverage?.value ?? "1")),
       }));
 
-    const availableBalance = parseFloat(accountState.withdrawable || "0");
+    const balance = getTradableBalanceSnapshot(accountState);
+    const availableBalance = balance.tradableUsd;
 
     // Must-trade liveness: ensure at least one executed trade every 15 minutes.
     // Trigger when overdue OR when the next tick would miss the deadline.
@@ -944,7 +986,11 @@ async function executeTickInternal(agentId: string): Promise<TradeLog> {
     let executionResult: TradeLog["executionResult"] = undefined;
 
     console.log(`[Agent ${agentId}] Decision: ${decision.action} ${decision.asset} @ ${decision.confidence*100}% confidence`);
-    console.log(`[Agent ${agentId}] Available balance: $${availableBalance}, Has exchange client: ${!!ex}`);
+    console.log(
+      `[Agent ${agentId}] Available balance (tradable): $${availableBalance.toFixed(2)} ` +
+      `(withdrawable=$${balance.withdrawableUsd.toFixed(2)}, freeCollateral=$${balance.freeCollateralUsd.toFixed(2)}, marginUsed=$${balance.marginUsedUsd.toFixed(2)}, accountValue=$${balance.accountValueUsd.toFixed(2)}), ` +
+      `Has exchange client: ${!!ex}`
+    );
 
     if (decision.action !== "hold") {
       console.log(`[Agent ${agentId}] Attempting to execute trade...`);
@@ -962,16 +1008,30 @@ async function executeTickInternal(agentId: string): Promise<TradeLog> {
             console.warn(`[Agent ${agentId}] PKP leverage update failed, continuing:`, levErr);
           }
         } else if (ex) {
-          await updateLeverage(assetIndex, decision.leverage, true, ex);
-          console.log(`[Agent ${agentId}] Leverage set to ${decision.leverage}x`);
+          try {
+            await updateLeverage(assetIndex, decision.leverage, true, ex);
+            console.log(`[Agent ${agentId}] Leverage set to ${decision.leverage}x`);
+          } catch (levErr) {
+            console.warn(`[Agent ${agentId}] Leverage update failed, continuing:`, levErr);
+          }
         } else {
           console.warn(`[Agent ${agentId}] Cannot set leverage - no exchange client`);
         }
 
         // Calculate order size with safety checks
         const matchingPosition = positions.find((p) => p.coin === decision.asset);
-        const price =
-          markets.find((m) => m.coin === decision.asset)?.price || 0;
+        let price = markets.find((m) => m.coin === decision.asset)?.price || 0;
+        if (!(price > 0)) {
+          try {
+            const mids = await getAllMids();
+            price = parseUsd(mids[decision.asset]);
+            if (price > 0) {
+              console.log(`[Agent ${agentId}] Price fallback from allMids for ${decision.asset}: $${price}`);
+            }
+          } catch (midErr) {
+            console.warn(`[Agent ${agentId}] Failed to fetch allMids fallback for ${decision.asset}:`, midErr);
+          }
+        }
         const closeNotionalUsd = Math.abs(matchingPosition?.size ?? 0) * price;
         let targetNotionalUsd = decision.action === "close"
           ? closeNotionalUsd
@@ -993,8 +1053,24 @@ async function executeTickInternal(agentId: string): Promise<TradeLog> {
         console.log(`[Agent ${agentId}] Order calculation: notional=$${targetNotionalUsd}, price=$${price}, size=${orderSize}`);
 
         if (!isFinite(orderSize) || isNaN(orderSize) || orderSize <= 0) {
+          const skipReason = `Execution skipped: invalid order size ${orderSize} (notional=${targetNotionalUsd}, price=${price}).`;
+          decision.reasoning = appendExecutionContext(decision.reasoning, skipReason);
+          executionResult = {
+            orderId: "market",
+            fillPrice: price,
+            fillSize: 0,
+            status: "rejected",
+          };
           console.warn(`[Agent ${agentId}] SKIPPING: Invalid order size: ${orderSize} (notional=${targetNotionalUsd}, price=${price})`);
         } else if (!forceTradeAttempt && decision.action !== "close" && targetNotionalUsd < minOrderNotionalUsd) {
+          const skipReason = `Execution skipped: notional $${targetNotionalUsd.toFixed(2)} below minimum $${minOrderNotionalUsd.toFixed(2)}.`;
+          decision.reasoning = appendExecutionContext(decision.reasoning, skipReason);
+          executionResult = {
+            orderId: "market",
+            fillPrice: price,
+            fillSize: orderSize,
+            status: "rejected",
+          };
           console.warn(
             `[Agent ${agentId}] SKIPPING: Notional $${targetNotionalUsd.toFixed(2)} below minimum $${minOrderNotionalUsd.toFixed(2)}`
           );
@@ -1029,7 +1105,7 @@ async function executeTickInternal(agentId: string): Promise<TradeLog> {
             await executeOrder(entryParams, ex, { skipBuilder: true });
             console.log(`[Agent ${agentId}] Order executed successfully!`);
           } else {
-            console.warn(`[Agent ${agentId}] No exchange client - skipping order execution`);
+            throw new Error("No exchange client available for order execution");
           }
 
           executed = true;
@@ -1099,6 +1175,16 @@ async function executeTickInternal(agentId: string): Promise<TradeLog> {
         } else {
           console.error(`[Agent ${agentId}] Trade execution failed: ${summary}`);
         }
+        decision.reasoning = appendExecutionContext(
+          decision.reasoning,
+          `Execution failed: ${summary}.`
+        );
+        executionResult = {
+          orderId: "market",
+          fillPrice: 0,
+          fillSize: 0,
+          status: "rejected",
+        };
         if (state) {
           state.errors.push({
             timestamp: Date.now(),
@@ -1243,17 +1329,29 @@ export async function executeApprovedTrade(
     try {
       const markets = await getEnrichedMarketData();
       const accountState = await getAccountState(hlAddress);
-      const availableBalance = parseFloat(accountState.withdrawable || "0");
+      const balance = getTradableBalanceSnapshot(accountState);
+      const availableBalance = balance.tradableUsd;
       const assetIndex = await getAssetIndex(decision.asset);
       if (isPKP && pkpExchange) {
-        await updateLeverage(assetIndex, decision.leverage, true, pkpExchange);
+        try {
+          await updateLeverage(assetIndex, decision.leverage, true, pkpExchange);
+        } catch (levErr) {
+          console.warn(`[Agent ${agentId}] Approved trade PKP leverage update failed, continuing:`, levErr);
+        }
       } else if (agentExchange) {
-        await updateLeverage(assetIndex, decision.leverage, true, agentExchange);
+        try {
+          await updateLeverage(assetIndex, decision.leverage, true, agentExchange);
+        } catch (levErr) {
+          console.warn(`[Agent ${agentId}] Approved trade leverage update failed, continuing:`, levErr);
+        }
       }
 
       const capitalToUse = availableBalance * decision.size;
-      const price =
-        markets.find((m) => m.coin === decision.asset)?.price || 0;
+      let price = markets.find((m) => m.coin === decision.asset)?.price || 0;
+      if (!(price > 0)) {
+        const mids = await getAllMids();
+        price = parseUsd(mids[decision.asset]);
+      }
       const positions = (accountState.assetPositions || [])
         .filter((p) => parseFloat(p.position.szi) !== 0)
         .map((p) => ({ coin: p.position.coin, size: parseFloat(p.position.szi) }));
@@ -1261,6 +1359,12 @@ export async function executeApprovedTrade(
       const orderSize = decision.action === "close"
         ? Math.abs(matchingPosition?.size ?? 0)
         : (price > 0 ? capitalToUse / price : 0);
+
+      if (!(orderSize > 0)) {
+        throw new Error(
+          `Approved trade skipped due invalid order size ${orderSize} (tradable=${availableBalance}, price=${price})`
+        );
+      }
 
       if (orderSize > 0) {
         const isBuy =
