@@ -15,6 +15,7 @@ type SimulatedFill = {
 type ExecutionReceipt = {
   receipt_id: string;
   intent_id: string;
+  intent_hash: string;
   mode: "paper" | "live";
   symbol: string;
   side: "buy" | "sell";
@@ -22,6 +23,7 @@ type ExecutionReceipt = {
   price_ref: string;
   simulated_fills: SimulatedFill[];
   decision_hash: string;
+  receipt_hash: string;
   created_at: string;
 };
 
@@ -107,10 +109,11 @@ export async function POST(request: Request) {
 
   const intentId = typeof body.intent_id === "string" ? body.intent_id.trim() : "";
   const modeRaw = typeof body.mode === "string" ? body.mode.trim().toLowerCase() : "paper";
-  const symbol = typeof body.symbol === "string" ? body.symbol.trim() : "";
+  const symbolRaw = typeof body.symbol === "string" ? body.symbol.trim() : "";
   const sideRaw = typeof body.side === "string" ? body.side.trim().toLowerCase() : "";
   const notional = parseFiniteNumber(body.notional);
   const priceRef = parseFiniteNumber(body.price_ref);
+  const symbol = symbolRaw.toUpperCase();
 
   if (!intentId || !symbol || !["buy", "sell"].includes(sideRaw)) {
     return NextResponse.json(
@@ -125,8 +128,24 @@ export async function POST(request: Request) {
     );
   }
 
+  if (!["paper", "live"].includes(modeRaw)) {
+    return NextResponse.json(
+      { error: "mode must be either 'paper' or 'live'" },
+      { status: 400 }
+    );
+  }
   const mode: "paper" | "live" = modeRaw === "live" ? "live" : "paper";
   const side: "buy" | "sell" = sideRaw === "sell" ? "sell" : "buy";
+
+  const state = getBridgeState();
+  const previous = state.runs.get(intentId);
+  if (!previous?.intent) {
+    return NextResponse.json(
+      { error: `No intent found for intent_id '${intentId}'` },
+      { status: 409 }
+    );
+  }
+  const intentHash = hashPayload(previous.intent);
 
   const quantity = notional / priceRef;
   const qtyA = quantity * 0.6;
@@ -141,6 +160,7 @@ export async function POST(request: Request) {
 
   const decisionHash = hashPayload({
     intent_id: intentId,
+    intent_hash: intentHash,
     mode,
     symbol,
     side,
@@ -150,9 +170,11 @@ export async function POST(request: Request) {
   });
 
   const createdAt = new Date().toISOString();
-  const receipt: ExecutionReceipt = {
-    receipt_id: `rcpt_${decisionHash.slice(0, 24)}`,
+  const receiptId = `rcpt_${decisionHash.slice(0, 24)}`;
+  const receiptHash = hashPayload({
+    receipt_id: receiptId,
     intent_id: intentId,
+    intent_hash: intentHash,
     mode,
     symbol,
     side,
@@ -160,11 +182,22 @@ export async function POST(request: Request) {
     price_ref: toDecimal(priceRef, 8),
     simulated_fills: simulatedFills,
     decision_hash: decisionHash,
+  });
+  const receipt: ExecutionReceipt = {
+    receipt_id: receiptId,
+    intent_id: intentId,
+    intent_hash: intentHash,
+    mode,
+    symbol,
+    side,
+    notional: toDecimal(notional, 8),
+    price_ref: toDecimal(priceRef, 8),
+    simulated_fills: simulatedFills,
+    decision_hash: decisionHash,
+    receipt_hash: receiptHash,
     created_at: createdAt,
   };
 
-  const state = getBridgeState();
-  const previous = state.runs.get(intentId);
   state.runs.set(intentId, {
     intent: previous?.intent,
     execution: receipt,
@@ -173,5 +206,16 @@ export async function POST(request: Request) {
   });
   state.receipt_to_intent.set(receipt.receipt_id, intentId);
 
-  return NextResponse.json({ accepted: true, execution: receipt }, { status: 202 });
+  return NextResponse.json(
+    {
+      accepted: true,
+      execution: receipt,
+      stage: {
+        intent: "completed",
+        execution: "completed",
+        verification: previous?.verification ? "completed" : "pending",
+      },
+    },
+    { status: 202 }
+  );
 }

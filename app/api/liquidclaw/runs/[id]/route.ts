@@ -17,6 +17,11 @@ type BridgeState = {
   verification_to_intent: Map<string, string>;
 };
 
+type LookupResolution = {
+  intentId: string;
+  lookupKind: "intent_id" | "receipt_id" | "verification_id";
+};
+
 function getBridgeState(): BridgeState {
   const globals = globalThis as typeof globalThis & {
     __liquidclaw_bridge_state__?: BridgeState;
@@ -33,14 +38,16 @@ function getBridgeState(): BridgeState {
   return globals.__liquidclaw_bridge_state__;
 }
 
-function resolveIntentId(id: string, state: BridgeState): string | null {
-  if (state.runs.has(id)) return id;
+function resolveIntentId(id: string, state: BridgeState): LookupResolution | null {
+  if (state.runs.has(id)) return { intentId: id, lookupKind: "intent_id" };
 
   const byReceipt = state.receipt_to_intent.get(id);
-  if (byReceipt) return byReceipt;
+  if (byReceipt) return { intentId: byReceipt, lookupKind: "receipt_id" };
 
   const byVerification = state.verification_to_intent.get(id);
-  if (byVerification) return byVerification;
+  if (byVerification) {
+    return { intentId: byVerification, lookupKind: "verification_id" };
+  }
 
   return null;
 }
@@ -58,15 +65,15 @@ export async function GET(
   }
 
   const state = getBridgeState();
-  const intentId = resolveIntentId(lookupId, state);
-  if (!intentId) {
+  const resolution = resolveIntentId(lookupId, state);
+  if (!resolution) {
     return NextResponse.json(
       { error: `Run '${lookupId}' not found` },
       { status: 404 }
     );
   }
 
-  const run = state.runs.get(intentId);
+  const run = state.runs.get(resolution.intentId);
   if (!run) {
     return NextResponse.json(
       { error: `Run '${lookupId}' not found` },
@@ -74,13 +81,29 @@ export async function GET(
     );
   }
 
+  const stage = {
+    intent: run.intent ? "completed" : "pending",
+    execution: run.execution ? "completed" : "pending",
+    verification: run.verification ? "completed" : "pending",
+  };
+
+  const lifecycle =
+    stage.verification === "completed"
+      ? "verified"
+      : stage.execution === "completed"
+        ? "executed"
+        : stage.intent === "completed"
+          ? "intent_accepted"
+          : "missing";
+
   return NextResponse.json({
-    run_id: intentId,
-    stage: {
-      intent: Boolean(run.intent),
-      execution: Boolean(run.execution),
-      verification: Boolean(run.verification),
+    run_id: resolution.intentId,
+    lookup: {
+      input: lookupId,
+      kind: resolution.lookupKind,
     },
+    lifecycle,
+    stage,
     run,
   });
 }

@@ -116,6 +116,7 @@ export async function POST(request: Request) {
     market_context_hash: marketContextHash,
     created_at: createdAt,
   };
+  const intentHash = hashPayload(intent);
 
   const state = getBridgeState();
   const previous = state.runs.get(intentId);
@@ -130,8 +131,13 @@ export async function POST(request: Request) {
     {
       accepted: true,
       intent,
-      intent_hash: hashPayload(intent),
+      intent_hash: intentHash,
       run_id: intentId,
+      stage: {
+        intent: "completed",
+        execution: previous?.execution ? "completed" : "pending",
+        verification: previous?.verification ? "completed" : "pending",
+      },
     },
     { status: 202 }
   );

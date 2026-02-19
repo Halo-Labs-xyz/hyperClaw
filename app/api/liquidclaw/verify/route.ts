@@ -14,12 +14,13 @@ type VerificationRecord = {
   backend: VerificationBackend;
   proof_ref: string;
   status: VerificationStatus;
+  verification_hash: string;
   verified_at: string;
 };
 
 type BridgeRun = {
   intent?: unknown;
-  execution?: { receipt_id?: string };
+  execution?: { receipt_id?: string; receipt_hash?: string };
   verification?: VerificationRecord;
   updated_at: string;
 };
@@ -48,18 +49,36 @@ function getBridgeState(): BridgeState {
   return globals.__liquidclaw_bridge_state__;
 }
 
-function parseBackend(value: unknown): VerificationBackend {
-  if (value === "eigencloud_primary") return value;
-  return "signed_fallback";
+function parseBackend(value: unknown): VerificationBackend | null {
+  if (value === undefined) return "signed_fallback";
+  if (value === "eigencloud_primary" || value === "signed_fallback") return value;
+  return null;
 }
 
-function parseStatus(value: unknown): VerificationStatus {
-  if (value === "pending" || value === "failed") return value;
-  return "verified";
+function parseStatus(value: unknown): VerificationStatus | null {
+  if (value === undefined) return "verified";
+  if (value === "pending" || value === "verified" || value === "failed") return value;
+  return null;
+}
+
+function canonicalize(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map((item) => canonicalize(item));
+  if (!value || typeof value !== "object") return value;
+
+  const entries = Object.entries(value as JsonMap).sort(([a], [b]) =>
+    a.localeCompare(b)
+  );
+  const out: JsonMap = {};
+  for (const [key, nested] of entries) {
+    out[key] = canonicalize(nested);
+  }
+  return out;
 }
 
 function hashPayload(value: unknown): string {
-  return createHash("sha256").update(JSON.stringify(value)).digest("hex");
+  return createHash("sha256")
+    .update(JSON.stringify(canonicalize(value)))
+    .digest("hex");
 }
 
 export async function POST(request: Request) {
@@ -95,15 +114,41 @@ export async function POST(request: Request) {
   if (!run) {
     return NextResponse.json({ error: "Run not found" }, { status: 404 });
   }
+  if (!run.execution?.receipt_id) {
+    return NextResponse.json(
+      { error: `No execution found for receipt_id '${receiptId}'` },
+      { status: 409 }
+    );
+  }
 
   const backend = parseBackend(body.backend);
   const status = parseStatus(body.status);
+  if (!backend) {
+    return NextResponse.json(
+      { error: "backend must be 'eigencloud_primary' or 'signed_fallback'" },
+      { status: 400 }
+    );
+  }
+  if (!status) {
+    return NextResponse.json(
+      { error: "status must be 'pending', 'verified', or 'failed'" },
+      { status: 400 }
+    );
+  }
   const verifiedAt = new Date().toISOString();
   const verificationId = `ver_${randomUUID()}`;
   const proofRef =
     typeof body.proof_ref === "string" && body.proof_ref.trim().length > 0
       ? body.proof_ref.trim()
       : `local:${hashPayload({ receipt_id: receiptId, backend, status, verifiedAt })}`;
+  const verificationHash = hashPayload({
+    verification_id: verificationId,
+    receipt_id: receiptId,
+    backend,
+    proof_ref: proofRef,
+    status,
+    receipt_hash: run.execution.receipt_hash ?? null,
+  });
 
   const verification: VerificationRecord = {
     verification_id: verificationId,
@@ -111,6 +156,7 @@ export async function POST(request: Request) {
     backend,
     proof_ref: proofRef,
     status,
+    verification_hash: verificationHash,
     verified_at: verifiedAt,
   };
 
@@ -122,5 +168,16 @@ export async function POST(request: Request) {
   });
   state.verification_to_intent.set(verificationId, intentId);
 
-  return NextResponse.json({ accepted: true, verification }, { status: 202 });
+  return NextResponse.json(
+    {
+      accepted: true,
+      verification,
+      stage: {
+        intent: run.intent ? "completed" : "missing",
+        execution: run.execution ? "completed" : "missing",
+        verification: "completed",
+      },
+    },
+    { status: 202 }
+  );
 }
