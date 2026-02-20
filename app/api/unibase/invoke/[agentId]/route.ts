@@ -3,12 +3,12 @@
  * 
  * A2A Protocol endpoint for invoking an AIP agent.
  * This is called by the AIP Gateway in DIRECT mode.
- * Enforces x402 payment verification bound to Monad chain.
+ * Enforces x402 payment verification bound to the configured EVM chain.
  */
 
 import { NextRequest, NextResponse } from "next/server";
 import { invokeAIPAgent, type A2AContext } from "@/lib/unibase-aip";
-import { verifyX402MonadPayment } from "@/lib/x402";
+import { verifyX402Payment } from "@/lib/x402";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -38,12 +38,12 @@ export async function POST(
       );
     }
 
-    const x402Verification = verifyX402MonadPayment(req, body);
+    const x402Verification = verifyX402Payment(req, body);
     if (!x402Verification.ok) {
       const headers = new Headers();
       if (x402Verification.status === 402) {
         headers.set("x-payment-required", "x402");
-        headers.set("x-required-network", "monad");
+        headers.set("x-required-network", "evm");
         headers.set("x-required-chain-id", String(x402Verification.expectedChainId));
       }
 
@@ -53,7 +53,7 @@ export async function POST(
           code: x402Verification.code,
           required: {
             protocol: "x402",
-            network: "monad",
+            network: "evm",
             chain_id: x402Verification.expectedChainId,
           },
           observed: {

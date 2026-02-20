@@ -1,8 +1,8 @@
 # HyperClaw
 
-AI-powered autonomous trading agents on Hyperliquid, funded through on-chain vaults on Monad.
+AI-powered autonomous trading agents on Hyperliquid, funded through on-chain vaults on EVM networks.
 
-Users deposit into Monad smart contract vaults. Capital is relayed to Hyperliquid. AI agents trade perpetual futures autonomously, with configurable autonomy levels, risk parameters, and real-time monitoring. A native `$HCLAW` token governs deposit caps via a bonding-curve tier system.
+Users deposit into EVM smart contract vaults. Capital is relayed to Hyperliquid. AI agents trade perpetual futures autonomously, with configurable autonomy levels, risk parameters, and real-time monitoring. A native `$HCLAW` token governs deposit caps via a bonding-curve tier system.
 
 ---
 
@@ -75,7 +75,7 @@ flowchart LR
 
 **Data flow:**
 
-1. User deposits MON or ERC20 into `HyperclawVault` on Monad. `$HCLAW` market cap sets the deposit cap tier.
+1. User deposits native token or ERC20 into `HyperclawVault` on the configured EVM network. `$HCLAW` market cap sets the deposit cap tier.
 2. Deposit relay picks up the confirmed tx and funds the agent wallet:
    - both networks: operator `usdSend` direct to the agent HL wallet (no bridge on deposit)
    - fair-value conversion: MON/ERC20 amount -> USDC relay amount via oracle/feed pricing
@@ -790,7 +790,7 @@ cp .env.example .env.local
 | `WEB_PUSH_PRIVATE_KEY`               | Yes      | VAPID private key                                     |
 | `NEXT_PUBLIC_WEB_PUSH_PUBLIC_KEY`    | Yes      | VAPID public key                                      |
 | `HYPERLIQUID_PRIVATE_KEY`            | Yes      | Operator wallet key (testnet funding + ops signer)    |
-| `NEXT_PUBLIC_HYPERLIQUID_TESTNET`    | No       | `"true"` for HL testnet (default: mirrors Monad)      |
+| `NEXT_PUBLIC_HYPERLIQUID_TESTNET`    | No       | `"true"` for HL testnet (default: mirrors EVM setting)      |
 | `RELAY_FEE_BPS`                      | No       | Deposit relay fee in basis points (default: 100 = 1%) |
 | `MAINNET_MON_MIN_PRICE_USD`          | No       | Reject mainnet MON pricing below this bound (default: 1.05) |
 | `MAINNET_MON_MAX_PRICE_USD`          | No       | Reject mainnet MON pricing above this bound |
@@ -828,8 +828,10 @@ cp .env.example .env.local
 | `TELEGRAM_WEBHOOK_SECRET`            | No       | Optional Telegram webhook secret token                 |
 | `ACCOUNT_ENCRYPTION_KEY`             | Yes      | AES-256-CBC key for stored private keys               |
 | `NEXT_PUBLIC_VAULT_ADDRESS`          | Yes      | Deployed HyperclawVault contract address              |
-| `MONAD_PRIVATE_KEY`                  | Yes      | Monad deployer/admin private key                      |
-| `NEXT_PUBLIC_MONAD_TESTNET`          | No       | `"true"` for Monad testnet (default: true)            |
+| `EVM_PRIVATE_KEY`                    | Yes      | EVM deployer/admin private key                         |
+| `NEXT_PUBLIC_EVM_TESTNET`            | No       | `"true"` for EVM testnet (default: true)               |
+| `MONAD_PRIVATE_KEY`                  | No       | Backward-compatible alias for `EVM_PRIVATE_KEY`        |
+| `NEXT_PUBLIC_MONAD_TESTNET`          | No       | Backward-compatible alias for `NEXT_PUBLIC_EVM_TESTNET` |
 | `NEXT_PUBLIC_HCLAW_TOKEN_ADDRESS`    | No       | $HCLAW token address (after deployment)               |
 | `NEXT_PUBLIC_BUILDER_ADDRESS`       | No       | Builder wallet address (for earning fees on trades)   |
 | `NEXT_PUBLIC_BUILDER_FEE`           | No       | Builder fee in tenths of basis points (default: 10)   |
@@ -843,10 +845,12 @@ cp .env.example .env.local
 | `AIP_DEPLOYMENT_MODE`               | No       | AIP agent mode: "DIRECT" or "POLLING" (default: POLLING) |
 | `X402_REQUIRED`                     | No       | Enforce x402 verification on `/api/unibase/invoke/*` (default: true) |
 | `X402_GATEWAY_KEY`                  | Yes*     | Shared secret for trusted Unibase Gateway requests (*required when `X402_REQUIRED=true`) |
-| `X402_MONAD_CHAIN_ID`               | No       | Explicit Monad chain id for x402 checks (default: 143 mainnet / 10143 testnet) |
-| `MONAD_AGENT_ATTESTATION_ENABLED`   | No       | Enable Monad on-chain metadata attestation for agents (default: true) |
-| `MONAD_AGENT_ATTESTATION_REQUIRED`  | No       | Fail create/activation when attestation fails (default: true in production) |
-| `AIP_ATTESTATION_PRIVATE_KEY`       | No       | Dedicated signer key for attestation txs (fallback: `RELAY_MONAD_PRIVATE_KEY` then `MONAD_PRIVATE_KEY`) |
+| `X402_CHAIN_ID`                     | No       | Explicit EVM chain id for x402 checks (fallback: `X402_MONAD_CHAIN_ID`) |
+| `MONAD_AGENT_ATTESTATION_ENABLED`   | No       | Backward-compatible alias for `EVM_AGENT_ATTESTATION_ENABLED` |
+| `MONAD_AGENT_ATTESTATION_REQUIRED`  | No       | Backward-compatible alias for `EVM_AGENT_ATTESTATION_REQUIRED` |
+| `EVM_AGENT_ATTESTATION_ENABLED`     | No       | Enable EVM on-chain metadata attestation for agents (default: true) |
+| `EVM_AGENT_ATTESTATION_REQUIRED`    | No       | Fail create/activation when attestation fails (default: true in production) |
+| `AIP_ATTESTATION_PRIVATE_KEY`       | No       | Dedicated signer key for attestation txs (fallback: `RELAY_EVM_PRIVATE_KEY` then `EVM_PRIVATE_KEY`) |
 | `AIP_ATTESTATION_SINK_ADDRESS`      | No       | Destination address for calldata attestation tx (default: signer self-address) |
 | `AIP_AGENT_METADATA_BASE_URI`       | No       | Base URI for off-chain metadata references in attestation payload |
 | `AIP_ATTESTATION_RECEIPT_TIMEOUT_MS`| No       | Receipt wait timeout for attestation tx confirmation |

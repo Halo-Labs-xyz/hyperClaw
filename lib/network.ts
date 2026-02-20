@@ -1,7 +1,7 @@
 /**
  * Network State
  *
- * Runtime-switchable network configuration for both Monad and Hyperliquid.
+ * Runtime-switchable network configuration for both EVM and Hyperliquid.
  * Allows toggling testnet/mainnet without server restart.
  *
  * The state is held in-memory on the server and synced to the client
@@ -9,18 +9,23 @@
  */
 
 export interface NetworkState {
+  evmTestnet: boolean;
+  // Backward-compat field. Mirrors evmTestnet.
   monadTestnet: boolean;
   hlTestnet: boolean;
 }
 
 // Server-side mutable state (initialized from env vars)
-// If NEXT_PUBLIC_HYPERLIQUID_TESTNET is not explicitly set, mirror Monad's testnet setting
-const monadTestnetDefault = process.env.NEXT_PUBLIC_MONAD_TESTNET !== "false";
+// If NEXT_PUBLIC_HYPERLIQUID_TESTNET is not explicitly set, mirror EVM testnet setting.
+const evmTestnetDefault = process.env.NEXT_PUBLIC_EVM_TESTNET !== undefined
+  ? process.env.NEXT_PUBLIC_EVM_TESTNET === "true"
+  : process.env.NEXT_PUBLIC_MONAD_TESTNET !== "false";
 let networkState: NetworkState = {
-  monadTestnet: monadTestnetDefault,
+  evmTestnet: evmTestnetDefault,
+  monadTestnet: evmTestnetDefault,
   hlTestnet: process.env.NEXT_PUBLIC_HYPERLIQUID_TESTNET !== undefined
     ? process.env.NEXT_PUBLIC_HYPERLIQUID_TESTNET === "true"
-    : monadTestnetDefault,
+    : evmTestnetDefault,
 };
 
 // Change listeners — modules register to flush their cached clients
@@ -31,8 +36,12 @@ export function getNetworkState(): NetworkState {
   return { ...networkState };
 }
 
+export function isEvmTestnet(): boolean {
+  return networkState.evmTestnet;
+}
+
 export function isMonadTestnet(): boolean {
-  return networkState.monadTestnet;
+  return isEvmTestnet();
 }
 
 export function isHlTestnet(): boolean {
@@ -44,11 +53,25 @@ export function isHlTestnet(): boolean {
  * so they can invalidate cached clients/transports.
  */
 export function setNetworkState(update: Partial<NetworkState>): NetworkState {
-  const changed =
-    (update.monadTestnet !== undefined && update.monadTestnet !== networkState.monadTestnet) ||
-    (update.hlTestnet !== undefined && update.hlTestnet !== networkState.hlTestnet);
+  const nextEvmTestnet =
+    update.evmTestnet !== undefined
+      ? update.evmTestnet
+      : update.monadTestnet !== undefined
+        ? update.monadTestnet
+        : networkState.evmTestnet;
+  const nextHlTestnet = update.hlTestnet ?? networkState.hlTestnet;
 
-  networkState = { ...networkState, ...update };
+  const changed =
+    nextEvmTestnet !== networkState.evmTestnet ||
+    nextHlTestnet !== networkState.hlTestnet;
+
+  networkState = {
+    ...networkState,
+    ...update,
+    evmTestnet: nextEvmTestnet,
+    monadTestnet: nextEvmTestnet,
+    hlTestnet: nextHlTestnet,
+  };
 
   if (changed) {
     for (const listener of listeners) {

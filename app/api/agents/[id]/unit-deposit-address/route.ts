@@ -5,7 +5,7 @@ export async function POST() {
     {
       success: false,
       error:
-        "Direct Unit deposit address flow is disabled. Deposit into the Monad vault; backend relay handles operator-funded HL wallet credits.",
+        "Direct Unit deposit address flow is disabled. Deposit into the configured EVM vault; backend relay handles operator-funded HL wallet credits.",
     },
     { status: 410 }
   );

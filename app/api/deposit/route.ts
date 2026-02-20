@@ -11,9 +11,9 @@ import { getUserCapContext } from "@/lib/hclaw-policy";
 import { getVaultAddressIfDeployed } from "@/lib/env";
 import { getAgents } from "@/lib/store";
 
-type MonadNetwork = "mainnet" | "testnet";
+type EvmNetwork = "mainnet" | "testnet";
 
-function parseNetwork(value: unknown): MonadNetwork | undefined {
+function parseNetwork(value: unknown): EvmNetwork | undefined {
   if (value === "mainnet" || value === "testnet") return value;
   return undefined;
 }
@@ -34,7 +34,7 @@ function summarizeVaultConfig() {
 /**
  * POST /api/deposit
  *
- * Confirm a Monad vault transaction (deposit or withdrawal).
+ * Confirm an EVM vault transaction (deposit or withdrawal).
  * Called by the frontend after tx confirmation to sync relay/accounting.
  *
  * Body: { txHash: string }

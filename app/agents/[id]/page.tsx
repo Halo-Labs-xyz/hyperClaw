@@ -883,8 +883,8 @@ export default function AgentDetailPage() {
         return;
       }
 
-      // ========== On-chain deposit via Monad vault ==========
-      setDepositStatus(`Switch network to Monad ${activeNetwork} in wallet...`);
+      // ========== On-chain deposit via EVM vault ==========
+      setDepositStatus(`Switch network to EVM ${activeNetwork} in wallet...`);
       await switchChainAsync({ chainId: vaultChainId });
 
       if (depositToken.symbol === "MON") {
@@ -1012,7 +1012,7 @@ export default function AgentDetailPage() {
         return;
       }
 
-      setWithdrawStatus(`Switch network to Monad ${activeNetwork} in wallet...`);
+      setWithdrawStatus(`Switch network to EVM ${activeNetwork} in wallet...`);
       await switchChainAsync({ chainId: vaultChainId });
       setWithdrawPhase("signing");
       setWithdrawStatus("Check wallet and sign withdrawal transaction...");
@@ -1478,7 +1478,7 @@ export default function AgentDetailPage() {
               <div className="flex items-center gap-2">
                 <div className="w-2 h-2 rounded-full bg-success" />
                 <span className="font-semibold text-success uppercase tracking-wider">
-                  Secure Agent Registered On Monad {agent.aipAttestation.network}
+                  Secure Agent Registered On EVM {agent.aipAttestation.network}
                 </span>
               </div>
               <div className="text-dim">
@@ -2427,7 +2427,7 @@ export default function AgentDetailPage() {
                                       rel="noreferrer"
                                       className="underline text-accent hover:text-accent/80"
                                     >
-                                      Monad explorer: {shortenTxHash(withdrawSyncDetails.txHash)}
+                                      EVM explorer: {shortenTxHash(withdrawSyncDetails.txHash)}
                                     </a>
                                   )}
                                 </div>

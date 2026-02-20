@@ -18,7 +18,7 @@ import {
   type Hex,
 } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
-import { monadMainnet } from "./chains";
+import { evmMainnet } from "./chains";
 import { sendUsdFromAgent } from "./hyperliquid";
 
 export type BridgeStatus = "submitted" | "pending" | "failed";
@@ -76,8 +76,8 @@ const MAINNET_BRIDGE_PREFER_DEBRIDGE =
 
 const HYPERUNIT_API_URL =
   (process.env.HYPERUNIT_API_URL || "https://api.hyperunit.xyz").replace(/\/$/, "");
-const HYPERUNIT_MONAD_CHAIN =
-  (process.env.HYPERUNIT_MONAD_CHAIN || "monad").toLowerCase();
+const HYPERUNIT_EVM_CHAIN =
+  (process.env.HYPERUNIT_EVM_CHAIN || process.env.HYPERUNIT_MONAD_CHAIN || "monad").toLowerCase();
 const HYPERUNIT_HYPERLIQUID_CHAIN =
   (process.env.HYPERUNIT_HYPERLIQUID_CHAIN || "hyperliquid").toLowerCase();
 const HYPERUNIT_DEPOSIT_ASSET =
@@ -90,30 +90,38 @@ const HYPERUNIT_BEARER_TOKEN = process.env.HYPERUNIT_BEARER_TOKEN?.trim() || "";
 const DEBRIDGE_API_URL =
   (process.env.DEBRIDGE_API_URL || "https://dln.debridge.finance").replace(/\/$/, "");
 
-function getRelayMonadPrivateKey(): `0x${string}` | null {
-  const raw = process.env.RELAY_MONAD_PRIVATE_KEY || process.env.MONAD_PRIVATE_KEY;
+function getRelayEvmPrivateKey(): `0x${string}` | null {
+  const raw =
+    process.env.RELAY_EVM_PRIVATE_KEY ||
+    process.env.EVM_PRIVATE_KEY ||
+    process.env.RELAY_MONAD_PRIVATE_KEY ||
+    process.env.MONAD_PRIVATE_KEY;
   if (!raw || !/^0x[a-fA-F0-9]{64}$/.test(raw.trim())) return null;
   return raw.trim() as `0x${string}`;
 }
 
-function getMonadRpcUrl(): string {
-  return process.env.MONAD_MAINNET_RPC_URL || monadMainnet.rpcUrls.default.http[0];
+function getEvmRpcUrl(): string {
+  return (
+    process.env.EVM_MAINNET_RPC_URL ||
+    process.env.MONAD_MAINNET_RPC_URL ||
+    evmMainnet.rpcUrls.default.http[0]
+  );
 }
 
-async function sendMonadNative(to: Address, value: bigint): Promise<Hex> {
-  const relayPk = getRelayMonadPrivateKey();
+async function sendEvmNative(to: Address, value: bigint): Promise<Hex> {
+  const relayPk = getRelayEvmPrivateKey();
   if (!relayPk) {
-    throw new Error("Relay private key is missing; cannot send native MON");
+    throw new Error("Relay private key is missing; cannot send native EVM asset");
   }
   const account = privateKeyToAccount(relayPk);
   const wallet = createWalletClient({
     account,
-    chain: monadMainnet,
-    transport: http(getMonadRpcUrl()),
+    chain: evmMainnet,
+    transport: http(getEvmRpcUrl()),
   });
   return wallet.sendTransaction({
     account,
-    chain: monadMainnet,
+    chain: evmMainnet,
     to,
     value,
   });
@@ -160,10 +168,12 @@ function getHyperunitHeaders(): Record<string, string> {
 }
 
 function hasDebridgeConfig(): boolean {
+  const evmChainId = process.env.DEBRIDGE_EVM_CHAIN_ID || process.env.DEBRIDGE_MONAD_CHAIN_ID;
+  const evmTokenIn = process.env.DEBRIDGE_EVM_TOKEN_IN || process.env.DEBRIDGE_MONAD_TOKEN_IN;
   return Boolean(
-    process.env.DEBRIDGE_MONAD_CHAIN_ID &&
+    evmChainId &&
       process.env.DEBRIDGE_HYPERLIQUID_CHAIN_ID &&
-      process.env.DEBRIDGE_MONAD_TOKEN_IN &&
+      evmTokenIn &&
       process.env.DEBRIDGE_HYPERLIQUID_TOKEN_OUT
   );
 }
@@ -272,12 +282,12 @@ export async function resolveHyperunitWithdrawalProtocolAddress(
   try {
     return await getHyperunitDestinationAddress({
       sourceChain: HYPERUNIT_HYPERLIQUID_CHAIN,
-      destinationChain: HYPERUNIT_MONAD_CHAIN,
+      destinationChain: HYPERUNIT_EVM_CHAIN,
       asset: HYPERUNIT_WITHDRAW_ASSET,
       destinationAddress: monadAddress,
     });
   } catch (error) {
-    const known = await getKnownHyperunitProtocolAddress(monadAddress, HYPERUNIT_MONAD_CHAIN);
+    const known = await getKnownHyperunitProtocolAddress(monadAddress, HYPERUNIT_EVM_CHAIN);
     if (known) return known;
     throw error;
   }
@@ -288,7 +298,7 @@ export async function resolveHyperunitDepositProtocolAddress(
 ): Promise<Address> {
   try {
     return await getHyperunitDestinationAddress({
-      sourceChain: HYPERUNIT_MONAD_CHAIN,
+      sourceChain: HYPERUNIT_EVM_CHAIN,
       destinationChain: HYPERUNIT_HYPERLIQUID_CHAIN,
       asset: HYPERUNIT_DEPOSIT_ASSET,
       destinationAddress: hlAddress,
@@ -363,9 +373,9 @@ async function createDeBridgeOrderTx(params: {
   }
 
   const query = new URLSearchParams({
-    srcChainId: String(process.env.DEBRIDGE_MONAD_CHAIN_ID),
+    srcChainId: String(process.env.DEBRIDGE_EVM_CHAIN_ID || process.env.DEBRIDGE_MONAD_CHAIN_ID),
     dstChainId: String(process.env.DEBRIDGE_HYPERLIQUID_CHAIN_ID),
-    srcChainTokenIn: String(process.env.DEBRIDGE_MONAD_TOKEN_IN),
+    srcChainTokenIn: String(process.env.DEBRIDGE_EVM_TOKEN_IN || process.env.DEBRIDGE_MONAD_TOKEN_IN),
     dstChainTokenOut: String(process.env.DEBRIDGE_HYPERLIQUID_TOKEN_OUT),
     srcChainTokenInAmount: params.srcAmountRaw,
     srcChainOrderAuthorityAddress: params.senderAddress,
@@ -409,7 +419,7 @@ async function tryExecuteDebridge(params: {
     };
   }
 
-  const relayPk = getRelayMonadPrivateKey();
+  const relayPk = getRelayEvmPrivateKey();
   if (!relayPk) {
     return {
       provider: "debridge",
@@ -423,13 +433,13 @@ async function tryExecuteDebridge(params: {
   const account = privateKeyToAccount(relayPk);
   const wallet = createWalletClient({
     account,
-    chain: monadMainnet,
-    transport: http(getMonadRpcUrl()),
+    chain: evmMainnet,
+    transport: http(getEvmRpcUrl()),
   });
 
   const txHash = await wallet.sendTransaction({
     account,
-    chain: monadMainnet,
+    chain: evmMainnet,
     to: tx.to as Address,
     data: tx.data as Hex,
     value: BigInt(tx.value || "0"),
@@ -485,7 +495,7 @@ export async function bridgeDepositToHyperliquidAgent(params: {
     let protocolAddress: Address;
     try {
       protocolAddress = await getHyperunitDestinationAddress({
-        sourceChain: HYPERUNIT_MONAD_CHAIN,
+        sourceChain: HYPERUNIT_EVM_CHAIN,
         destinationChain: HYPERUNIT_HYPERLIQUID_CHAIN,
         asset: HYPERUNIT_DEPOSIT_ASSET,
         destinationAddress: hlAddress,
@@ -507,7 +517,7 @@ export async function bridgeDepositToHyperliquidAgent(params: {
       };
     }
 
-    const relayTxHash = await sendMonadNative(protocolAddress, sourceAmountRaw);
+    const relayTxHash = await sendEvmNative(protocolAddress, sourceAmountRaw);
     let operationId: string | undefined;
     let operationState: string | undefined;
     try {
@@ -541,7 +551,7 @@ export async function bridgeDepositToHyperliquidAgent(params: {
       };
     }
 
-    const relayPk = getRelayMonadPrivateKey();
+    const relayPk = getRelayEvmPrivateKey();
     if (!relayPk) {
       return {
         provider: "debridge",
@@ -589,7 +599,7 @@ export async function bridgeDepositToHyperliquidAgent(params: {
     if (hyperunit.status === "submitted") {
       if (hasDebridgeConfig()) {
         try {
-          const relayPk = getRelayMonadPrivateKey();
+          const relayPk = getRelayEvmPrivateKey();
           if (relayPk) {
             const senderAddress = privateKeyToAccount(relayPk).address;
             const quote = await createDeBridgeOrderTx({
@@ -676,7 +686,7 @@ export async function bridgeWithdrawalToMonadUser(params: {
   try {
     const protocolAddress = await getHyperunitDestinationAddress({
       sourceChain: HYPERUNIT_HYPERLIQUID_CHAIN,
-      destinationChain: HYPERUNIT_MONAD_CHAIN,
+      destinationChain: HYPERUNIT_EVM_CHAIN,
       asset: HYPERUNIT_WITHDRAW_ASSET,
       destinationAddress: userAddress,
     });

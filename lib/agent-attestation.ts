@@ -8,8 +8,8 @@ import {
   type Hex,
 } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
-import { monadMainnet, monadTestnet } from "@/lib/chains";
-import { buildMonadVisionTxUrl } from "@/lib/monad-vision";
+import { evmMainnet, evmTestnet } from "@/lib/chains";
+import { buildEvmExplorerTxUrl } from "@/lib/monad-vision";
 import { getAgent, updateAgent } from "@/lib/store";
 import { getNetworkState } from "@/lib/network";
 import type { Agent, AgentOnchainAttestation } from "@/lib/types";
@@ -48,17 +48,25 @@ function parseBool(raw: string | undefined, fallback: boolean): boolean {
 }
 
 function isAttestationEnabled(): boolean {
-  return parseBool(process.env.MONAD_AGENT_ATTESTATION_ENABLED, true);
+  return parseBool(
+    process.env.EVM_AGENT_ATTESTATION_ENABLED ?? process.env.MONAD_AGENT_ATTESTATION_ENABLED,
+    true
+  );
 }
 
 function isAttestationRequired(): boolean {
   const defaultRequired = process.env.NODE_ENV === "production";
-  return parseBool(process.env.MONAD_AGENT_ATTESTATION_REQUIRED, defaultRequired);
+  return parseBool(
+    process.env.EVM_AGENT_ATTESTATION_REQUIRED ?? process.env.MONAD_AGENT_ATTESTATION_REQUIRED,
+    defaultRequired
+  );
 }
 
 function getAttestorPrivateKey(): Hex | null {
   const raw =
     process.env.AIP_ATTESTATION_PRIVATE_KEY ||
+    process.env.RELAY_EVM_PRIVATE_KEY ||
+    process.env.EVM_PRIVATE_KEY ||
     process.env.RELAY_MONAD_PRIVATE_KEY ||
     process.env.MONAD_PRIVATE_KEY ||
     "";
@@ -77,21 +85,25 @@ function getMetadataUri(): string | undefined {
 function getAgentNetwork(agent: Agent): DeploymentNetwork {
   const tagged = agent.autonomy?.deploymentNetwork;
   if (tagged === "mainnet" || tagged === "testnet") return tagged;
-  return getNetworkState().monadTestnet ? "testnet" : "mainnet";
+  return getNetworkState().evmTestnet ? "testnet" : "mainnet";
 }
 
 function resolveRpcUrl(network: DeploymentNetwork): string {
   if (network === "mainnet") {
     return (
+      process.env.EVM_MAINNET_RPC_URL ||
+      process.env.NEXT_PUBLIC_EVM_MAINNET_RPC_URL ||
       process.env.MONAD_MAINNET_RPC_URL ||
       process.env.NEXT_PUBLIC_MONAD_MAINNET_RPC_URL ||
-      monadMainnet.rpcUrls.default.http[0]
+      evmMainnet.rpcUrls.default.http[0]
     );
   }
   return (
+    process.env.EVM_TESTNET_RPC_URL ||
+    process.env.NEXT_PUBLIC_EVM_TESTNET_RPC_URL ||
     process.env.MONAD_TESTNET_RPC_URL ||
     process.env.NEXT_PUBLIC_MONAD_TESTNET_RPC_URL ||
-    monadTestnet.rpcUrls.default.http[0]
+    evmTestnet.rpcUrls.default.http[0]
   );
 }
 
@@ -153,8 +165,8 @@ function buildAttestationData(agent: Agent, metadataHash: Hex): Hex {
   return stringToHex(JSON.stringify(envelope));
 }
 
-function buildExplorerUrl(_network: DeploymentNetwork, txHash: Hex): string {
-  return buildMonadVisionTxUrl(txHash);
+function buildExplorerUrl(network: DeploymentNetwork, txHash: Hex): string {
+  return buildEvmExplorerTxUrl(txHash, network);
 }
 
 function hasFreshAttestation(
@@ -188,14 +200,14 @@ export async function ensureAgentOnchainAttestation(
   if (!privateKey) {
     if (required) {
       throw new Error(
-        "Monad attestation is required but AIP_ATTESTATION_PRIVATE_KEY/RELAY_MONAD_PRIVATE_KEY/MONAD_PRIVATE_KEY is not configured."
+        "EVM attestation is required but AIP_ATTESTATION_PRIVATE_KEY/RELAY_EVM_PRIVATE_KEY/EVM_PRIVATE_KEY is not configured."
       );
     }
     return { agent, attestation: agent.aipAttestation ?? null, skipped: true, reason: "missing_private_key" };
   }
 
   const network = getAgentNetwork(agent);
-  const chain = network === "mainnet" ? monadMainnet : monadTestnet;
+  const chain = network === "mainnet" ? evmMainnet : evmTestnet;
   const metadataHash = computeMetadataHash(agent);
 
   if (!options?.force && hasFreshAttestation(agent, metadataHash, chain.id)) {
@@ -238,14 +250,14 @@ export async function ensureAgentOnchainAttestation(
   });
 
   if (receipt.status !== "success") {
-    throw new Error(`Monad attestation tx reverted for agent ${agent.id}: ${txHash}`);
+    throw new Error(`EVM attestation tx reverted for agent ${agent.id}: ${txHash}`);
   }
 
   const metadataUri = getMetadataUri() ? `${getMetadataUri()}/${agent.id}` : undefined;
   const attestation: AgentOnchainAttestation = {
     version: ATTESTATION_VERSION,
     status: "confirmed",
-    method: "monad_tx_calldata",
+    method: "evm_tx_calldata",
     txHash,
     blockNumber: Number(receipt.blockNumber),
     chainId: chain.id,
@@ -263,7 +275,7 @@ export async function ensureAgentOnchainAttestation(
   }
 
   console.log(
-    `[Attestation] Agent ${agent.id} attested on Monad ${network} (${chain.id}) tx=${txHash} reason=${options?.reason || "unknown"}`
+    `[Attestation] Agent ${agent.id} attested on EVM ${network} (${chain.id}) tx=${txHash} reason=${options?.reason || "unknown"}`
   );
 
   return {

@@ -6,7 +6,7 @@ import { WagmiProvider, createConfig } from "@privy-io/wagmi";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { http } from "wagmi";
 import { NetworkProvider } from "./NetworkContext";
-import { monadMainnet, monadTestnet } from "@/lib/chains";
+import { evmMainnet, evmTestnet } from "@/lib/chains";
 
 const queryClient = new QueryClient();
 
@@ -18,10 +18,10 @@ export default function ProvidersRuntime({
   const wagmiConfig = useMemo(
     () =>
       createConfig({
-        chains: [monadMainnet, monadTestnet],
+        chains: [evmMainnet, evmTestnet],
         transports: {
-          [monadMainnet.id]: http(monadMainnet.rpcUrls.default.http[0]),
-          [monadTestnet.id]: http(monadTestnet.rpcUrls.default.http[0]),
+          [evmMainnet.id]: http(evmMainnet.rpcUrls.default.http[0]),
+          [evmTestnet.id]: http(evmTestnet.rpcUrls.default.http[0]),
         },
       }),
     []
@@ -45,14 +45,14 @@ export default function ProvidersRuntime({
           coinbaseWallet: {
             config: {
               preference: {
-                // Monad chains are not supported by Coinbase Smart Wallet.
+                // Some custom EVM chains are not supported by Coinbase Smart Wallet.
                 options: "eoaOnly",
               },
             },
           },
         },
-        defaultChain: monadMainnet,
-        supportedChains: [monadMainnet, monadTestnet],
+        defaultChain: evmMainnet,
+        supportedChains: [evmMainnet, evmTestnet],
       }}
     >
       <QueryClientProvider client={queryClient}>

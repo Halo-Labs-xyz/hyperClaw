@@ -7,12 +7,12 @@ import {
   WalletWithMetadata,
 } from "@privy-io/react-auth";
 import { createPublicClient, http, formatEther } from "viem";
-import { monadMainnet } from "@/lib/chains";
+import { evmMainnet, evmNativeSymbol } from "@/lib/chains";
 import { QRCodeSVG } from "qrcode.react";
 
 const publicClient = createPublicClient({
-  chain: monadMainnet,
-  transport: http("https://rpc.monad.xyz"),
+  chain: evmMainnet,
+  transport: http(evmMainnet.rpcUrls.default.http[0]),
 });
 
 export default function UseLoginPrivy() {
@@ -89,7 +89,7 @@ export default function UseLoginPrivy() {
             <span className="w-8 h-8 bg-accent/20 rounded-full flex items-center justify-center text-sm">
               W
             </span>
-            Monad Wallet
+            EVM Wallet
           </h3>
 
           <div className="space-y-4">
@@ -119,7 +119,7 @@ export default function UseLoginPrivy() {
                 />
               </div>
               <p className="mt-2 text-xs text-muted">
-                Scan to send MON to this wallet
+                Scan to send {evmNativeSymbol} to this wallet
               </p>
             </div>
 
@@ -141,7 +141,7 @@ export default function UseLoginPrivy() {
                   ) : balanceError ? (
                     <span className="text-danger">Error</span>
                   ) : (
-                    `${parseFloat(balance || "0").toFixed(4)} MON`
+                    `${parseFloat(balance || "0").toFixed(4)} ${evmNativeSymbol}`
                   )}
                 </span>
               </div>

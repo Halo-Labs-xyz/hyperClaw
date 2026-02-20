@@ -1,3 +1,4 @@
+import { createHash, randomUUID } from "crypto";
 import { NextResponse } from "next/server";
 import {
   depositToVault,
@@ -18,6 +19,12 @@ import { privateKeyToAccount } from "viem/accounts";
 import { activateAgent, getLifecycleState } from "@/lib/agent-lifecycle";
 import { getAgent, updateAgent } from "@/lib/store";
 import { getVaultAddressIfDeployed } from "@/lib/env";
+import {
+  recordMirroredExecutionAttribution,
+  summarizeMirroredExecutionAttributions,
+  type MirroredExecutionAttribution,
+} from "@/lib/agentic-vault";
+import type { CopytradeProviderAttribution } from "@/lib/vault";
 
 function parseUsdAmount(value: unknown): number | undefined {
   if (typeof value === "number") {
@@ -32,6 +39,93 @@ function parseUsdAmount(value: unknown): number | undefined {
     return parseFloat(parsed.toFixed(6));
   }
   return undefined;
+}
+
+type BridgeRun = {
+  intent?: unknown;
+  execution?: unknown;
+  verification?: unknown;
+  settlement?: unknown;
+  updated_at: string;
+};
+
+type BridgeState = {
+  runs: Map<string, BridgeRun>;
+  receipt_to_intent: Map<string, string>;
+  verification_to_intent: Map<string, string>;
+  settlement_to_intent: Map<string, string>;
+};
+
+function getBridgeState(): BridgeState {
+  const globals = globalThis as typeof globalThis & {
+    __liquidclaw_bridge_state__?: BridgeState;
+  };
+
+  if (!globals.__liquidclaw_bridge_state__) {
+    globals.__liquidclaw_bridge_state__ = {
+      runs: new Map<string, BridgeRun>(),
+      receipt_to_intent: new Map<string, string>(),
+      verification_to_intent: new Map<string, string>(),
+      settlement_to_intent: new Map<string, string>(),
+    };
+  }
+
+  return globals.__liquidclaw_bridge_state__;
+}
+
+function hashPayload(value: unknown): string {
+  return createHash("sha256").update(JSON.stringify(value)).digest("hex");
+}
+
+function isHash64(value: string): boolean {
+  return /^[0-9a-f]{64}$/.test(value);
+}
+
+function parseProviderAttributions(value: unknown): CopytradeProviderAttribution[] {
+  if (!Array.isArray(value)) return [];
+  return value
+    .map((item) => (item && typeof item === "object" ? item : null))
+    .filter((item): item is Record<string, unknown> => !!item)
+    .map((item) => ({
+      provider: {
+        providerId:
+          typeof item.provider_id === "string" ? item.provider_id.trim() : "",
+        payoutAddress:
+          typeof item.payout_address === "string" ? item.payout_address.trim() : "",
+        displayName:
+          typeof item.display_name === "string"
+            ? item.display_name.trim()
+            : undefined,
+      },
+      signalId: typeof item.signal_id === "string" ? item.signal_id.trim() : "",
+      signalHash:
+        typeof item.signal_hash === "string" ? item.signal_hash.trim() : "",
+      attributionWeightBps:
+        typeof item.attribution_weight_bps === "number"
+          ? Math.max(0, Math.floor(item.attribution_weight_bps))
+          : 0,
+      feeSchedule: {
+        fixedFeeBps:
+          typeof item.fixed_fee_bps === "number"
+            ? Math.max(0, Math.floor(item.fixed_fee_bps))
+            : 0,
+        performanceFeeBps:
+          typeof item.performance_fee_bps === "number"
+            ? Math.max(0, Math.floor(item.performance_fee_bps))
+            : 0,
+        maxFeeUsd:
+          typeof item.max_fee_usd === "number"
+            ? Math.max(0, item.max_fee_usd)
+            : 0,
+      },
+    }))
+    .filter(
+      (item) =>
+        item.provider.providerId.length > 0 &&
+        item.signalId.length > 0 &&
+        isHash64(item.signalHash) &&
+        item.attributionWeightBps > 0
+    );
 }
 
 /**
@@ -443,6 +537,111 @@ export async function POST(request: Request) {
           configured: !!process.env.HYPERLIQUID_PRIVATE_KEY &&
             process.env.HYPERLIQUID_PRIVATE_KEY !== "your_agent_private_key_hex",
           vaultAddress: getVaultAddressIfDeployed(isTestnet() ? "testnet" : "mainnet"),
+        });
+      }
+
+      // ========== WS-10 settlement receipt persistence ==========
+      case "copytrade-settlement": {
+        const intentId =
+          typeof body.intent_id === "string" ? body.intent_id.trim() : "";
+        const receiptId =
+          typeof body.receipt_id === "string" ? body.receipt_id.trim() : "";
+        const settlementId =
+          typeof body.settlement_id === "string" && body.settlement_id.trim()
+            ? body.settlement_id.trim()
+            : `stl_${randomUUID()}`;
+        const sourceSignalHash =
+          typeof body.source_signal_hash === "string"
+            ? body.source_signal_hash.trim()
+            : "";
+        const mirroredPnlUsd = parseUsdAmount(body.mirrored_pnl_usd) ?? 0;
+        const revenueShareFeeUsd = parseUsdAmount(body.revenue_share_fee_usd) ?? 0;
+        const providerAttributions = parseProviderAttributions(
+          body.provider_attributions
+        );
+
+        if (!intentId || !receiptId || !isHash64(sourceSignalHash)) {
+          return NextResponse.json(
+            {
+              error:
+                "intent_id, receipt_id, and source_signal_hash (64-char lowercase hex) are required",
+            },
+            { status: 400 }
+          );
+        }
+
+        const settledAt = new Date().toISOString();
+        const settlementHash =
+          typeof body.settlement_hash === "string" && isHash64(body.settlement_hash)
+            ? body.settlement_hash
+            : hashPayload({
+                settlement_id: settlementId,
+                intent_id: intentId,
+                receipt_id: receiptId,
+                source_signal_hash: sourceSignalHash,
+                mirrored_pnl_usd: mirroredPnlUsd,
+                revenue_share_fee_usd: revenueShareFeeUsd,
+                provider_attributions: providerAttributions,
+                settled_at: settledAt,
+              });
+
+        const attributionRecord: MirroredExecutionAttribution = {
+          executionReceiptId: receiptId,
+          settlementReceiptId: settlementId,
+          sourceSignalHash,
+          providerAttributions,
+          mirroredPnlUsd,
+          revenueShareFeeUsd,
+          createdAt: Date.now(),
+        };
+        await recordMirroredExecutionAttribution(attributionRecord);
+
+        const bridge = getBridgeState();
+        const existing = bridge.runs.get(intentId);
+        bridge.runs.set(intentId, {
+          intent: existing?.intent,
+          execution: existing?.execution,
+          verification: existing?.verification,
+          settlement: {
+            settlement_id: settlementId,
+            intent_id: intentId,
+            receipt_id: receiptId,
+            source_signal_hash: sourceSignalHash,
+            settlement_hash: settlementHash,
+            mirrored_pnl_usd: mirroredPnlUsd,
+            revenue_share_fee_usd: revenueShareFeeUsd,
+            provider_attributions: providerAttributions,
+            settled_at: settledAt,
+          },
+          updated_at: settledAt,
+        });
+        bridge.settlement_to_intent.set(settlementId, intentId);
+
+        return NextResponse.json({
+          accepted: true,
+          settlement: {
+            settlement_id: settlementId,
+            intent_id: intentId,
+            receipt_id: receiptId,
+            source_signal_hash: sourceSignalHash,
+            settlement_hash: settlementHash,
+            mirrored_pnl_usd: mirroredPnlUsd,
+            revenue_share_fee_usd: revenueShareFeeUsd,
+            provider_attributions: providerAttributions,
+            settled_at: settledAt,
+          },
+        });
+      }
+
+      // ========== WS-10 mirrored PnL/fee attribution summary ==========
+      case "copytrade-status": {
+        const summary = await summarizeMirroredExecutionAttributions();
+        return NextResponse.json({
+          network: isTestnet() ? "testnet" : "mainnet",
+          mirroredExecutions: summary.count,
+          mirroredPnlUsd: summary.mirroredPnlUsd,
+          revenueShareFeeUsd: summary.revenueShareFeeUsd,
+          providerFeeById: summary.providerFeeById,
         });
       }
 

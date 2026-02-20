@@ -3,7 +3,8 @@
  */
 import { getAddress } from "viem";
 
-export type MonadNetwork = "mainnet" | "testnet";
+export type EvmNetwork = "mainnet" | "testnet";
+export type MonadNetwork = EvmNetwork;
 
 const PLACEHOLDER_VALUES = [
   "your_deployed_vault_contract_address",
@@ -59,7 +60,7 @@ function getAddressFromCandidates(candidates: string[]): `0x${string}` | null {
 }
 
 function getNetworkScopedAddress(
-  network: MonadNetwork | undefined,
+  network: EvmNetwork | undefined,
   options: { fallback: string; mainnet: string[]; testnet: string[] }
 ): `0x${string}` | null {
   if (network === "mainnet") {
@@ -71,12 +72,16 @@ function getNetworkScopedAddress(
   return getAddressFromCandidates([options.fallback]);
 }
 
-export function getVaultAddressIfDeployed(network?: MonadNetwork): `0x${string}` | null {
-  const defaultMainnet = process.env.NEXT_PUBLIC_MONAD_TESTNET === "false";
+export function getVaultAddressIfDeployed(network?: EvmNetwork): `0x${string}` | null {
+  const defaultMainnet = process.env.NEXT_PUBLIC_EVM_TESTNET !== undefined
+    ? process.env.NEXT_PUBLIC_EVM_TESTNET === "false"
+    : process.env.NEXT_PUBLIC_MONAD_TESTNET === "false";
   // Only use the hotfix override when no explicit mainnet vault address is configured.
   // This prevents a stale Railway variable from silently overriding the intended vault.
   if (network === "mainnet" || (network === undefined && defaultMainnet)) {
     const explicitMainnet = getAddressFromCandidates([
+      "EVM_MAINNET_VAULT_ADDRESS",
+      "NEXT_PUBLIC_EVM_MAINNET_VAULT_ADDRESS",
       "MONAD_MAINNET_VAULT_ADDRESS",
       "NEXT_PUBLIC_MONAD_MAINNET_VAULT_ADDRESS",
       "NEXT_PUBLIC_VAULT_ADDRESS_MAINNET",
@@ -90,11 +95,15 @@ export function getVaultAddressIfDeployed(network?: MonadNetwork): `0x${string}`
   return getNetworkScopedAddress(network, {
     fallback: "NEXT_PUBLIC_VAULT_ADDRESS",
     mainnet: [
+      "EVM_MAINNET_VAULT_ADDRESS",
+      "NEXT_PUBLIC_EVM_MAINNET_VAULT_ADDRESS",
       "MONAD_MAINNET_VAULT_ADDRESS",
       "NEXT_PUBLIC_MONAD_MAINNET_VAULT_ADDRESS",
       "NEXT_PUBLIC_VAULT_ADDRESS_MAINNET",
     ],
     testnet: [
+      "EVM_TESTNET_VAULT_ADDRESS",
+      "NEXT_PUBLIC_EVM_TESTNET_VAULT_ADDRESS",
       "MONAD_TESTNET_VAULT_ADDRESS",
       "NEXT_PUBLIC_MONAD_TESTNET_VAULT_ADDRESS",
       "NEXT_PUBLIC_VAULT_ADDRESS_TESTNET",
@@ -102,80 +111,100 @@ export function getVaultAddressIfDeployed(network?: MonadNetwork): `0x${string}`
   });
 }
 
-export function getHclawAddressIfSet(network?: MonadNetwork): `0x${string}` | null {
+export function getHclawAddressIfSet(network?: EvmNetwork): `0x${string}` | null {
   return getNetworkScopedAddress(network, {
     fallback: "NEXT_PUBLIC_HCLAW_TOKEN_ADDRESS",
     mainnet: [
       "NEXT_PUBLIC_HCLAW_TOKEN_ADDRESS_MAINNET",
+      "NEXT_PUBLIC_EVM_MAINNET_HCLAW_TOKEN_ADDRESS",
+      "EVM_MAINNET_HCLAW_TOKEN_ADDRESS",
       "NEXT_PUBLIC_MONAD_MAINNET_HCLAW_TOKEN_ADDRESS",
       "MONAD_MAINNET_HCLAW_TOKEN_ADDRESS",
     ],
     testnet: [
       "NEXT_PUBLIC_HCLAW_TOKEN_ADDRESS_TESTNET",
+      "NEXT_PUBLIC_EVM_TESTNET_HCLAW_TOKEN_ADDRESS",
+      "EVM_TESTNET_HCLAW_TOKEN_ADDRESS",
       "NEXT_PUBLIC_MONAD_TESTNET_HCLAW_TOKEN_ADDRESS",
       "MONAD_TESTNET_HCLAW_TOKEN_ADDRESS",
     ],
   });
 }
 
-export function getHclawLockAddressIfSet(network?: MonadNetwork): `0x${string}` | null {
+export function getHclawLockAddressIfSet(network?: EvmNetwork): `0x${string}` | null {
   return getNetworkScopedAddress(network, {
     fallback: "NEXT_PUBLIC_HCLAW_LOCK_ADDRESS",
     mainnet: [
       "NEXT_PUBLIC_HCLAW_LOCK_ADDRESS_MAINNET",
+      "NEXT_PUBLIC_EVM_MAINNET_HCLAW_LOCK_ADDRESS",
+      "EVM_MAINNET_HCLAW_LOCK_ADDRESS",
       "NEXT_PUBLIC_MONAD_MAINNET_HCLAW_LOCK_ADDRESS",
       "MONAD_MAINNET_HCLAW_LOCK_ADDRESS",
     ],
     testnet: [
       "NEXT_PUBLIC_HCLAW_LOCK_ADDRESS_TESTNET",
+      "NEXT_PUBLIC_EVM_TESTNET_HCLAW_LOCK_ADDRESS",
+      "EVM_TESTNET_HCLAW_LOCK_ADDRESS",
       "NEXT_PUBLIC_MONAD_TESTNET_HCLAW_LOCK_ADDRESS",
       "MONAD_TESTNET_HCLAW_LOCK_ADDRESS",
     ],
   });
 }
 
-export function getHclawPolicyAddressIfSet(network?: MonadNetwork): `0x${string}` | null {
+export function getHclawPolicyAddressIfSet(network?: EvmNetwork): `0x${string}` | null {
   return getNetworkScopedAddress(network, {
     fallback: "NEXT_PUBLIC_HCLAW_POLICY_ADDRESS",
     mainnet: [
       "NEXT_PUBLIC_HCLAW_POLICY_ADDRESS_MAINNET",
+      "NEXT_PUBLIC_EVM_MAINNET_HCLAW_POLICY_ADDRESS",
+      "EVM_MAINNET_HCLAW_POLICY_ADDRESS",
       "NEXT_PUBLIC_MONAD_MAINNET_HCLAW_POLICY_ADDRESS",
       "MONAD_MAINNET_HCLAW_POLICY_ADDRESS",
     ],
     testnet: [
       "NEXT_PUBLIC_HCLAW_POLICY_ADDRESS_TESTNET",
+      "NEXT_PUBLIC_EVM_TESTNET_HCLAW_POLICY_ADDRESS",
+      "EVM_TESTNET_HCLAW_POLICY_ADDRESS",
       "NEXT_PUBLIC_MONAD_TESTNET_HCLAW_POLICY_ADDRESS",
       "MONAD_TESTNET_HCLAW_POLICY_ADDRESS",
     ],
   });
 }
 
-export function getHclawRewardsAddressIfSet(network?: MonadNetwork): `0x${string}` | null {
+export function getHclawRewardsAddressIfSet(network?: EvmNetwork): `0x${string}` | null {
   return getNetworkScopedAddress(network, {
     fallback: "NEXT_PUBLIC_HCLAW_REWARDS_ADDRESS",
     mainnet: [
       "NEXT_PUBLIC_HCLAW_REWARDS_ADDRESS_MAINNET",
+      "NEXT_PUBLIC_EVM_MAINNET_HCLAW_REWARDS_ADDRESS",
+      "EVM_MAINNET_HCLAW_REWARDS_ADDRESS",
       "NEXT_PUBLIC_MONAD_MAINNET_HCLAW_REWARDS_ADDRESS",
       "MONAD_MAINNET_HCLAW_REWARDS_ADDRESS",
     ],
     testnet: [
       "NEXT_PUBLIC_HCLAW_REWARDS_ADDRESS_TESTNET",
+      "NEXT_PUBLIC_EVM_TESTNET_HCLAW_REWARDS_ADDRESS",
+      "EVM_TESTNET_HCLAW_REWARDS_ADDRESS",
       "NEXT_PUBLIC_MONAD_TESTNET_HCLAW_REWARDS_ADDRESS",
       "MONAD_TESTNET_HCLAW_REWARDS_ADDRESS",
     ],
   });
 }
 
-export function getAgenticLpVaultAddressIfSet(network?: MonadNetwork): `0x${string}` | null {
+export function getAgenticLpVaultAddressIfSet(network?: EvmNetwork): `0x${string}` | null {
   return getNetworkScopedAddress(network, {
     fallback: "NEXT_PUBLIC_AGENTIC_LP_VAULT_ADDRESS",
     mainnet: [
       "NEXT_PUBLIC_AGENTIC_LP_VAULT_ADDRESS_MAINNET",
+      "NEXT_PUBLIC_EVM_MAINNET_AGENTIC_LP_VAULT_ADDRESS",
+      "EVM_MAINNET_AGENTIC_LP_VAULT_ADDRESS",
       "NEXT_PUBLIC_MONAD_MAINNET_AGENTIC_LP_VAULT_ADDRESS",
       "MONAD_MAINNET_AGENTIC_LP_VAULT_ADDRESS",
     ],
     testnet: [
       "NEXT_PUBLIC_AGENTIC_LP_VAULT_ADDRESS_TESTNET",
+      "NEXT_PUBLIC_EVM_TESTNET_AGENTIC_LP_VAULT_ADDRESS",
+      "EVM_TESTNET_AGENTIC_LP_VAULT_ADDRESS",
       "NEXT_PUBLIC_MONAD_TESTNET_AGENTIC_LP_VAULT_ADDRESS",
       "MONAD_TESTNET_AGENTIC_LP_VAULT_ADDRESS",
     ],
