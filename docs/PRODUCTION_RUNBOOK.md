@@ -25,6 +25,24 @@ Command meanings:
 - `npm run build`: production bundle and route compilation
 - `npm run check`: one-shot production gate
 
+## WS-8.3 Gate Command Matrix
+
+Run in this exact order for release-readiness evidence:
+
+```bash
+npm run clean:cache
+npm install
+npm run lint
+npm run check
+npm run preflight:mainnet
+```
+
+Execution notes:
+
+- `npm run check` already includes `lint`, `typecheck`, and `build`.
+- `npm run build` is configured with `NEXT_DISABLE_SWC_NATIVE=1` to avoid runtime SWC binary download variance during deterministic gate runs.
+- Treat any failing command in this matrix as a release blocker until remediated or explicitly waived by operator policy.
+
 ## Pre-Deploy Checklist
 
 1. Confirm env parity against `.env.example`.
