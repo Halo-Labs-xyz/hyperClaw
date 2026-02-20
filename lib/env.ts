@@ -239,3 +239,40 @@ export function getHclawEpochDurationDays(): number {
   if (!Number.isFinite(parsed) || parsed <= 0 || parsed > 30) return 7;
   return parsed;
 }
+
+function normalizeAbsoluteHttpUrl(value: string | undefined | null): string | null {
+  const trimmed = value?.trim();
+  if (!trimmed) return null;
+  try {
+    const parsed = new URL(trimmed);
+    if (parsed.protocol !== "http:" && parsed.protocol !== "https:") return null;
+    return parsed.toString().replace(/\/$/, "");
+  } catch {
+    return null;
+  }
+}
+
+function parseCsvList(raw: string | undefined | null): string[] {
+  if (!raw) return [];
+  const values = raw
+    .split(",")
+    .map((value) => value.trim().toLowerCase())
+    .filter((value) => value.length > 0);
+  return Array.from(new Set(values));
+}
+
+export function getLiquidClawFrontdoorGatewayBaseUrl(): string | null {
+  return (
+    normalizeAbsoluteHttpUrl(process.env.LIQUIDCLAW_FRONTDOOR_GATEWAY_BASE_URL) ??
+    normalizeAbsoluteHttpUrl(process.env.FRONTDOOR_GATEWAY_BASE_URL) ??
+    normalizeAbsoluteHttpUrl(process.env.GATEWAY_FRONTDOOR_BASE_URL)
+  );
+}
+
+export function getLiquidClawFrontdoorRedirectAllowlist(): string[] {
+  const raw =
+    process.env.LIQUIDCLAW_FRONTDOOR_REDIRECT_ALLOWLIST ??
+    process.env.FRONTDOOR_REDIRECT_ALLOWLIST ??
+    "";
+  return parseCsvList(raw);
+}

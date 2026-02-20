@@ -14,6 +14,7 @@ This is the canonical documentation map for the repository.
 - `docs/HCLAW_MONAD_NADFUN_INTEGRATION_PRD.md`
 - `docs/HCLAW_IMPLEMENTATION_CHECKLIST.md`
 - `docs/LIT_PROTOCOL_INTEGRATION.md`
+- `docs/LIQUIDCLAW_FRONTDOOR_ONBOARDING.md`
 - `docs/PKP_BUILDER_CODE_INTEGRATION.md`
 - `docs/PKP_TRADING_INTEGRATION.md`
 - `docs/IRONCLAW_INTEGRATION.md`
