@@ -40,6 +40,8 @@ type BridgeState = {
   verification_to_intent: Map<string, string>;
 };
 
+type VerificationStage = "pending" | "completed" | "failed";
+
 function getBridgeState(): BridgeState {
   const globals = globalThis as typeof globalThis & {
     __liquidclaw_bridge_state__?: BridgeState;
@@ -59,6 +61,20 @@ function getBridgeState(): BridgeState {
 function asObject(value: unknown): JsonMap | null {
   if (!value || typeof value !== "object" || Array.isArray(value)) return null;
   return value as JsonMap;
+}
+
+function getStringField(value: unknown, key: string): string | null {
+  const obj = asObject(value);
+  const field = obj?.[key];
+  return typeof field === "string" && field.trim().length > 0 ? field : null;
+}
+
+function getVerificationStage(value: unknown): VerificationStage {
+  const status = getStringField(value, "status");
+  if (status === "verified") return "completed";
+  if (status === "failed") return "failed";
+  if (status === "pending") return "pending";
+  return value ? "completed" : "pending";
 }
 
 function canonicalize(value: unknown): unknown {
@@ -108,6 +124,8 @@ export async function POST(request: Request) {
   }
 
   const intentId = typeof body.intent_id === "string" ? body.intent_id.trim() : "";
+  const providedIntentHash =
+    typeof body.intent_hash === "string" ? body.intent_hash.trim() : "";
   const modeRaw = typeof body.mode === "string" ? body.mode.trim().toLowerCase() : "paper";
   const symbolRaw = typeof body.symbol === "string" ? body.symbol.trim() : "";
   const sideRaw = typeof body.side === "string" ? body.side.trim().toLowerCase() : "";
@@ -146,6 +164,12 @@ export async function POST(request: Request) {
     );
   }
   const intentHash = hashPayload(previous.intent);
+  if (providedIntentHash && providedIntentHash !== intentHash) {
+    return NextResponse.json(
+      { error: `intent_hash mismatch for intent_id '${intentId}'` },
+      { status: 409 }
+    );
+  }
 
   const quantity = notional / priceRef;
   const qtyA = quantity * 0.6;
@@ -198,10 +222,22 @@ export async function POST(request: Request) {
     created_at: createdAt,
   };
 
+  const previousReceiptId = previous.execution?.receipt_id;
+  if (previousReceiptId && previousReceiptId !== receiptId) {
+    state.receipt_to_intent.delete(previousReceiptId);
+  }
+
+  const receiptReplaced = Boolean(previousReceiptId && previousReceiptId !== receiptId);
+  const previousVerificationId = getStringField(previous.verification, "verification_id");
+  if (receiptReplaced && previousVerificationId) {
+    state.verification_to_intent.delete(previousVerificationId);
+  }
+  const nextVerification = receiptReplaced ? undefined : previous.verification;
+
   state.runs.set(intentId, {
-    intent: previous?.intent,
+    intent: previous.intent,
     execution: receipt,
-    verification: previous?.verification,
+    verification: nextVerification,
     updated_at: createdAt,
   });
   state.receipt_to_intent.set(receipt.receipt_id, intentId);
@@ -209,11 +245,12 @@ export async function POST(request: Request) {
   return NextResponse.json(
     {
       accepted: true,
+      run_id: intentId,
       execution: receipt,
       stage: {
         intent: "completed",
         execution: "completed",
-        verification: previous?.verification ? "completed" : "pending",
+        verification: getVerificationStage(nextVerification),
       },
     },
     { status: 202 }
