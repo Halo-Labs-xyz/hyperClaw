@@ -11,6 +11,8 @@ type BridgeRun = {
   updated_at: string;
 };
 
+type VerificationStage = "pending" | "completed" | "failed";
+
 type BridgeState = {
   runs: Map<string, BridgeRun>;
   receipt_to_intent: Map<string, string>;
@@ -52,6 +54,18 @@ function resolveIntentId(id: string, state: BridgeState): LookupResolution | nul
   return null;
 }
 
+function getVerificationStage(value: unknown): VerificationStage {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return "pending";
+  }
+
+  const status = (value as { status?: unknown }).status;
+  if (status === "verified") return "completed";
+  if (status === "failed") return "failed";
+  if (status === "pending") return "pending";
+  return "completed";
+}
+
 export async function GET(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
@@ -84,7 +98,7 @@ export async function GET(
   const stage = {
     intent: run.intent ? "completed" : "pending",
     execution: run.execution ? "completed" : "pending",
-    verification: run.verification ? "completed" : "pending",
+    verification: getVerificationStage(run.verification),
   };
 
   const lifecycle =

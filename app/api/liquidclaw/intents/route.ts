@@ -30,6 +30,8 @@ type BridgeState = {
   verification_to_intent: Map<string, string>;
 };
 
+type VerificationStage = "pending" | "completed" | "failed";
+
 function getBridgeState(): BridgeState {
   const globals = globalThis as typeof globalThis & {
     __liquidclaw_bridge_state__?: BridgeState;
@@ -49,6 +51,20 @@ function getBridgeState(): BridgeState {
 function asObject(value: unknown): JsonMap | null {
   if (!value || typeof value !== "object" || Array.isArray(value)) return null;
   return value as JsonMap;
+}
+
+function getStringField(value: unknown, key: string): string | null {
+  const obj = asObject(value);
+  const field = obj?.[key];
+  return typeof field === "string" && field.trim().length > 0 ? field : null;
+}
+
+function getVerificationStage(value: unknown): VerificationStage {
+  const status = getStringField(value, "status");
+  if (status === "verified") return "completed";
+  if (status === "failed") return "failed";
+  if (status === "pending") return "pending";
+  return value ? "completed" : "pending";
 }
 
 function canonicalize(value: unknown): unknown {
@@ -120,10 +136,27 @@ export async function POST(request: Request) {
 
   const state = getBridgeState();
   const previous = state.runs.get(intentId);
+  const previousIntentHash = previous?.intent ? hashPayload(previous.intent) : null;
+  const intentChanged = Boolean(previousIntentHash && previousIntentHash !== intentHash);
+  const nextExecution = intentChanged ? undefined : previous?.execution;
+  const nextVerification = intentChanged ? undefined : previous?.verification;
+
+  if (intentChanged) {
+    const previousReceiptId = getStringField(previous?.execution, "receipt_id");
+    if (previousReceiptId) {
+      state.receipt_to_intent.delete(previousReceiptId);
+    }
+
+    const previousVerificationId = getStringField(previous?.verification, "verification_id");
+    if (previousVerificationId) {
+      state.verification_to_intent.delete(previousVerificationId);
+    }
+  }
+
   state.runs.set(intentId, {
     intent,
-    execution: previous?.execution,
-    verification: previous?.verification,
+    execution: nextExecution,
+    verification: nextVerification,
     updated_at: createdAt,
   });
 
@@ -135,8 +168,8 @@ export async function POST(request: Request) {
       run_id: intentId,
       stage: {
         intent: "completed",
-        execution: previous?.execution ? "completed" : "pending",
-        verification: previous?.verification ? "completed" : "pending",
+        execution: nextExecution ? "completed" : "pending",
+        verification: getVerificationStage(nextVerification),
       },
     },
     { status: 202 }

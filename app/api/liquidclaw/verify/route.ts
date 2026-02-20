@@ -32,6 +32,7 @@ type BridgeState = {
 };
 
 type JsonMap = Record<string, unknown>;
+type VerificationStage = "pending" | "completed" | "failed";
 
 function getBridgeState(): BridgeState {
   const globals = globalThis as typeof globalThis & {
@@ -59,6 +60,12 @@ function parseStatus(value: unknown): VerificationStatus | null {
   if (value === undefined) return "verified";
   if (value === "pending" || value === "verified" || value === "failed") return value;
   return null;
+}
+
+function stageFromVerificationStatus(status: VerificationStatus): VerificationStage {
+  if (status === "verified") return "completed";
+  if (status === "failed") return "failed";
+  return "pending";
 }
 
 function canonicalize(value: unknown): unknown {
@@ -114,9 +121,22 @@ export async function POST(request: Request) {
   if (!run) {
     return NextResponse.json({ error: "Run not found" }, { status: 404 });
   }
-  if (!run.execution?.receipt_id) {
+  if (!run.execution?.receipt_id || run.execution.receipt_id !== receiptId) {
     return NextResponse.json(
       { error: `No execution found for receipt_id '${receiptId}'` },
+      { status: 409 }
+    );
+  }
+
+  const providedReceiptHash =
+    typeof body.receipt_hash === "string" ? body.receipt_hash.trim() : "";
+  if (
+    providedReceiptHash &&
+    run.execution.receipt_hash &&
+    providedReceiptHash !== run.execution.receipt_hash
+  ) {
+    return NextResponse.json(
+      { error: `receipt_hash mismatch for receipt_id '${receiptId}'` },
       { status: 409 }
     );
   }
@@ -160,6 +180,14 @@ export async function POST(request: Request) {
     verified_at: verifiedAt,
   };
 
+  const previousVerificationId =
+    run.verification && typeof run.verification.verification_id === "string"
+      ? run.verification.verification_id
+      : null;
+  if (previousVerificationId) {
+    state.verification_to_intent.delete(previousVerificationId);
+  }
+
   state.runs.set(intentId, {
     intent: run.intent,
     execution: run.execution,
@@ -171,11 +199,12 @@ export async function POST(request: Request) {
   return NextResponse.json(
     {
       accepted: true,
+      run_id: intentId,
       verification,
       stage: {
         intent: run.intent ? "completed" : "missing",
         execution: run.execution ? "completed" : "missing",
-        verification: "completed",
+        verification: stageFromVerificationStatus(status),
       },
     },
     { status: 202 }
