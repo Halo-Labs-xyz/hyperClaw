@@ -9,17 +9,20 @@ import {
   type ReactNode,
 } from "react";
 import { useAccount, useChainId, useSwitchChain } from "wagmi";
-import { monadTestnet, monadMainnet } from "@/lib/chains";
+import { evmTestnet, evmMainnet } from "@/lib/chains";
 
 interface NetworkContextValue {
+  evmTestnet: boolean;
+  // Backward-compat alias for existing UI consumers.
   monadTestnet: boolean;
   hlTestnet: boolean;
   switching: boolean;
-  /** Toggle both Monad + HL together */
+  /** Toggle both EVM + HL together */
   toggleNetwork: () => Promise<void>;
   /** Set specific network flags */
   setNetwork: (
     update: {
+      evmTestnet?: boolean;
       monadTestnet?: boolean;
       hlTestnet?: boolean;
     },
@@ -28,6 +31,7 @@ interface NetworkContextValue {
 }
 
 const NetworkContext = createContext<NetworkContextValue>({
+  evmTestnet: true,
   monadTestnet: true,
   hlTestnet: true,
   switching: false,
@@ -40,18 +44,19 @@ export function useNetwork() {
 }
 
 export function NetworkProvider({ children }: { children: ReactNode }) {
-  const [monadTest, setMonadTest] = useState(true);
+  const [evmTest, setEvmTest] = useState(true);
   const [hlTest, setHlTest] = useState(true);
   const [switching, setSwitching] = useState(false);
   const { isConnected } = useAccount();
   const chainId = useChainId();
   const { switchChainAsync } = useSwitchChain();
   const persistNetworkState = useCallback(
-    (next: { monadTestnet: boolean; hlTestnet: boolean }) => {
+    (next: { evmTestnet: boolean; hlTestnet: boolean }) => {
       localStorage.setItem(
         "hyperclaw-network",
         JSON.stringify({
-          monadTestnet: next.monadTestnet,
+          evmTestnet: next.evmTestnet,
+          monadTestnet: next.evmTestnet,
           hlTestnet: next.hlTestnet,
         })
       );
@@ -67,12 +72,14 @@ export function NetworkProvider({ children }: { children: ReactNode }) {
         const res = await fetch("/api/network");
         const data = await res.json();
         if (cancelled) return;
-        setMonadTest(data.monadTestnet ?? true);
+        const nextEvmTestnet = data.evmTestnet ?? data.monadTestnet ?? true;
+        setEvmTest(nextEvmTestnet);
         setHlTest(data.hlTestnet ?? true);
         localStorage.setItem(
           "hyperclaw-network",
           JSON.stringify({
-            monadTestnet: data.monadTestnet ?? true,
+            evmTestnet: nextEvmTestnet,
+            monadTestnet: nextEvmTestnet,
             hlTestnet: data.hlTestnet ?? true,
           })
         );
@@ -81,7 +88,13 @@ export function NetworkProvider({ children }: { children: ReactNode }) {
         if (!stored || cancelled) return;
         try {
           const parsed = JSON.parse(stored);
-          if (typeof parsed.monadTestnet === "boolean") setMonadTest(parsed.monadTestnet);
+          const parsedEvm =
+            typeof parsed.evmTestnet === "boolean"
+              ? parsed.evmTestnet
+              : typeof parsed.monadTestnet === "boolean"
+                ? parsed.monadTestnet
+                : undefined;
+          if (typeof parsedEvm === "boolean") setEvmTest(parsedEvm);
           if (typeof parsed.hlTestnet === "boolean") setHlTest(parsed.hlTestnet);
         } catch {
           // ignore malformed local data
@@ -96,21 +109,23 @@ export function NetworkProvider({ children }: { children: ReactNode }) {
 
   const setNetwork = useCallback(
     async (
-      update: { monadTestnet?: boolean; hlTestnet?: boolean },
+      update: { evmTestnet?: boolean; monadTestnet?: boolean; hlTestnet?: boolean },
       options?: { syncWalletChain?: boolean }
     ) => {
       const syncWalletChain = options?.syncWalletChain ?? true;
       const previous = {
-        monadTestnet: monadTest,
+        evmTestnet: evmTest,
         hlTestnet: hlTest,
       };
+      const nextEvmTestnet =
+        update.evmTestnet ?? update.monadTestnet ?? evmTest;
       const optimistic = {
-        monadTestnet: update.monadTestnet ?? monadTest,
+        evmTestnet: nextEvmTestnet,
         hlTestnet: update.hlTestnet ?? hlTest,
       };
 
       setSwitching(true);
-      setMonadTest(optimistic.monadTestnet);
+      setEvmTest(optimistic.evmTestnet);
       setHlTest(optimistic.hlTestnet);
       persistNetworkState(optimistic);
 
@@ -125,11 +140,12 @@ export function NetworkProvider({ children }: { children: ReactNode }) {
         const data = await res.json().catch(() => ({} as { error?: string }));
 
         if (res.ok && data.success) {
+          const resolvedEvmTestnet = Boolean(data.evmTestnet ?? data.monadTestnet);
           resolved = {
-            monadTestnet: Boolean(data.monadTestnet),
+            evmTestnet: resolvedEvmTestnet,
             hlTestnet: Boolean(data.hlTestnet),
           };
-          setMonadTest(resolved.monadTestnet);
+          setEvmTest(resolved.evmTestnet);
           setHlTest(resolved.hlTestnet);
           persistNetworkState(resolved);
         } else {
@@ -137,20 +153,20 @@ export function NetworkProvider({ children }: { children: ReactNode }) {
             "[Network] Server-side switch failed; reverting to previous network state:",
             data.error || `HTTP ${res.status}`
           );
-          setMonadTest(previous.monadTestnet);
+          setEvmTest(previous.evmTestnet);
           setHlTest(previous.hlTestnet);
           persistNetworkState(previous);
         }
       } catch (e) {
         console.warn("[Network] Server request failed; reverting to previous network state:", e);
-        setMonadTest(previous.monadTestnet);
+        setEvmTest(previous.evmTestnet);
         setHlTest(previous.hlTestnet);
         persistNetworkState(previous);
       } finally {
         if (syncWalletChain) {
-          const targetChainId = resolved.monadTestnet
-            ? monadTestnet.id
-            : monadMainnet.id;
+          const targetChainId = resolved.evmTestnet
+            ? evmTestnet.id
+            : evmMainnet.id;
           try {
             await switchChainAsync({ chainId: targetChainId });
           } catch {
@@ -160,39 +176,40 @@ export function NetworkProvider({ children }: { children: ReactNode }) {
         setSwitching(false);
       }
     },
-    [hlTest, monadTest, persistNetworkState, switchChainAsync]
+    [hlTest, evmTest, persistNetworkState, switchChainAsync]
   );
 
   const toggleNetwork = useCallback(async () => {
-    const newTestnet = !monadTest;
-    await setNetwork({ monadTestnet: newTestnet, hlTestnet: newTestnet });
-  }, [monadTest, setNetwork]);
+    const newTestnet = !evmTest;
+    await setNetwork({ evmTestnet: newTestnet, hlTestnet: newTestnet });
+  }, [evmTest, setNetwork]);
 
   // Keep runtime network in sync with the connected wallet chain.
   useEffect(() => {
     if (!isConnected) return;
     if (switching) return;
 
-    if (chainId === monadMainnet.id && (monadTest || hlTest)) {
+    if (chainId === evmMainnet.id && (evmTest || hlTest)) {
       void setNetwork(
-        { monadTestnet: false, hlTestnet: false },
+        { evmTestnet: false, hlTestnet: false },
         { syncWalletChain: false }
       );
       return;
     }
 
-    if (chainId === monadTestnet.id && (!monadTest || !hlTest)) {
+    if (chainId === evmTestnet.id && (!evmTest || !hlTest)) {
       void setNetwork(
-        { monadTestnet: true, hlTestnet: true },
+        { evmTestnet: true, hlTestnet: true },
         { syncWalletChain: false }
       );
     }
-  }, [chainId, hlTest, isConnected, monadTest, setNetwork, switching]);
+  }, [chainId, hlTest, isConnected, evmTest, setNetwork, switching]);
 
   return (
     <NetworkContext.Provider
       value={{
-        monadTestnet: monadTest,
+        evmTestnet: evmTest,
+        monadTestnet: evmTest,
         hlTestnet: hlTest,
         switching,
         toggleNetwork,

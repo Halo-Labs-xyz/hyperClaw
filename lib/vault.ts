@@ -1,6 +1,36 @@
 import { type Address } from "viem";
 import { getVaultAddressIfDeployed } from "@/lib/env";
 
+export type CopytradeSignalProviderIdentity = {
+  providerId: string;
+  payoutAddress: string;
+  displayName?: string;
+};
+
+export type CopytradeFeeSchedule = {
+  fixedFeeBps: number;
+  performanceFeeBps: number;
+  maxFeeUsd: number;
+};
+
+export type CopytradeProviderAttribution = {
+  provider: CopytradeSignalProviderIdentity;
+  signalId: string;
+  signalHash: string;
+  attributionWeightBps: number;
+  feeSchedule: CopytradeFeeSchedule;
+};
+
+export function calculateCopytradeProviderFeeUsd(
+  realizedPnlUsd: number,
+  schedule: CopytradeFeeSchedule
+): number {
+  const pnl = Number.isFinite(realizedPnlUsd) ? Math.max(0, realizedPnlUsd) : 0;
+  const fixed = (pnl * Math.max(0, schedule.fixedFeeBps)) / 10_000;
+  const perf = (pnl * Math.max(0, schedule.performanceFeeBps)) / 10_000;
+  return Math.min(Math.max(0, schedule.maxFeeUsd), fixed + perf);
+}
+
 // ============================================
 // HyperclawVault ABI
 // ============================================

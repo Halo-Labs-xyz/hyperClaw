@@ -101,14 +101,14 @@ export interface Agent {
   pendingApproval?: PendingTradeApproval;
   // Optional user API key override for this agent (encrypted)
   aiApiKey?: { provider: "anthropic" | "openai"; encryptedKey: string };
-  // Monad on-chain metadata attestation for AIP/external verification.
+  // EVM on-chain metadata attestation for AIP/external verification.
   aipAttestation?: AgentOnchainAttestation;
 }
 
 export interface AgentOnchainAttestation {
   version: "hyperclaw-agent-attestation-v1";
   status: "confirmed";
-  method: "monad_tx_calldata";
+  method: "evm_tx_calldata" | "monad_tx_calldata";
   txHash: `0x${string}`;
   blockNumber: number;
   chainId: number;
@@ -361,10 +361,10 @@ export interface PortfolioSummary {
 }
 
 // ============================================
-// Monad Token Config
+// EVM Token Config
 // ============================================
 
-export interface MonadToken {
+export interface EvmToken {
   address: Address;
   symbol: string;
   name: string;
@@ -372,7 +372,7 @@ export interface MonadToken {
   logoURI?: string;
 }
 
-export const MONAD_TOKENS: MonadToken[] = [
+export const EVM_TOKENS: EvmToken[] = [
   {
     address: "0x0000000000000000000000000000000000000000",
     symbol: "MON",
@@ -386,6 +386,9 @@ export const MONAD_TOKENS: MonadToken[] = [
     decimals: 6,
   },
 ];
+
+export type MonadToken = EvmToken;
+export const MONAD_TOKENS = EVM_TOKENS;
 
 // ============================================
 // Streaming / Watcher Types

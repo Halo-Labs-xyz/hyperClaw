@@ -27,7 +27,10 @@ function parseBool(value: string | undefined, fallback: boolean): boolean {
 }
 
 function isAttestationRequired(): boolean {
-  return parseBool(process.env.MONAD_AGENT_ATTESTATION_REQUIRED, false);
+  return parseBool(
+    process.env.EVM_AGENT_ATTESTATION_REQUIRED ?? process.env.MONAD_AGENT_ATTESTATION_REQUIRED,
+    false
+  );
 }
 
 const AGENT_EXECUTION_MIN_CONFIDENCE = 0.1;

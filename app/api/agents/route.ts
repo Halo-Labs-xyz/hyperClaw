@@ -16,7 +16,10 @@ function parseBool(value: string | undefined, fallback: boolean): boolean {
 }
 
 function isAttestationRequired(): boolean {
-  return parseBool(process.env.MONAD_AGENT_ATTESTATION_REQUIRED, false);
+  return parseBool(
+    process.env.EVM_AGENT_ATTESTATION_REQUIRED ?? process.env.MONAD_AGENT_ATTESTATION_REQUIRED,
+    false
+  );
 }
 
 function normalizeString(value: unknown): string | undefined {
@@ -108,7 +111,7 @@ export async function GET(request: Request) {
     const view = normalizeString(searchParams.get("view")) ?? "full";
     const scope = normalizeString(searchParams.get("scope")) ?? "all";
     const requestedNetwork = parseNetwork(searchParams.get("network"));
-    const currentNetwork = getNetworkState().monadTestnet ? "testnet" : "mainnet";
+    const currentNetwork = getNetworkState().evmTestnet ? "testnet" : "mainnet";
     const network = requestedNetwork ?? currentNetwork;
     const networkScopedAgents = agents.filter((a) => getAgentDeploymentNetwork(a) === network);
     const withDepositTvl = await Promise.all(
@@ -233,7 +236,7 @@ export async function POST(request: Request) {
       parseNetwork(body.network) ??
       parseNetwork(new URL(request.url).searchParams.get("network"));
     body.autonomy.deploymentNetwork =
-      requestedNetwork ?? (getNetworkState().monadTestnet ? "testnet" : "mainnet");
+      requestedNetwork ?? (getNetworkState().evmTestnet ? "testnet" : "mainnet");
 
     // Determine wallet mode: PKP or traditional
     const usePKP = process.env.USE_LIT_PKP === "true";

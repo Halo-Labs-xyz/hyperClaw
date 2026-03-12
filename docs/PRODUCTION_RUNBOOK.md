@@ -25,6 +25,24 @@ Command meanings:
 - `npm run build`: production bundle and route compilation
 - `npm run check`: one-shot production gate
 
+## WS-8.3 Gate Command Matrix
+
+Run in this exact order for release-readiness evidence:
+
+```bash
+npm run clean:cache
+npm install
+npm run lint
+npm run check
+npm run preflight:mainnet
+```
+
+Execution notes:
+
+- `npm run check` already includes `lint`, `typecheck`, and `build`.
+- `npm run build` is configured with `NEXT_DISABLE_SWC_NATIVE=1` to avoid runtime SWC binary download variance during deterministic gate runs.
+- Treat any failing command in this matrix as a release blocker until remediated or explicitly waived by operator policy.
+
 ## Pre-Deploy Checklist
 
 1. Confirm env parity against `.env.example`.
@@ -88,6 +106,47 @@ Command meanings:
    - Disable epoch closures by rotating `HCLAW_POINTS_CLOSE_KEY`.
    - Pause lock/rewards/agentic execution contracts on multisig (if deployed controls are enabled).
    - Point `NEXT_PUBLIC_VAULT_ADDRESS` back to previous stable vault and redeploy frontend.
+
+## LiquidClaw Demo Operations (WS-9)
+
+Use with `/Users/shaanp/Documents/GitHub/agentest/liquidclaw/docs/PRODUCTION_DEMO_24H.md`.
+
+### Immutable Artifact Control
+
+1. Build once from pinned commit SHAs.
+2. Promote the exact same build artifact from staging to production.
+3. Reject deploy if artifact hash or commit SHA drifts between environments.
+
+### Env Parity Verification
+
+Before production promotion, confirm parity for:
+
+- Hyperliquid network/runtime endpoints.
+- Vault and custody policy envs.
+- Verification backend and fallback envs.
+- Bridge route auth/env keys.
+
+### Route and UI Smoke Sequence
+
+1. API bridge smokes:
+   - `/api/liquidclaw/intents`
+   - `/api/liquidclaw/execute`
+   - `/api/liquidclaw/verify`
+   - `/api/liquidclaw/runs/[id]`
+2. Wallet/vault smokes:
+   - `/api/wallet/attest`
+   - existing vault/fund paths used by operators.
+3. UI walk:
+   - `/agents`
+   - `/agents/[id]`
+   - receipt/verification visibility checks after paper execution.
+
+### Emergency Controls
+
+- Pause-all: pause active agents first, then diagnose.
+- Fallback verification mode: enable signed fallback chain when primary backend is unavailable.
+- Vault rollback: revert vault envs to last known good snapshot before resuming.
+- Env snapshot restore: restore full env snapshot atomically, restart services, rerun smokes.
 
 ## Ongoing Maintenance
 

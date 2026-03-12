@@ -16,7 +16,7 @@ export async function GET() {
  *
  * Switch network at runtime.
  *
- * Body: { monadTestnet?: boolean, hlTestnet?: boolean }
+ * Body: { evmTestnet?: boolean, monadTestnet?: boolean, hlTestnet?: boolean }
  *
  * Both fields are optional — only the provided ones are updated.
  * All cached SDK clients are invalidated on change.
@@ -54,8 +54,11 @@ export async function POST(request: Request) {
     const body = await request.json();
     const update: Record<string, boolean> = {};
 
+    if (typeof body.evmTestnet === "boolean") {
+      update.evmTestnet = body.evmTestnet;
+    }
     if (typeof body.monadTestnet === "boolean") {
-      update.monadTestnet = body.monadTestnet;
+      update.evmTestnet = body.monadTestnet;
     }
     if (typeof body.hlTestnet === "boolean") {
       update.hlTestnet = body.hlTestnet;
@@ -63,7 +66,7 @@ export async function POST(request: Request) {
 
     // Also support a single "testnet" flag that sets both
     if (typeof body.testnet === "boolean") {
-      update.monadTestnet = body.testnet;
+      update.evmTestnet = body.testnet;
       update.hlTestnet = body.testnet;
     }
 

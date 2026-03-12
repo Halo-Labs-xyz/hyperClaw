@@ -1,17 +1,17 @@
 "use client";
 
 import { useAccount, useChainId, useSwitchChain } from "wagmi";
-import { monadMainnet } from "@/lib/chains";
+import { evmMainnet } from "@/lib/chains";
 import { useNetwork } from "./NetworkContext";
 
 export function NetworkToggle() {
-  const { monadTestnet, hlTestnet, switching, toggleNetwork } = useNetwork();
+  const { evmTestnet, hlTestnet, switching, toggleNetwork } = useNetwork();
   const { isConnected } = useAccount();
   const chainId = useChainId();
   const { switchChainAsync } = useSwitchChain();
 
-  const isTestnet = monadTestnet || hlTestnet;
-  const onMainnetWallet = chainId === monadMainnet.id;
+  const isTestnet = evmTestnet || hlTestnet;
+  const onMainnetWallet = chainId === evmMainnet.id;
   const showMainnetNudge = isConnected && !onMainnetWallet;
 
   return (
@@ -53,14 +53,14 @@ export function NetworkToggle() {
 
       {showMainnetNudge ? (
         <button
-          onClick={() => void switchChainAsync({ chainId: monadMainnet.id })}
+          onClick={() => void switchChainAsync({ chainId: evmMainnet.id })}
           className="px-2.5 py-1.5 rounded-lg border text-[11px] font-medium transition-all"
           style={{
             borderColor: "rgba(34, 197, 94, 0.35)",
             backgroundColor: "rgba(34, 197, 94, 0.08)",
             color: "rgb(74, 222, 128)",
           }}
-          title="Recommended: switch wallet to Monad Mainnet"
+          title="Recommended: switch wallet to EVM mainnet"
         >
           Use Mainnet
         </button>

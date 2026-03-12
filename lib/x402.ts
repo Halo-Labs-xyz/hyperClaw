@@ -85,9 +85,32 @@ function firstHeader(request: Request, names: string[]): string | undefined {
   return undefined;
 }
 
-function matchesExpectedMonadNetwork(chain: string, expectedChainId: number): boolean {
+function parseCommaList(value: string | undefined): string[] {
+  if (!value) return [];
+  return value
+    .split(",")
+    .map((entry) => entry.trim().toLowerCase())
+    .filter(Boolean);
+}
+
+function getExpectedChainAliases(expectedChainId: number): string[] {
+  const configured = parseCommaList(
+    process.env.X402_REQUIRED_CHAIN_NAME || process.env.X402_REQUIRED_NETWORK
+  );
+  if (configured.length > 0) return configured;
+
+  if (expectedChainId === 143) return ["monad", "mainnet"];
+  if (expectedChainId === 10143) return ["monad", "testnet"];
+  if (expectedChainId === 1) return ["ethereum", "eth", "mainnet"];
+  if (expectedChainId === 11155111) return ["sepolia", "testnet"];
+  return ["evm"];
+}
+
+function matchesExpectedEvmNetwork(chain: string, expectedChainId: number): boolean {
   const normalized = chain.toLowerCase();
-  if (!normalized.includes("monad")) return false;
+  const aliases = getExpectedChainAliases(expectedChainId);
+  const matchesAlias = aliases.some((alias) => normalized.includes(alias));
+  if (!matchesAlias) return false;
 
   const mentionsTestnet = normalized.includes("testnet");
   const mentionsMainnet = normalized.includes("mainnet");
@@ -97,10 +120,20 @@ function matchesExpectedMonadNetwork(chain: string, expectedChainId: number): bo
   return true;
 }
 
-function resolveExpectedMonadChainId(): number {
-  const envValue = parseNumberLike(process.env.X402_MONAD_CHAIN_ID);
+function resolveExpectedChainId(): number {
+  const envValue =
+    parseNumberLike(process.env.X402_CHAIN_ID) ??
+    parseNumberLike(process.env.X402_MONAD_CHAIN_ID);
   if (envValue !== undefined && envValue > 0) return envValue;
-  return getNetworkState().monadTestnet ? 10143 : 143;
+  const defaultMainnetChainId =
+    parseNumberLike(process.env.NEXT_PUBLIC_EVM_MAINNET_CHAIN_ID) ??
+    parseNumberLike(process.env.NEXT_PUBLIC_MONAD_MAINNET_CHAIN_ID) ??
+    143;
+  const defaultTestnetChainId =
+    parseNumberLike(process.env.NEXT_PUBLIC_EVM_TESTNET_CHAIN_ID) ??
+    parseNumberLike(process.env.NEXT_PUBLIC_MONAD_TESTNET_CHAIN_ID) ??
+    10143;
+  return getNetworkState().evmTestnet ? defaultTestnetChainId : defaultMainnetChainId;
 }
 
 function isX402Required(): boolean {
@@ -192,8 +225,8 @@ function parseObservedChain(
   return { chainId, chainName };
 }
 
-export function verifyX402MonadPayment(request: Request, requestBody: unknown): X402VerificationResult {
-  const expectedChainId = resolveExpectedMonadChainId();
+export function verifyX402Payment(request: Request, requestBody: unknown): X402VerificationResult {
+  const expectedChainId = resolveExpectedChainId();
   const required = isX402Required();
   const configuredGatewayKey = getConfiguredGatewayKey();
 
@@ -243,19 +276,19 @@ export function verifyX402MonadPayment(request: Request, requestBody: unknown): 
 
   const observed = parseObservedChain(request, body, payment);
   const hasObservedChain = observed.chainId !== undefined || !!observed.chainName;
-  const onMonad =
+  const onExpectedEvmChain =
     observed.chainId !== undefined
       ? observed.chainId === expectedChainId
       : observed.chainName
-        ? matchesExpectedMonadNetwork(observed.chainName, expectedChainId)
+        ? matchesExpectedEvmNetwork(observed.chainName, expectedChainId)
         : false;
 
-  if (!hasObservedChain || !onMonad) {
+  if (!hasObservedChain || !onExpectedEvmChain) {
     return {
       ok: false,
       status: 402,
       code: "x402_chain_mismatch",
-      message: "x402 payment must be settled on Monad.",
+      message: "x402 payment must be settled on the configured EVM chain.",
       expectedChainId,
       observedChainId: observed.chainId,
       observedChain: observed.chainName,
@@ -269,3 +302,5 @@ export function verifyX402MonadPayment(request: Request, requestBody: unknown): 
     observedChain: observed.chainName,
   };
 }
+
+export const verifyX402MonadPayment = verifyX402Payment;

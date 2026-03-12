@@ -268,7 +268,7 @@ export default function CreateAgentPage() {
     };
 
     queueProgress(900, "provisioning", "Provisioning secure signing wallet...");
-    queueProgress(2500, "attesting", "Registering agent attestation on Monad...");
+    queueProgress(2500, "attesting", "Registering agent attestation on EVM...");
 
     try {
       const network = monadTestnet ? "testnet" : "mainnet";
@@ -319,7 +319,7 @@ export default function CreateAgentPage() {
       if (attestation?.txHash) {
         setCreateProgress({
           stage: "confirmed",
-          message: `Secure agent registered on Monad ${attestation.network}.`,
+          message: `Secure agent registered on EVM ${attestation.network}.`,
         });
       } else if (warning) {
         setCreateProgress({
@@ -940,7 +940,7 @@ export default function CreateAgentPage() {
                   <p className="text-[11px] uppercase tracking-wider font-semibold">{createStageLabel}</p>
                   <p className="text-sm font-medium mt-0.5 break-words">{createProgress.message}</p>
                   <p className="text-[11px] text-dim mt-2">
-                    Wallet signature is not required during creation. Hyperclaw signs the Monad attestation transaction with the secure attestor key.
+                    Wallet signature is not required during creation. Hyperclaw signs the EVM attestation transaction with the secure attestor key.
                   </p>
                 </div>
               </div>
@@ -995,7 +995,7 @@ export default function CreateAgentPage() {
               <span className="flex items-center justify-center gap-2">
                 <span className="w-4 h-4 border-2 border-background/30 border-t-background rounded-full animate-spin" />
                 {createProgress.stage === "attesting"
-                  ? "Registering on Monad..."
+                  ? "Registering on EVM..."
                   : createProgress.stage === "provisioning"
                   ? "Provisioning Secure Wallet..."
                   : "Creating Agent..."}

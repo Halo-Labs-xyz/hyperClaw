@@ -2,7 +2,11 @@ import { createPublicClient, formatEther, http } from "viem";
 import { getAgenticLpVaultAddressIfSet } from "@/lib/env";
 import { isMonadTestnet } from "@/lib/network";
 import type { AgenticVaultStatus, HclawTreasuryFlow } from "@/lib/types";
-import { AGENTIC_LP_VAULT_ABI } from "@/lib/vault";
+import {
+  AGENTIC_LP_VAULT_ABI,
+  calculateCopytradeProviderFeeUsd,
+  type CopytradeProviderAttribution,
+} from "@/lib/vault";
 import {
   isSupabaseStoreEnabled,
   sbInsertHclawTreasuryFlow,
@@ -11,6 +15,17 @@ import {
 import type { MonadNetwork } from "@/lib/hclaw-lock";
 
 const memoryTreasuryFlows: HclawTreasuryFlow[] = [];
+const memoryMirroredAttributions: MirroredExecutionAttribution[] = [];
+
+export type MirroredExecutionAttribution = {
+  executionReceiptId: string;
+  settlementReceiptId?: string;
+  sourceSignalHash: string;
+  providerAttributions: CopytradeProviderAttribution[];
+  mirroredPnlUsd: number;
+  revenueShareFeeUsd: number;
+  createdAt: number;
+};
 
 function getMonadRpcUrl(network?: MonadNetwork): string {
   const mainnetRpc =
@@ -185,5 +200,48 @@ export async function getTreasurySummary(limit = 200) {
       incentiveUsd: flows.reduce((sum, flow) => sum + flow.incentiveUsd, 0),
       reserveUsd: flows.reduce((sum, flow) => sum + flow.reserveUsd, 0),
     },
+  };
+}
+
+export async function recordMirroredExecutionAttribution(
+  record: MirroredExecutionAttribution
+): Promise<void> {
+  memoryMirroredAttributions.push(record);
+}
+
+export async function listMirroredExecutionAttributions(
+  limit = 100
+): Promise<MirroredExecutionAttribution[]> {
+  return [...memoryMirroredAttributions]
+    .sort((a, b) => b.createdAt - a.createdAt)
+    .slice(0, limit);
+}
+
+export async function summarizeMirroredExecutionAttributions(limit = 200) {
+  const records = await listMirroredExecutionAttributions(limit);
+  const providerFees = records.flatMap((record) =>
+    record.providerAttributions.map((attribution) => {
+      const fee = calculateCopytradeProviderFeeUsd(
+        record.mirroredPnlUsd,
+        attribution.feeSchedule
+      );
+      return {
+        providerId: attribution.provider.providerId,
+        feeUsd: fee,
+      };
+    })
+  );
+
+  return {
+    count: records.length,
+    mirroredPnlUsd: records.reduce((sum, row) => sum + row.mirroredPnlUsd, 0),
+    revenueShareFeeUsd: records.reduce(
+      (sum, row) => sum + row.revenueShareFeeUsd,
+      0
+    ),
+    providerFeeById: providerFees.reduce<Record<string, number>>((acc, row) => {
+      acc[row.providerId] = (acc[row.providerId] ?? 0) + row.feeUsd;
+      return acc;
+    }, {}),
   };
 }
