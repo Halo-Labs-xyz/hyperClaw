@@ -91,5 +91,149 @@
         "cooldownMs": 60000
       }
     }
+  },
+  {
+    "alias": "pkp-agent-aeefb87a",
+    "address": "0xDe055D7512A95Cf608fEF7Cec686e46a358c4c59",
+    "type": "pkp",
+    "isDefault": false,
+    "agentId": "aeefb87a856357de",
+    "createdAt": 1770754730826,
+    "pkp": {
+      "tokenId": "62477919730194043491418062821805601541161737608555645965211119144170456051094",
+      "publicKey": "0x048fa71bfb8cfa38abbe076d7677f8b369ad9c86334a73043f8137c0dc2e1ecf86042f2276322d321755062d2072105d452cb379122751058486e2f8e0481056f7",
+      "ethAddress": "0xDe055D7512A95Cf608fEF7Cec686e46a358c4c59",
+      "constraints": {
+        "maxPositionSizeUsd": 5000,
+        "allowedCoins": [
+          "BTC",
+          "ETH"
+        ],
+        "maxLeverage": 2,
+        "requireStopLoss": true,
+        "maxDailyTrades": 50,
+        "cooldownMs": 60000
+      }
+    }
+  },
+  {
+    "alias": "pkp-agent-b749ff15",
+    "address": "0x890CF32E40cE394736d8Ef0FCcF383e6cAe59521",
+    "type": "pkp",
+    "isDefault": false,
+    "agentId": "b749ff158122fdec",
+    "createdAt": 1770759495480,
+    "pkp": {
+      "tokenId": "53628256552427624089624917409359999426793426638194681965000171146306306038587",
+      "publicKey": "0x04caed1ea20b61ced8fa2b0a1977f19fbec9e660450a1d98869ba264584ededd25c33bd46aa83d447ff1619a8453263ab3995394ecd95feefafc190bc1b71375d7",
+      "ethAddress": "0x890CF32E40cE394736d8Ef0FCcF383e6cAe59521",
+      "constraints": {
+        "maxPositionSizeUsd": 5000,
+        "allowedCoins": [
+          "BTC",
+          "ETH"
+        ],
+        "maxLeverage": 2,
+        "requireStopLoss": true,
+        "maxDailyTrades": 50,
+        "cooldownMs": 60000
+      }
+    }
+  },
+  {
+    "alias": "pkp-agent-5o2oig",
+    "address": "0xeA983CE8bbe4869BAA93c9953dd083F4C7D1D49C",
+    "type": "pkp",
+    "isDefault": false,
+    "agentId": "5o2oig",
+    "createdAt": 1770762347387,
+    "pkp": {
+      "tokenId": "100589601081403065433403015511296301088079891344578884047308156798743413390947",
+      "publicKey": "0x040c922dbeb11b2557990dc7cf8ccd2709f79380e7bf04442dde41f4265a4586fa8ee4bb9a71ed2657c1e147ffe400e1c57fa64ea55aba2bf63e3dd6de7915d4e8",
+      "ethAddress": "0xeA983CE8bbe4869BAA93c9953dd083F4C7D1D49C",
+      "constraints": {
+        "maxPositionSizeUsd": 5000,
+        "allowedCoins": [
+          "BTC",
+          "ETH"
+        ],
+        "maxLeverage": 10,
+        "requireStopLoss": true,
+        "maxDailyTrades": 50,
+        "cooldownMs": 60000
+      }
+    }
+  },
+  {
+    "alias": "pkp-agent-pjv9dn",
+    "address": "0x939f819c5B4F3EB891FbC2E05062B632e594fCDe",
+    "type": "pkp",
+    "isDefault": false,
+    "agentId": "pjv9dn",
+    "createdAt": 1770762395694,
+    "pkp": {
+      "tokenId": "57811833910565462369752461567362514488327911299375976092398512993296140965858",
+      "publicKey": "0x04bb795340bc89239a2dafecfe24227b45259eff8af66e785aee22133802ac12e02046559b3a0f61db49d118c2e95ded8790cdd9fb7477aee36b295343d60952cd",
+      "ethAddress": "0x939f819c5B4F3EB891FbC2E05062B632e594fCDe",
+      "constraints": {
+        "maxPositionSizeUsd": 5000,
+        "allowedCoins": [
+          "BTC",
+          "ETH"
+        ],
+        "maxLeverage": 17,
+        "requireStopLoss": true,
+        "maxDailyTrades": 50,
+        "cooldownMs": 60000
+      }
+    }
+  },
+  {
+    "alias": "pkp-agent-kn089",
+    "address": "0x7c149adE15511cC3Afb2D23176cE39000c25fb18",
+    "type": "pkp",
+    "isDefault": false,
+    "agentId": "kn089",
+    "createdAt": 1770762406697,
+    "pkp": {
+      "tokenId": "101571896484820654507128840214602080392553522236658754718855349575418585739513",
+      "publicKey": "0x04b52c02e02f0dc3b9018b7e312b973c294cd7dc2aae99e627cbfb33033a86446df7d97a2409c2ffd2ff7fe9272235a21c3f060ff335cebfe3a7a19162bed516df",
+      "ethAddress": "0x7c149adE15511cC3Afb2D23176cE39000c25fb18",
+      "constraints": {
+        "maxPositionSizeUsd": 5000,
+        "allowedCoins": [
+          "BTC",
+          "ETH"
+        ],
+        "maxLeverage": 13,
+        "requireStopLoss": true,
+        "maxDailyTrades": 50,
+        "cooldownMs": 60000
+      }
+    }
+  },
+  {
+    "alias": "pkp-agent-v0b3ce",
+    "address": "0x883C3Bd4C69de2B37Dd1D7ff57733F5B0F407372",
+    "type": "pkp",
+    "isDefault": false,
+    "agentId": "v0b3ce",
+    "createdAt": 1770762568018,
+    "pkp": {
+      "tokenId": "109896961112231972887147833908497760995022775173049595618578844237896223447398",
+      "publicKey": "0x04f2548dd203a7c26aa353edf8fb67d19787dd9047cde478a3957c38326949760b7dcb51f4f0b839c5719a8f90017d92d8535bfafd394f5278d3858a2b16aa59c9",
+      "ethAddress": "0x883C3Bd4C69de2B37Dd1D7ff57733F5B0F407372",
+      "constraints": {
+        "maxPositionSizeUsd": 5000,
+        "allowedCoins": [
+          "BTC",
+          "ETH"
+        ],
+        "maxLeverage": 5,
+        "requireStopLoss": true,
+        "maxDailyTrades": 50,
+        "cooldownMs": 60000
+      }
+    }
   }
 ]

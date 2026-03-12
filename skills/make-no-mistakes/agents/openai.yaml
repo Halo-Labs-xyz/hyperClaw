@@ -1,0 +1,4 @@
+interface:
+  display_name: "Make No Mistakes"
+  short_description: "Append a strict no-error directive to prompts"
+  default_prompt: "Append MAKE NO MISTAKES. to each prompt before reasoning and answering."

@@ -1,1 +1,58 @@
-[]
+[
+  {
+    "id": "aeefb87a856357de",
+    "name": "PKP E2E Agent",
+    "description": "Validate Lit signing and IronClaw integration",
+    "status": "active",
+    "createdAt": 1770754730825,
+    "markets": [
+      "BTC",
+      "ETH"
+    ],
+    "maxLeverage": 2,
+    "riskLevel": "moderate",
+    "stopLossPercent": 5,
+    "autonomy": {
+      "mode": "semi",
+      "aggressiveness": 40,
+      "minConfidence": 0.8,
+      "maxTradesPerDay": 5,
+      "approvalTimeoutMs": 300000
+    },
+    "hlAddress": "0xDe055D7512A95Cf608fEF7Cec686e46a358c4c59",
+    "totalPnl": 0,
+    "totalPnlPercent": 0,
+    "totalTrades": 0,
+    "winRate": 0,
+    "vaultTvlUsd": 0,
+    "depositorCount": 0
+  },
+  {
+    "id": "b749ff158122fdec",
+    "name": "TS E2E Funded Agent",
+    "description": "Funded trade e2e validation",
+    "status": "active",
+    "createdAt": 1770759495462,
+    "markets": [
+      "BTC",
+      "ETH"
+    ],
+    "maxLeverage": 2,
+    "riskLevel": "moderate",
+    "stopLossPercent": 5,
+    "autonomy": {
+      "mode": "semi",
+      "aggressiveness": 50,
+      "minConfidence": 0.75,
+      "maxTradesPerDay": 10,
+      "approvalTimeoutMs": 300000
+    },
+    "hlAddress": "0x890CF32E40cE394736d8Ef0FCcF383e6cAe59521",
+    "totalPnl": 0,
+    "totalPnlPercent": 0,
+    "totalTrades": 14,
+    "winRate": 0,
+    "vaultTvlUsd": 0,
+    "depositorCount": 0
+  }
+]

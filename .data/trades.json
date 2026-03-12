@@ -1,17 +1,2473 @@
 [
   {
-    "id": "2bb0aec7b07268d4",
-    "agentId": "87dbaf6df992e5c3",
-    "timestamp": 1770660907016,
+    "id": "ce43408d10ad3494",
+    "agentId": "aeefb87a856357de",
+    "timestamp": 1770760106204,
     "decision": {
       "action": "hold",
+      "asset": "BTC",
+      "size": 0,
+      "leverage": 1,
+      "confidence": 0,
+      "reasoning": "The strategy 'Validate Lit signing and IronClaw integration' does not provide specific entry/exit rules or market behavior patterns to act upon. Additionally, the current market conditions show 0% 24h change and low volatility, with funding rates suggesting a slight short bias. However, without clear strategic directives or high-confidence signals, holding is prudent.",
+      "stopLoss": null,
+      "takeProfit": null
+    },
+    "executed": false
+  },
+  {
+    "id": "c59e33bdf6730f43",
+    "agentId": "b749ff158122fdec",
+    "timestamp": 1770760112936,
+    "decision": {
+      "action": "short",
       "asset": "ETH",
+      "size": 0.5,
+      "leverage": 2,
+      "confidence": 0.7,
+      "reasoning": "Despite the 0% price change, the high positive funding rate on ETH suggests a potential short opportunity as longs are paying shorts. The strategy allows for moderate risk, and the funding rate signal aligns with a short position.",
+      "stopLoss": 2300,
+      "takeProfit": 2100
+    },
+    "executed": true,
+    "executionResult": {
+      "orderId": "market",
+      "fillPrice": 2223.05,
+      "fillSize": 0.005397989249004745,
+      "status": "filled"
+    }
+  },
+  {
+    "id": "abdc40d187e6b58a",
+    "agentId": "b749ff158122fdec",
+    "timestamp": 1770760113168,
+    "decision": {
+      "action": "short",
+      "asset": "ETH",
+      "size": 0.5,
+      "leverage": 2,
+      "confidence": 0.7,
+      "reasoning": "Despite the 0% price change, the high positive funding rate on ETH suggests a potential short opportunity as longs are paying shorts. The strategy allows for moderate risk, and the funding rate signal aligns with a short position.",
+      "stopLoss": 2300,
+      "takeProfit": 2100
+    },
+    "executed": true,
+    "executionResult": {
+      "orderId": "market",
+      "fillPrice": 2223.05,
+      "fillSize": 0.005397989249004745,
+      "status": "filled"
+    }
+  },
+  {
+    "id": "e5821af91fbd5cb9",
+    "agentId": "b749ff158122fdec",
+    "timestamp": 1770760113748,
+    "decision": {
+      "action": "short",
+      "asset": "ETH",
+      "size": 0.5,
+      "leverage": 2,
+      "confidence": 0.7,
+      "reasoning": "Despite the 0% price change, the high positive funding rate on ETH suggests a potential short opportunity as longs are paying shorts. The strategy allows for moderate risk, and the funding rate signal aligns with a short position.",
+      "stopLoss": 2300,
+      "takeProfit": 2100
+    },
+    "executed": true,
+    "executionResult": {
+      "orderId": "market",
+      "fillPrice": 2223.05,
+      "fillSize": 0.005397989249004745,
+      "status": "filled"
+    }
+  },
+  {
+    "id": "c12969d2c72bda30",
+    "agentId": "aeefb87a856357de",
+    "timestamp": 1770760127824,
+    "decision": {
+      "action": "hold",
+      "asset": "BTC",
+      "size": 0,
+      "leverage": 1,
+      "confidence": 0,
+      "reasoning": "The strategy provided does not specify clear entry or exit rules, timeframes, or market behavior patterns to act upon. Additionally, the current market data shows 0% 24h change and a very low funding rate, indicating a lack of strong directional movement. Given the moderate risk level and max leverage constraint, there is insufficient basis for a confident trade at this time.",
+      "stopLoss": null,
+      "takeProfit": null
+    },
+    "executed": false
+  },
+  {
+    "id": "88a55f28f4c0a291",
+    "agentId": "b749ff158122fdec",
+    "timestamp": 1770760135595,
+    "decision": {
+      "action": "short",
+      "asset": "ETH",
+      "size": 0.5,
+      "leverage": 2,
+      "confidence": 0.7,
+      "reasoning": "The strategy focuses on funding rate direction as a key signal. With ETH's positive funding rate, it suggests a short position. Despite the 24h price stability, the high funding rate indicates potential downward pressure.",
+      "stopLoss": 2300,
+      "takeProfit": 2100
+    },
+    "executed": true,
+    "executionResult": {
+      "orderId": "market",
+      "fillPrice": 2223.05,
+      "fillSize": 0.005397989249004745,
+      "status": "filled"
+    }
+  },
+  {
+    "id": "848584770df18902",
+    "agentId": "aeefb87a856357de",
+    "timestamp": 1770760208288,
+    "decision": {
+      "action": "hold",
+      "asset": "BTC",
+      "size": 0,
+      "leverage": 1,
+      "confidence": 0,
+      "reasoning": "The strategy 'Validate Lit signing and IronClaw integration' does not provide specific entry/exit rules or market behavior patterns to act upon. Additionally, the current market conditions show 0% 24h change and low volatility, with funding rates suggesting a slight short bias. However, without clear strategic directives or high-confidence signals, holding is prudent.",
+      "stopLoss": null,
+      "takeProfit": null
+    },
+    "executed": false
+  },
+  {
+    "id": "8f7ed5fd60d08046",
+    "agentId": "aeefb87a856357de",
+    "timestamp": 1770760209313,
+    "decision": {
+      "action": "hold",
+      "asset": "BTC",
+      "size": 0,
+      "leverage": 1,
+      "confidence": 0,
+      "reasoning": "The strategy 'Validate Lit signing and IronClaw integration' does not provide specific entry/exit rules or market behavior patterns to act upon. Additionally, the current market conditions show 0% 24h change and low volatility, with funding rates suggesting a slight short bias. However, without clear strategic directives or high-confidence signals, holding is prudent.",
+      "stopLoss": null,
+      "takeProfit": null
+    },
+    "executed": false
+  },
+  {
+    "id": "2f90b877ae7a78ac",
+    "agentId": "aeefb87a856357de",
+    "timestamp": 1770760210026,
+    "decision": {
+      "action": "hold",
+      "asset": "BTC",
+      "size": 0,
+      "leverage": 1,
+      "confidence": 0,
+      "reasoning": "The strategy 'Validate Lit signing and IronClaw integration' does not provide specific entry/exit rules or market behavior patterns to act upon. Additionally, the current market conditions show 0% 24h change and low volatility, with funding rates suggesting a slight short bias. However, without clear strategic directives or high-confidence signals, holding is prudent.",
+      "stopLoss": null,
+      "takeProfit": null
+    },
+    "executed": false
+  },
+  {
+    "id": "95c5d808fe983a5f",
+    "agentId": "b749ff158122fdec",
+    "timestamp": 1770760210714,
+    "decision": {
+      "action": "short",
+      "asset": "ETH",
+      "size": 0.5,
+      "leverage": 2,
+      "confidence": 0.7,
+      "reasoning": "Despite the 0% price change, the high positive funding rate on ETH suggests a potential short opportunity as longs are paying shorts. The strategy allows for moderate risk, and the funding rate signal aligns with a short position.",
+      "stopLoss": 2300,
+      "takeProfit": 2100
+    },
+    "executed": false
+  },
+  {
+    "id": "f0317c4647f12013",
+    "agentId": "b749ff158122fdec",
+    "timestamp": 1770760211737,
+    "decision": {
+      "action": "short",
+      "asset": "ETH",
+      "size": 0.5,
+      "leverage": 2,
+      "confidence": 0.7,
+      "reasoning": "Despite the 0% price change, the high positive funding rate on ETH suggests a potential short opportunity as longs are paying shorts. The strategy allows for moderate risk, and the funding rate signal aligns with a short position.",
+      "stopLoss": 2300,
+      "takeProfit": 2100
+    },
+    "executed": false
+  },
+  {
+    "id": "8cf476aae65936bf",
+    "agentId": "b749ff158122fdec",
+    "timestamp": 1770760212804,
+    "decision": {
+      "action": "short",
+      "asset": "ETH",
+      "size": 0.5,
+      "leverage": 2,
+      "confidence": 0.7,
+      "reasoning": "Despite the 0% price change, the high positive funding rate on ETH suggests a potential short opportunity as longs are paying shorts. The strategy allows for moderate risk, and the funding rate signal aligns with a short position.",
+      "stopLoss": 2300,
+      "takeProfit": 2100
+    },
+    "executed": false
+  },
+  {
+    "id": "0195f7d8ed7a1d68",
+    "agentId": "aeefb87a856357de",
+    "timestamp": 1770760266622,
+    "decision": {
+      "action": "hold",
+      "asset": "BTC",
+      "size": 0,
+      "leverage": 1,
+      "confidence": 0,
+      "reasoning": "The strategy 'Validate Lit signing and IronClaw integration' does not provide specific entry/exit rules or market behavior patterns to act upon. Additionally, the current market conditions show 0% 24h change and low volatility, with funding rates suggesting a slight short bias. However, without clear strategic directives or high-confidence signals, holding is prudent.",
+      "stopLoss": null,
+      "takeProfit": null
+    },
+    "executed": false
+  },
+  {
+    "id": "ee94870efb129dd3",
+    "agentId": "b749ff158122fdec",
+    "timestamp": 1770760268509,
+    "decision": {
+      "action": "short",
+      "asset": "ETH",
+      "size": 0.5,
+      "leverage": 2,
+      "confidence": 0.7,
+      "reasoning": "Despite the 0% price change, the high positive funding rate on ETH suggests a potential short opportunity as longs are paying shorts. The strategy allows for moderate risk, and the funding rate signal aligns with a short position.",
+      "stopLoss": 2300,
+      "takeProfit": 2100
+    },
+    "executed": false
+  },
+  {
+    "id": "c8ab2caf209cfec7",
+    "agentId": "aeefb87a856357de",
+    "timestamp": 1770760270097,
+    "decision": {
+      "action": "hold",
+      "asset": "BTC",
+      "size": 0,
+      "leverage": 1,
+      "confidence": 0,
+      "reasoning": "The strategy provided does not specify clear entry or exit rules, timeframes, or market behavior patterns to act upon. Additionally, the current market data shows 0% 24h change and a very low funding rate, indicating a lack of strong directional movement. Given the moderate risk level and max leverage constraint, there is insufficient basis for a confident trade at this time.",
+      "stopLoss": null,
+      "takeProfit": null
+    },
+    "executed": false
+  },
+  {
+    "id": "080e5eb30ba2104e",
+    "agentId": "b749ff158122fdec",
+    "timestamp": 1770760270493,
+    "decision": {
+      "action": "short",
+      "asset": "ETH",
+      "size": 0.5,
+      "leverage": 2,
+      "confidence": 0.7,
+      "reasoning": "The strategy focuses on funding rate direction as a key signal. With ETH's positive funding rate, it suggests a short position. Despite the 24h price stability, the high funding rate indicates potential downward pressure.",
+      "stopLoss": 2300,
+      "takeProfit": 2100
+    },
+    "executed": false
+  },
+  {
+    "id": "50391a7ffef8ade1",
+    "agentId": "aeefb87a856357de",
+    "timestamp": 1770760325879,
+    "decision": {
+      "action": "hold",
+      "asset": "BTC",
+      "size": 0,
+      "leverage": 1,
+      "confidence": 0,
+      "reasoning": "The strategy provided does not specify clear entry or exit rules, timeframes, or market behavior patterns to act upon. Additionally, the current market data shows 0% 24h change and a very low funding rate, indicating a lack of strong directional movement. Given the moderate risk level and max leverage constraint, there is insufficient basis for a confident trade at this time.",
+      "stopLoss": null,
+      "takeProfit": null
+    },
+    "executed": false
+  },
+  {
+    "id": "2b7176b56dd09bdc",
+    "agentId": "b749ff158122fdec",
+    "timestamp": 1770760328095,
+    "decision": {
+      "action": "short",
+      "asset": "ETH",
+      "size": 0.5,
+      "leverage": 2,
+      "confidence": 0.7,
+      "reasoning": "The strategy focuses on funding rate direction as a key signal. With ETH's positive funding rate, it suggests a short position. Despite the 24h price stability, the high funding rate indicates potential downward pressure.",
+      "stopLoss": 2300,
+      "takeProfit": 2100
+    },
+    "executed": false
+  },
+  {
+    "id": "2d7701289819c44c",
+    "agentId": "aeefb87a856357de",
+    "timestamp": 1770760332564,
+    "decision": {
+      "action": "hold",
+      "asset": "BTC",
+      "size": 0,
+      "leverage": 1,
+      "confidence": 0,
+      "reasoning": "The strategy 'Validate Lit signing and IronClaw integration' does not provide specific entry/exit rules or timeframes. Current market conditions show no price change and low volatility, with a moderate risk level and low leverage available. Funding rates are slightly positive, suggesting a potential short, but without clear strategy directives or strong signals, holding is prudent.",
+      "stopLoss": null,
+      "takeProfit": null
+    },
+    "executed": false
+  },
+  {
+    "id": "ec00079a84a374b3",
+    "agentId": "b749ff158122fdec",
+    "timestamp": 1770760336176,
+    "decision": {
+      "action": "hold",
+      "asset": "BTC",
       "size": 0,
       "leverage": 1,
       "confidence": 0.5,
-      "reasoning": "The Adaptive RSI with Divergence indicator is currently neutral with 50% confidence, providing no clear directional signal. Given the strategy's emphasis on securing profits within 1-hour timeframes and the absence of strong momentum or divergence signals, it is prudent to hold and reassess at the next hourly interval.",
+      "reasoning": "The market is in a low-volatility state with 0% 24h change and limited leverage options. Funding rates are slightly positive, suggesting a potential short, but the strategy lacks specific entry/exit rules or timeframes to act upon. Holding until clearer signals or strategy details emerge.",
       "stopLoss": null,
       "takeProfit": null
+    },
+    "executed": false
+  },
+  {
+    "id": "2a77a65d87dd6805",
+    "agentId": "aeefb87a856357de",
+    "timestamp": 1770760385877,
+    "decision": {
+      "action": "hold",
+      "asset": "BTC",
+      "size": 0,
+      "leverage": 1,
+      "confidence": 0,
+      "reasoning": "The strategy provided does not specify clear entry or exit rules, timeframes, or market behavior patterns to act upon. Additionally, the current market data shows 0% 24h change and a very low funding rate, indicating a lack of strong directional movement. Given the moderate risk level and max leverage constraint, there is insufficient basis for a confident trade at this time.",
+      "stopLoss": null,
+      "takeProfit": null
+    },
+    "executed": false
+  },
+  {
+    "id": "50352c6bd1b0cda1",
+    "agentId": "aeefb87a856357de",
+    "timestamp": 1770760386627,
+    "decision": {
+      "action": "hold",
+      "asset": "BTC",
+      "size": 0,
+      "leverage": 1,
+      "confidence": 0,
+      "reasoning": "The strategy 'Validate Lit signing and IronClaw integration' does not provide specific entry/exit rules or market behavior patterns to act upon. Additionally, the current market conditions show 0% 24h change and low volatility, with funding rates suggesting a slight short bias. However, without clear strategic directives or high-confidence signals, holding is prudent.",
+      "stopLoss": null,
+      "takeProfit": null
+    },
+    "executed": false
+  },
+  {
+    "id": "62cf2c050997ac68",
+    "agentId": "b749ff158122fdec",
+    "timestamp": 1770760387747,
+    "decision": {
+      "action": "short",
+      "asset": "ETH",
+      "size": 0.5,
+      "leverage": 2,
+      "confidence": 0.7,
+      "reasoning": "The strategy focuses on funding rate direction as a key signal. With ETH's positive funding rate, it suggests a short position. Despite the 24h price stability, the high funding rate indicates potential downward pressure.",
+      "stopLoss": 2300,
+      "takeProfit": 2100
+    },
+    "executed": false
+  },
+  {
+    "id": "0a4fcc9ae5fbed02",
+    "agentId": "b749ff158122fdec",
+    "timestamp": 1770760388531,
+    "decision": {
+      "action": "short",
+      "asset": "ETH",
+      "size": 0.5,
+      "leverage": 2,
+      "confidence": 0.7,
+      "reasoning": "Despite the 0% price change, the high positive funding rate on ETH suggests a potential short opportunity as longs are paying shorts. The strategy allows for moderate risk, and the funding rate signal aligns with a short position.",
+      "stopLoss": 2300,
+      "takeProfit": 2100
+    },
+    "executed": false
+  },
+  {
+    "id": "871aa8362114d583",
+    "agentId": "aeefb87a856357de",
+    "timestamp": 1770760445881,
+    "decision": {
+      "action": "hold",
+      "asset": "BTC",
+      "size": 0,
+      "leverage": 1,
+      "confidence": 0,
+      "reasoning": "The strategy provided does not specify clear entry or exit rules, timeframes, or market behavior patterns to act upon. Additionally, the current market data shows 0% 24h change and a very low funding rate, indicating a lack of strong directional movement. Given the moderate risk level and max leverage constraint, there is insufficient basis for a confident trade at this time.",
+      "stopLoss": null,
+      "takeProfit": null
+    },
+    "executed": false
+  },
+  {
+    "id": "1434e5c9b58e2555",
+    "agentId": "aeefb87a856357de",
+    "timestamp": 1770760446634,
+    "decision": {
+      "action": "hold",
+      "asset": "BTC",
+      "size": 0,
+      "leverage": 1,
+      "confidence": 0,
+      "reasoning": "The strategy 'Validate Lit signing and IronClaw integration' does not provide specific entry/exit rules or market behavior patterns to act upon. Additionally, the current market conditions show 0% 24h change and low volatility, with funding rates suggesting a slight short bias. However, without clear strategic directives or high-confidence signals, holding is prudent.",
+      "stopLoss": null,
+      "takeProfit": null
+    },
+    "executed": false
+  },
+  {
+    "id": "cf4f06d1c9e1c288",
+    "agentId": "b749ff158122fdec",
+    "timestamp": 1770760448205,
+    "decision": {
+      "action": "short",
+      "asset": "ETH",
+      "size": 0.5,
+      "leverage": 2,
+      "confidence": 0.7,
+      "reasoning": "The strategy focuses on funding rate direction as a key signal. With ETH's positive funding rate, it suggests a short position. Despite the 24h price stability, the high funding rate indicates potential downward pressure.",
+      "stopLoss": 2300,
+      "takeProfit": 2100
+    },
+    "executed": false
+  },
+  {
+    "id": "e0c18dbd98b7da2a",
+    "agentId": "b749ff158122fdec",
+    "timestamp": 1770760448507,
+    "decision": {
+      "action": "short",
+      "asset": "ETH",
+      "size": 0.5,
+      "leverage": 2,
+      "confidence": 0.7,
+      "reasoning": "Despite the 0% price change, the high positive funding rate on ETH suggests a potential short opportunity as longs are paying shorts. The strategy allows for moderate risk, and the funding rate signal aligns with a short position.",
+      "stopLoss": 2300,
+      "takeProfit": 2100
+    },
+    "executed": false
+  },
+  {
+    "id": "83a6a82c6c112559",
+    "agentId": "aeefb87a856357de",
+    "timestamp": 1770760505884,
+    "decision": {
+      "action": "hold",
+      "asset": "BTC",
+      "size": 0,
+      "leverage": 1,
+      "confidence": 0,
+      "reasoning": "The strategy provided does not specify clear entry or exit rules, timeframes, or market behavior patterns to act upon. Additionally, the current market data shows 0% 24h change and a very low funding rate, indicating a lack of strong directional movement. Given the moderate risk level and max leverage constraint, there is insufficient basis for a confident trade at this time.",
+      "stopLoss": null,
+      "takeProfit": null
+    },
+    "executed": false
+  },
+  {
+    "id": "2d7b34eb95da7acb",
+    "agentId": "aeefb87a856357de",
+    "timestamp": 1770760506631,
+    "decision": {
+      "action": "hold",
+      "asset": "BTC",
+      "size": 0,
+      "leverage": 1,
+      "confidence": 0,
+      "reasoning": "The strategy 'Validate Lit signing and IronClaw integration' does not provide specific entry/exit rules or market behavior patterns to act upon. Additionally, the current market conditions show 0% 24h change and low volatility, with funding rates suggesting a slight short bias. However, without clear strategic directives or high-confidence signals, holding is prudent.",
+      "stopLoss": null,
+      "takeProfit": null
+    },
+    "executed": false
+  },
+  {
+    "id": "490f64c121847249",
+    "agentId": "b749ff158122fdec",
+    "timestamp": 1770760508476,
+    "decision": {
+      "action": "short",
+      "asset": "ETH",
+      "size": 0.5,
+      "leverage": 2,
+      "confidence": 0.7,
+      "reasoning": "Despite the 0% price change, the high positive funding rate on ETH suggests a potential short opportunity as longs are paying shorts. The strategy allows for moderate risk, and the funding rate signal aligns with a short position.",
+      "stopLoss": 2300,
+      "takeProfit": 2100
+    },
+    "executed": false
+  },
+  {
+    "id": "3eba72463e352f90",
+    "agentId": "b749ff158122fdec",
+    "timestamp": 1770760509023,
+    "decision": {
+      "action": "short",
+      "asset": "ETH",
+      "size": 0.5,
+      "leverage": 2,
+      "confidence": 0.7,
+      "reasoning": "The strategy focuses on funding rate direction as a key signal. With ETH's positive funding rate, it suggests a short position. Despite the 24h price stability, the high funding rate indicates potential downward pressure.",
+      "stopLoss": 2300,
+      "takeProfit": 2100
+    },
+    "executed": false
+  },
+  {
+    "id": "7c67f7cac33268e6",
+    "agentId": "b749ff158122fdec",
+    "timestamp": 1770760548617,
+    "decision": {
+      "action": "hold",
+      "asset": "BTC",
+      "size": 0,
+      "leverage": 1,
+      "confidence": 0.5,
+      "reasoning": "The market shows no significant price movement with 0% change in 24h, and funding rates are positive indicating a potential short bias, but the current position is already at max leverage. The strategy requires adherence to moderate risk rules with max 2x leverage, so holding is prudent until clearer signals emerge.",
+      "stopLoss": null,
+      "takeProfit": null
+    },
+    "executed": false
+  },
+  {
+    "id": "099527dcb9fdbf5f",
+    "agentId": "aeefb87a856357de",
+    "timestamp": 1770760565883,
+    "decision": {
+      "action": "hold",
+      "asset": "BTC",
+      "size": 0,
+      "leverage": 1,
+      "confidence": 0,
+      "reasoning": "The strategy provided does not specify clear entry or exit rules, timeframes, or market behavior patterns to act upon. Additionally, the current market data shows 0% 24h change and a very low funding rate, indicating a lack of strong directional movement. Given the moderate risk level and max leverage constraint, there is insufficient basis for a confident trade at this time.",
+      "stopLoss": null,
+      "takeProfit": null
+    },
+    "executed": false
+  },
+  {
+    "id": "01c3e32f7c371b0a",
+    "agentId": "b749ff158122fdec",
+    "timestamp": 1770760566878,
+    "decision": {
+      "action": "short",
+      "asset": "ETH",
+      "size": 0.5,
+      "leverage": 2,
+      "confidence": 0.7,
+      "reasoning": "The strategy focuses on funding rate direction as a key signal. With ETH's positive funding rate, it suggests a short position. Despite the 24h price stability, the high funding rate indicates potential downward pressure.",
+      "stopLoss": 2300,
+      "takeProfit": 2100
+    },
+    "executed": false
+  },
+  {
+    "id": "1d004a67d932d663",
+    "agentId": "b749ff158122fdec",
+    "timestamp": 1770760567284,
+    "decision": {
+      "action": "close",
+      "asset": "BTC",
+      "size": 1,
+      "leverage": 2,
+      "confidence": 0.8,
+      "reasoning": "The BTC position is currently at a loss with high leverage in a low-volatility environment. Given the moderate risk level and the need to adhere to the max leverage of 2x, closing the position to manage risk is prudent.",
+      "stopLoss": null,
+      "takeProfit": null
+    },
+    "executed": true,
+    "executionResult": {
+      "orderId": "market",
+      "fillPrice": 69212.5,
+      "fillSize": 0.00032638994401300346,
+      "status": "filled"
+    }
+  },
+  {
+    "id": "96772bdf223334b5",
+    "agentId": "aeefb87a856357de",
+    "timestamp": 1770760572904,
+    "decision": {
+      "action": "hold",
+      "asset": "BTC",
+      "size": 0,
+      "leverage": 1,
+      "confidence": 0,
+      "reasoning": "The strategy provided does not specify any actionable trading signals or patterns to follow. Additionally, the market conditions show no significant price movement or volatility, and the available leverage is limited to 2x. Thus, no high-confidence opportunity exists at this time.",
+      "stopLoss": null,
+      "takeProfit": null
+    },
+    "executed": false
+  },
+  {
+    "id": "6ff75a8300e9598e",
+    "agentId": "b749ff158122fdec",
+    "timestamp": 1770760573879,
+    "decision": {
+      "action": "hold",
+      "asset": "BTC",
+      "size": 0,
+      "leverage": 1,
+      "confidence": 0.5,
+      "reasoning": "The market shows no significant price movement with 0% 24h change and low volatility. Funding rates are slightly positive, suggesting a minor bias towards shorts, but not strong enough to act upon. The strategy does not provide specific entry/exit rules or timeframes in this context, so holding is prudent.",
+      "stopLoss": null,
+      "takeProfit": null
+    },
+    "executed": false
+  },
+  {
+    "id": "b9f68ad04f953f6d",
+    "agentId": "b749ff158122fdec",
+    "timestamp": 1770760574645,
+    "decision": {
+      "action": "hold",
+      "asset": "BTC",
+      "size": 0,
+      "leverage": 1,
+      "confidence": 0.5,
+      "reasoning": "The strategy requires specific entry/exit rules and market behavior patterns which are not clearly defined in the current data. With 0% 24h change and moderate risk level, there is insufficient momentum or signals to justify a position. Funding rates are positive but not strong enough to warrant a short position under current conditions.",
+      "stopLoss": null,
+      "takeProfit": null
+    },
+    "executed": false
+  },
+  {
+    "id": "fa629cdd462cdd94",
+    "agentId": "b749ff158122fdec",
+    "timestamp": 1770760580928,
+    "decision": {
+      "action": "hold",
+      "asset": "BTC",
+      "size": 0,
+      "leverage": 1,
+      "confidence": 0,
+      "reasoning": "AI returned incomplete decision; holding position."
+    },
+    "executed": false
+  },
+  {
+    "id": "c7e69eb741b51349",
+    "agentId": "b749ff158122fdec",
+    "timestamp": 1770760586309,
+    "decision": {
+      "action": "hold",
+      "asset": "BTC",
+      "size": 0,
+      "leverage": 1,
+      "confidence": 0,
+      "reasoning": "AI returned incomplete decision; holding position."
+    },
+    "executed": false
+  },
+  {
+    "id": "2861c17d9a73592f",
+    "agentId": "aeefb87a856357de",
+    "timestamp": 1770760625893,
+    "decision": {
+      "action": "hold",
+      "asset": "BTC",
+      "size": 0,
+      "leverage": 1,
+      "confidence": 0,
+      "reasoning": "The strategy provided does not specify clear entry or exit rules, timeframes, or market behavior patterns to act upon. Additionally, the current market data shows 0% 24h change and a very low funding rate, indicating a lack of strong directional movement. Given the moderate risk level and max leverage constraint, there is insufficient basis for a confident trade at this time.",
+      "stopLoss": null,
+      "takeProfit": null
+    },
+    "executed": false
+  },
+  {
+    "id": "65d847a3f00c2782",
+    "agentId": "b749ff158122fdec",
+    "timestamp": 1770760629058,
+    "decision": {
+      "action": "short",
+      "asset": "ETH",
+      "size": 0.5,
+      "leverage": 2,
+      "confidence": 0.7,
+      "reasoning": "The strategy focuses on funding rate direction as a key signal. With ETH's positive funding rate, it suggests a short position. Despite the 24h price stability, the high funding rate indicates potential downward pressure.",
+      "stopLoss": 2300,
+      "takeProfit": 2100
+    },
+    "executed": false
+  },
+  {
+    "id": "6273178156f17fea",
+    "agentId": "b749ff158122fdec",
+    "timestamp": 1770760631822,
+    "decision": {
+      "action": "hold",
+      "asset": "BTC",
+      "size": 0,
+      "leverage": 1,
+      "confidence": 0.5,
+      "reasoning": "The strategy details are missing, preventing specific execution. Current market conditions show no price change and low volatility, with positive funding rates suggesting potential shorts, but without strategy guidance, holding is prudent.",
+      "stopLoss": null,
+      "takeProfit": null
+    },
+    "executed": false
+  },
+  {
+    "id": "1f2f87f0d914c346",
+    "agentId": "aeefb87a856357de",
+    "timestamp": 1770760633582,
+    "decision": {
+      "action": "hold",
+      "asset": "BTC",
+      "size": 0,
+      "leverage": 1,
+      "confidence": 0,
+      "reasoning": "The strategy provided lacks specific entry/exit rules or timeframes, and current market data shows no significant price movement or strong signals. Funding rates are positive, suggesting a potential short bias, but without a clear strategy directive or high-confidence indicators, holding is prudent.",
+      "stopLoss": null,
+      "takeProfit": null
+    },
+    "executed": false
+  },
+  {
+    "id": "1bcbc3cc66d02203",
+    "agentId": "aeefb87a856357de",
+    "timestamp": 1770760685885,
+    "decision": {
+      "action": "hold",
+      "asset": "BTC",
+      "size": 0,
+      "leverage": 1,
+      "confidence": 0,
+      "reasoning": "The strategy provided does not specify clear entry or exit rules, timeframes, or market behavior patterns to act upon. Additionally, the current market data shows 0% 24h change and a very low funding rate, indicating a lack of strong directional movement. Given the moderate risk level and max leverage constraint, there is insufficient basis for a confident trade at this time.",
+      "stopLoss": null,
+      "takeProfit": null
+    },
+    "executed": false
+  },
+  {
+    "id": "9ed2e2a2ea98d077",
+    "agentId": "b749ff158122fdec",
+    "timestamp": 1770760688994,
+    "decision": {
+      "action": "short",
+      "asset": "ETH",
+      "size": 0.5,
+      "leverage": 2,
+      "confidence": 0.7,
+      "reasoning": "The strategy focuses on funding rate direction as a key signal. With ETH's positive funding rate, it suggests a short position. Despite the 24h price stability, the high funding rate indicates potential downward pressure.",
+      "stopLoss": 2300,
+      "takeProfit": 2100
+    },
+    "executed": false
+  },
+  {
+    "id": "74b433a67e680c2e",
+    "agentId": "aeefb87a856357de",
+    "timestamp": 1770760707969,
+    "decision": {
+      "action": "hold",
+      "asset": "BTC",
+      "size": 0,
+      "leverage": 1,
+      "confidence": 0,
+      "reasoning": "The strategy 'Validate Lit signing and IronClaw integration' does not provide specific entry/exit rules or market behavior patterns to act upon. Additionally, the current market conditions show 0% 24h change and low volatility, with funding rates suggesting a slight short bias. However, without clear strategic directives or high-confidence signals, holding is prudent.",
+      "stopLoss": null,
+      "takeProfit": null
+    },
+    "executed": false
+  },
+  {
+    "id": "8d03b9e10313efae",
+    "agentId": "b749ff158122fdec",
+    "timestamp": 1770760713471,
+    "decision": {
+      "action": "short",
+      "asset": "ETH",
+      "size": 0.5,
+      "leverage": 2,
+      "confidence": 0.7,
+      "reasoning": "Despite the 0% price change, the high positive funding rate on ETH suggests a potential short opportunity as longs are paying shorts. The strategy allows for moderate risk, and the funding rate signal aligns with a short position.",
+      "stopLoss": 2300,
+      "takeProfit": 2100
+    },
+    "executed": false
+  },
+  {
+    "id": "fc2e72629361fbab",
+    "agentId": "aeefb87a856357de",
+    "timestamp": 1770760745885,
+    "decision": {
+      "action": "hold",
+      "asset": "BTC",
+      "size": 0,
+      "leverage": 1,
+      "confidence": 0,
+      "reasoning": "The strategy provided does not specify clear entry or exit rules, timeframes, or market behavior patterns to act upon. Additionally, the current market data shows 0% 24h change and a very low funding rate, indicating a lack of strong directional movement. Given the moderate risk level and max leverage constraint, there is insufficient basis for a confident trade at this time.",
+      "stopLoss": null,
+      "takeProfit": null
+    },
+    "executed": false
+  },
+  {
+    "id": "09418cc30ec588ca",
+    "agentId": "b749ff158122fdec",
+    "timestamp": 1770760749038,
+    "decision": {
+      "action": "short",
+      "asset": "ETH",
+      "size": 0.5,
+      "leverage": 2,
+      "confidence": 0.7,
+      "reasoning": "The strategy focuses on funding rate direction as a key signal. With ETH's positive funding rate, it suggests a short position. Despite the 24h price stability, the high funding rate indicates potential downward pressure.",
+      "stopLoss": 2300,
+      "takeProfit": 2100
+    },
+    "executed": false
+  },
+  {
+    "id": "6f945f9be049dd95",
+    "agentId": "aeefb87a856357de",
+    "timestamp": 1770760766510,
+    "decision": {
+      "action": "hold",
+      "asset": "BTC",
+      "size": 0,
+      "leverage": 1,
+      "confidence": 0,
+      "reasoning": "The strategy 'Validate Lit signing and IronClaw integration' does not provide specific entry/exit rules or market behavior patterns to act upon. Additionally, the current market conditions show 0% 24h change and low volatility, with funding rates suggesting a slight short bias. However, without clear strategic directives or high-confidence signals, holding is prudent.",
+      "stopLoss": null,
+      "takeProfit": null
+    },
+    "executed": false
+  },
+  {
+    "id": "2dadf433ad1b39c0",
+    "agentId": "b749ff158122fdec",
+    "timestamp": 1770760773498,
+    "decision": {
+      "action": "short",
+      "asset": "ETH",
+      "size": 0.5,
+      "leverage": 2,
+      "confidence": 0.7,
+      "reasoning": "Despite the 0% price change, the high positive funding rate on ETH suggests a potential short opportunity as longs are paying shorts. The strategy allows for moderate risk, and the funding rate signal aligns with a short position.",
+      "stopLoss": 2300,
+      "takeProfit": 2100
+    },
+    "executed": false
+  },
+  {
+    "id": "b5540751ce82260a",
+    "agentId": "aeefb87a856357de",
+    "timestamp": 1770760805888,
+    "decision": {
+      "action": "hold",
+      "asset": "BTC",
+      "size": 0,
+      "leverage": 1,
+      "confidence": 0,
+      "reasoning": "The strategy provided does not specify clear entry or exit rules, timeframes, or market behavior patterns to act upon. Additionally, the current market data shows 0% 24h change and a very low funding rate, indicating a lack of strong directional movement. Given the moderate risk level and max leverage constraint, there is insufficient basis for a confident trade at this time.",
+      "stopLoss": null,
+      "takeProfit": null
+    },
+    "executed": false
+  },
+  {
+    "id": "08ca029ad6794b75",
+    "agentId": "b749ff158122fdec",
+    "timestamp": 1770760808646,
+    "decision": {
+      "action": "short",
+      "asset": "ETH",
+      "size": 0.5,
+      "leverage": 2,
+      "confidence": 0.7,
+      "reasoning": "The strategy focuses on funding rate direction as a key signal. With ETH's positive funding rate, it suggests a short position. Despite the 24h price stability, the high funding rate indicates potential downward pressure.",
+      "stopLoss": 2300,
+      "takeProfit": 2100
+    },
+    "executed": false
+  },
+  {
+    "id": "f78cd859cfe51907",
+    "agentId": "aeefb87a856357de",
+    "timestamp": 1770760816499,
+    "decision": {
+      "action": "hold",
+      "asset": "BTC",
+      "size": 0,
+      "leverage": 1,
+      "confidence": 0.5,
+      "reasoning": "The strategy 'Validate Lit signing and IronClaw integration' does not provide specific entry/exit rules or timeframes. Current market conditions show no significant price movement, and funding rates are positive but not strong enough to justify a short position under moderate risk parameters with max leverage of 2x. Awaiting clearer signals or strategy details.",
+      "stopLoss": null,
+      "takeProfit": null
+    },
+    "executed": false
+  },
+  {
+    "id": "82f2b1a99e27a3c8",
+    "agentId": "aeefb87a856357de",
+    "timestamp": 1770760826510,
+    "decision": {
+      "action": "hold",
+      "asset": "BTC",
+      "size": 0,
+      "leverage": 1,
+      "confidence": 0,
+      "reasoning": "The strategy 'Validate Lit signing and IronClaw integration' does not provide specific entry/exit rules or market behavior patterns to act upon. Additionally, the current market conditions show 0% 24h change and low volatility, with funding rates suggesting a slight short bias. However, without clear strategic directives or high-confidence signals, holding is prudent.",
+      "stopLoss": null,
+      "takeProfit": null
+    },
+    "executed": false
+  },
+  {
+    "id": "73c446cd790b6896",
+    "agentId": "b749ff158122fdec",
+    "timestamp": 1770760831539,
+    "decision": {
+      "action": "short",
+      "asset": "ETH",
+      "size": 0.5,
+      "leverage": 2,
+      "confidence": 0.7,
+      "reasoning": "Despite the 0% price change, the high positive funding rate on ETH suggests a potential short opportunity as longs are paying shorts. The strategy allows for moderate risk, and the funding rate signal aligns with a short position.",
+      "stopLoss": 2300,
+      "takeProfit": 2100
+    },
+    "executed": false
+  },
+  {
+    "id": "bd6db5bfd4282ec9",
+    "agentId": "b749ff158122fdec",
+    "timestamp": 1770760857052,
+    "decision": {
+      "action": "hold",
+      "asset": "BTC",
+      "size": 0,
+      "leverage": 1,
+      "confidence": 0.5,
+      "reasoning": "The market is in a low-volatility state with 0% change in 24h. Funding rates are slightly positive, suggesting a potential short bias, but open interest is stable. Without specific timeframes or entry/exit rules from the strategy, and given the moderate risk level with max leverage of 2x, there is insufficient information to justify a high-confidence trade.",
+      "stopLoss": null,
+      "takeProfit": null
+    },
+    "executed": false
+  },
+  {
+    "id": "3931b87cbb8027df",
+    "agentId": "aeefb87a856357de",
+    "timestamp": 1770760865893,
+    "decision": {
+      "action": "hold",
+      "asset": "BTC",
+      "size": 0,
+      "leverage": 1,
+      "confidence": 0,
+      "reasoning": "The strategy provided does not specify clear entry or exit rules, timeframes, or market behavior patterns to act upon. Additionally, the current market data shows 0% 24h change and a very low funding rate, indicating a lack of strong directional movement. Given the moderate risk level and max leverage constraint, there is insufficient basis for a confident trade at this time.",
+      "stopLoss": null,
+      "takeProfit": null
+    },
+    "executed": false
+  },
+  {
+    "id": "06607623cb3c2c1e",
+    "agentId": "b749ff158122fdec",
+    "timestamp": 1770760870094,
+    "decision": {
+      "action": "short",
+      "asset": "ETH",
+      "size": 0.5,
+      "leverage": 2,
+      "confidence": 0.7,
+      "reasoning": "The strategy focuses on funding rate direction as a key signal. With ETH's positive funding rate, it suggests a short position. Despite the 24h price stability, the high funding rate indicates potential downward pressure.",
+      "stopLoss": 2300,
+      "takeProfit": 2100
+    },
+    "executed": false
+  },
+  {
+    "id": "6edfe404ccf03cdc",
+    "agentId": "aeefb87a856357de",
+    "timestamp": 1770760886514,
+    "decision": {
+      "action": "hold",
+      "asset": "BTC",
+      "size": 0,
+      "leverage": 1,
+      "confidence": 0,
+      "reasoning": "The strategy 'Validate Lit signing and IronClaw integration' does not provide specific entry/exit rules or market behavior patterns to act upon. Additionally, the current market conditions show 0% 24h change and low volatility, with funding rates suggesting a slight short bias. However, without clear strategic directives or high-confidence signals, holding is prudent.",
+      "stopLoss": null,
+      "takeProfit": null
+    },
+    "executed": false
+  },
+  {
+    "id": "33a11077d5807842",
+    "agentId": "b749ff158122fdec",
+    "timestamp": 1770760892401,
+    "decision": {
+      "action": "short",
+      "asset": "ETH",
+      "size": 0.5,
+      "leverage": 2,
+      "confidence": 0.7,
+      "reasoning": "Despite the 0% price change, the high positive funding rate on ETH suggests a potential short opportunity as longs are paying shorts. The strategy allows for moderate risk, and the funding rate signal aligns with a short position.",
+      "stopLoss": 2300,
+      "takeProfit": 2100
+    },
+    "executed": false
+  },
+  {
+    "id": "f0a2622a1a6cd4cf",
+    "agentId": "aeefb87a856357de",
+    "timestamp": 1770760925895,
+    "decision": {
+      "action": "hold",
+      "asset": "BTC",
+      "size": 0,
+      "leverage": 1,
+      "confidence": 0,
+      "reasoning": "The strategy provided does not specify clear entry or exit rules, timeframes, or market behavior patterns to act upon. Additionally, the current market data shows 0% 24h change and a very low funding rate, indicating a lack of strong directional movement. Given the moderate risk level and max leverage constraint, there is insufficient basis for a confident trade at this time.",
+      "stopLoss": null,
+      "takeProfit": null
+    },
+    "executed": false
+  },
+  {
+    "id": "a21d6266092cf374",
+    "agentId": "b749ff158122fdec",
+    "timestamp": 1770760928145,
+    "decision": {
+      "action": "short",
+      "asset": "ETH",
+      "size": 0.5,
+      "leverage": 2,
+      "confidence": 0.7,
+      "reasoning": "The strategy focuses on funding rate direction as a key signal. With ETH's positive funding rate, it suggests a short position. Despite the 24h price stability, the high funding rate indicates potential downward pressure.",
+      "stopLoss": 2300,
+      "takeProfit": 2100
+    },
+    "executed": false
+  },
+  {
+    "id": "f96566c4ae86958c",
+    "agentId": "aeefb87a856357de",
+    "timestamp": 1770760946517,
+    "decision": {
+      "action": "hold",
+      "asset": "BTC",
+      "size": 0,
+      "leverage": 1,
+      "confidence": 0,
+      "reasoning": "The strategy 'Validate Lit signing and IronClaw integration' does not provide specific entry/exit rules or market behavior patterns to act upon. Additionally, the current market conditions show 0% 24h change and low volatility, with funding rates suggesting a slight short bias. However, without clear strategic directives or high-confidence signals, holding is prudent.",
+      "stopLoss": null,
+      "takeProfit": null
+    },
+    "executed": false
+  },
+  {
+    "id": "9c1fb23a431cf5fd",
+    "agentId": "b749ff158122fdec",
+    "timestamp": 1770760951844,
+    "decision": {
+      "action": "short",
+      "asset": "ETH",
+      "size": 0.5,
+      "leverage": 2,
+      "confidence": 0.7,
+      "reasoning": "Despite the 0% price change, the high positive funding rate on ETH suggests a potential short opportunity as longs are paying shorts. The strategy allows for moderate risk, and the funding rate signal aligns with a short position.",
+      "stopLoss": 2300,
+      "takeProfit": 2100
+    },
+    "executed": false
+  },
+  {
+    "id": "1701b422e13259b3",
+    "agentId": "aeefb87a856357de",
+    "timestamp": 1770760985898,
+    "decision": {
+      "action": "hold",
+      "asset": "BTC",
+      "size": 0,
+      "leverage": 1,
+      "confidence": 0,
+      "reasoning": "The strategy provided does not specify clear entry or exit rules, timeframes, or market behavior patterns to act upon. Additionally, the current market data shows 0% 24h change and a very low funding rate, indicating a lack of strong directional movement. Given the moderate risk level and max leverage constraint, there is insufficient basis for a confident trade at this time.",
+      "stopLoss": null,
+      "takeProfit": null
+    },
+    "executed": false
+  },
+  {
+    "id": "89b1856a1cee4397",
+    "agentId": "b749ff158122fdec",
+    "timestamp": 1770760987756,
+    "decision": {
+      "action": "short",
+      "asset": "ETH",
+      "size": 0.5,
+      "leverage": 2,
+      "confidence": 0.7,
+      "reasoning": "The strategy focuses on funding rate direction as a key signal. With ETH's positive funding rate, it suggests a short position. Despite the 24h price stability, the high funding rate indicates potential downward pressure.",
+      "stopLoss": 2300,
+      "takeProfit": 2100
+    },
+    "executed": false
+  },
+  {
+    "id": "eeded2292dc075f6",
+    "agentId": "aeefb87a856357de",
+    "timestamp": 1770761006513,
+    "decision": {
+      "action": "hold",
+      "asset": "BTC",
+      "size": 0,
+      "leverage": 1,
+      "confidence": 0,
+      "reasoning": "The strategy 'Validate Lit signing and IronClaw integration' does not provide specific entry/exit rules or market behavior patterns to act upon. Additionally, the current market conditions show 0% 24h change and low volatility, with funding rates suggesting a slight short bias. However, without clear strategic directives or high-confidence signals, holding is prudent.",
+      "stopLoss": null,
+      "takeProfit": null
+    },
+    "executed": false
+  },
+  {
+    "id": "71ef98e751b54d9d",
+    "agentId": "b749ff158122fdec",
+    "timestamp": 1770761013371,
+    "decision": {
+      "action": "short",
+      "asset": "ETH",
+      "size": 0.5,
+      "leverage": 2,
+      "confidence": 0.7,
+      "reasoning": "Despite the 0% price change, the high positive funding rate on ETH suggests a potential short opportunity as longs are paying shorts. The strategy allows for moderate risk, and the funding rate signal aligns with a short position.",
+      "stopLoss": 2300,
+      "takeProfit": 2100
+    },
+    "executed": false
+  },
+  {
+    "id": "028c185a608dceca",
+    "agentId": "aeefb87a856357de",
+    "timestamp": 1770761045898,
+    "decision": {
+      "action": "hold",
+      "asset": "BTC",
+      "size": 0,
+      "leverage": 1,
+      "confidence": 0,
+      "reasoning": "The strategy provided does not specify clear entry or exit rules, timeframes, or market behavior patterns to act upon. Additionally, the current market data shows 0% 24h change and a very low funding rate, indicating a lack of strong directional movement. Given the moderate risk level and max leverage constraint, there is insufficient basis for a confident trade at this time.",
+      "stopLoss": null,
+      "takeProfit": null
+    },
+    "executed": false
+  },
+  {
+    "id": "62414b6ad889e026",
+    "agentId": "b749ff158122fdec",
+    "timestamp": 1770761047918,
+    "decision": {
+      "action": "short",
+      "asset": "ETH",
+      "size": 0.5,
+      "leverage": 2,
+      "confidence": 0.7,
+      "reasoning": "The strategy focuses on funding rate direction as a key signal. With ETH's positive funding rate, it suggests a short position. Despite the 24h price stability, the high funding rate indicates potential downward pressure.",
+      "stopLoss": 2300,
+      "takeProfit": 2100
+    },
+    "executed": false
+  },
+  {
+    "id": "e773a7e3ea67ecec",
+    "agentId": "aeefb87a856357de",
+    "timestamp": 1770761066518,
+    "decision": {
+      "action": "hold",
+      "asset": "BTC",
+      "size": 0,
+      "leverage": 1,
+      "confidence": 0,
+      "reasoning": "The strategy 'Validate Lit signing and IronClaw integration' does not provide specific entry/exit rules or market behavior patterns to act upon. Additionally, the current market conditions show 0% 24h change and low volatility, with funding rates suggesting a slight short bias. However, without clear strategic directives or high-confidence signals, holding is prudent.",
+      "stopLoss": null,
+      "takeProfit": null
+    },
+    "executed": false
+  },
+  {
+    "id": "cb3966e1da1c383c",
+    "agentId": "b749ff158122fdec",
+    "timestamp": 1770761072702,
+    "decision": {
+      "action": "short",
+      "asset": "ETH",
+      "size": 0.5,
+      "leverage": 2,
+      "confidence": 0.7,
+      "reasoning": "Despite the 0% price change, the high positive funding rate on ETH suggests a potential short opportunity as longs are paying shorts. The strategy allows for moderate risk, and the funding rate signal aligns with a short position.",
+      "stopLoss": 2300,
+      "takeProfit": 2100
+    },
+    "executed": false
+  },
+  {
+    "id": "735e252f7676e912",
+    "agentId": "aeefb87a856357de",
+    "timestamp": 1770761105898,
+    "decision": {
+      "action": "hold",
+      "asset": "BTC",
+      "size": 0,
+      "leverage": 1,
+      "confidence": 0,
+      "reasoning": "The strategy provided does not specify clear entry or exit rules, timeframes, or market behavior patterns to act upon. Additionally, the current market data shows 0% 24h change and a very low funding rate, indicating a lack of strong directional movement. Given the moderate risk level and max leverage constraint, there is insufficient basis for a confident trade at this time.",
+      "stopLoss": null,
+      "takeProfit": null
+    },
+    "executed": false
+  },
+  {
+    "id": "e2e13c4b74187ae6",
+    "agentId": "b749ff158122fdec",
+    "timestamp": 1770761107758,
+    "decision": {
+      "action": "short",
+      "asset": "ETH",
+      "size": 0.5,
+      "leverage": 2,
+      "confidence": 0.7,
+      "reasoning": "The strategy focuses on funding rate direction as a key signal. With ETH's positive funding rate, it suggests a short position. Despite the 24h price stability, the high funding rate indicates potential downward pressure.",
+      "stopLoss": 2300,
+      "takeProfit": 2100
+    },
+    "executed": false
+  },
+  {
+    "id": "4c414e8aaead6f4c",
+    "agentId": "aeefb87a856357de",
+    "timestamp": 1770761126516,
+    "decision": {
+      "action": "hold",
+      "asset": "BTC",
+      "size": 0,
+      "leverage": 1,
+      "confidence": 0,
+      "reasoning": "The strategy 'Validate Lit signing and IronClaw integration' does not provide specific entry/exit rules or market behavior patterns to act upon. Additionally, the current market conditions show 0% 24h change and low volatility, with funding rates suggesting a slight short bias. However, without clear strategic directives or high-confidence signals, holding is prudent.",
+      "stopLoss": null,
+      "takeProfit": null
+    },
+    "executed": false
+  },
+  {
+    "id": "05511c0901d24d1d",
+    "agentId": "b749ff158122fdec",
+    "timestamp": 1770761133655,
+    "decision": {
+      "action": "short",
+      "asset": "ETH",
+      "size": 0.5,
+      "leverage": 2,
+      "confidence": 0.7,
+      "reasoning": "Despite the 0% price change, the high positive funding rate on ETH suggests a potential short opportunity as longs are paying shorts. The strategy allows for moderate risk, and the funding rate signal aligns with a short position.",
+      "stopLoss": 2300,
+      "takeProfit": 2100
+    },
+    "executed": false
+  },
+  {
+    "id": "d6890bf2f8e27534",
+    "agentId": "aeefb87a856357de",
+    "timestamp": 1770761165900,
+    "decision": {
+      "action": "hold",
+      "asset": "BTC",
+      "size": 0,
+      "leverage": 1,
+      "confidence": 0,
+      "reasoning": "The strategy provided does not specify clear entry or exit rules, timeframes, or market behavior patterns to act upon. Additionally, the current market data shows 0% 24h change and a very low funding rate, indicating a lack of strong directional movement. Given the moderate risk level and max leverage constraint, there is insufficient basis for a confident trade at this time.",
+      "stopLoss": null,
+      "takeProfit": null
+    },
+    "executed": false
+  },
+  {
+    "id": "962a15085fc2f9d4",
+    "agentId": "b749ff158122fdec",
+    "timestamp": 1770761167750,
+    "decision": {
+      "action": "short",
+      "asset": "ETH",
+      "size": 0.5,
+      "leverage": 2,
+      "confidence": 0.7,
+      "reasoning": "The strategy focuses on funding rate direction as a key signal. With ETH's positive funding rate, it suggests a short position. Despite the 24h price stability, the high funding rate indicates potential downward pressure.",
+      "stopLoss": 2300,
+      "takeProfit": 2100
+    },
+    "executed": false
+  },
+  {
+    "id": "d6e505e58c867320",
+    "agentId": "aeefb87a856357de",
+    "timestamp": 1770761186517,
+    "decision": {
+      "action": "hold",
+      "asset": "BTC",
+      "size": 0,
+      "leverage": 1,
+      "confidence": 0,
+      "reasoning": "The strategy 'Validate Lit signing and IronClaw integration' does not provide specific entry/exit rules or market behavior patterns to act upon. Additionally, the current market conditions show 0% 24h change and low volatility, with funding rates suggesting a slight short bias. However, without clear strategic directives or high-confidence signals, holding is prudent.",
+      "stopLoss": null,
+      "takeProfit": null
+    },
+    "executed": false
+  },
+  {
+    "id": "a25894aa4d260140",
+    "agentId": "b749ff158122fdec",
+    "timestamp": 1770761193129,
+    "decision": {
+      "action": "short",
+      "asset": "ETH",
+      "size": 0.5,
+      "leverage": 2,
+      "confidence": 0.7,
+      "reasoning": "Despite the 0% price change, the high positive funding rate on ETH suggests a potential short opportunity as longs are paying shorts. The strategy allows for moderate risk, and the funding rate signal aligns with a short position.",
+      "stopLoss": 2300,
+      "takeProfit": 2100
+    },
+    "executed": false
+  },
+  {
+    "id": "8703a646b4024d79",
+    "agentId": "aeefb87a856357de",
+    "timestamp": 1770761225901,
+    "decision": {
+      "action": "hold",
+      "asset": "BTC",
+      "size": 0,
+      "leverage": 1,
+      "confidence": 0,
+      "reasoning": "The strategy provided does not specify clear entry or exit rules, timeframes, or market behavior patterns to act upon. Additionally, the current market data shows 0% 24h change and a very low funding rate, indicating a lack of strong directional movement. Given the moderate risk level and max leverage constraint, there is insufficient basis for a confident trade at this time.",
+      "stopLoss": null,
+      "takeProfit": null
+    },
+    "executed": false
+  },
+  {
+    "id": "098cf92712f29173",
+    "agentId": "b749ff158122fdec",
+    "timestamp": 1770761227770,
+    "decision": {
+      "action": "short",
+      "asset": "ETH",
+      "size": 0.5,
+      "leverage": 2,
+      "confidence": 0.7,
+      "reasoning": "The strategy focuses on funding rate direction as a key signal. With ETH's positive funding rate, it suggests a short position. Despite the 24h price stability, the high funding rate indicates potential downward pressure.",
+      "stopLoss": 2300,
+      "takeProfit": 2100
+    },
+    "executed": false
+  },
+  {
+    "id": "0d6302860ee013ac",
+    "agentId": "aeefb87a856357de",
+    "timestamp": 1770761246519,
+    "decision": {
+      "action": "hold",
+      "asset": "BTC",
+      "size": 0,
+      "leverage": 1,
+      "confidence": 0,
+      "reasoning": "The strategy 'Validate Lit signing and IronClaw integration' does not provide specific entry/exit rules or market behavior patterns to act upon. Additionally, the current market conditions show 0% 24h change and low volatility, with funding rates suggesting a slight short bias. However, without clear strategic directives or high-confidence signals, holding is prudent.",
+      "stopLoss": null,
+      "takeProfit": null
+    },
+    "executed": false
+  },
+  {
+    "id": "179c0ec3018fa986",
+    "agentId": "b749ff158122fdec",
+    "timestamp": 1770761252675,
+    "decision": {
+      "action": "short",
+      "asset": "ETH",
+      "size": 0.5,
+      "leverage": 2,
+      "confidence": 0.7,
+      "reasoning": "Despite the 0% price change, the high positive funding rate on ETH suggests a potential short opportunity as longs are paying shorts. The strategy allows for moderate risk, and the funding rate signal aligns with a short position.",
+      "stopLoss": 2300,
+      "takeProfit": 2100
+    },
+    "executed": false
+  },
+  {
+    "id": "c583c0b2d03f5cd1",
+    "agentId": "aeefb87a856357de",
+    "timestamp": 1770761285905,
+    "decision": {
+      "action": "hold",
+      "asset": "BTC",
+      "size": 0,
+      "leverage": 1,
+      "confidence": 0,
+      "reasoning": "The strategy provided does not specify clear entry or exit rules, timeframes, or market behavior patterns to act upon. Additionally, the current market data shows 0% 24h change and a very low funding rate, indicating a lack of strong directional movement. Given the moderate risk level and max leverage constraint, there is insufficient basis for a confident trade at this time.",
+      "stopLoss": null,
+      "takeProfit": null
+    },
+    "executed": false
+  },
+  {
+    "id": "a990b651ce16166b",
+    "agentId": "b749ff158122fdec",
+    "timestamp": 1770761288182,
+    "decision": {
+      "action": "short",
+      "asset": "ETH",
+      "size": 0.5,
+      "leverage": 2,
+      "confidence": 0.7,
+      "reasoning": "The strategy focuses on funding rate direction as a key signal. With ETH's positive funding rate, it suggests a short position. Despite the 24h price stability, the high funding rate indicates potential downward pressure.",
+      "stopLoss": 2300,
+      "takeProfit": 2100
+    },
+    "executed": false
+  },
+  {
+    "id": "65f6fc13156c8fdd",
+    "agentId": "aeefb87a856357de",
+    "timestamp": 1770761306535,
+    "decision": {
+      "action": "hold",
+      "asset": "BTC",
+      "size": 0,
+      "leverage": 1,
+      "confidence": 0,
+      "reasoning": "The strategy 'Validate Lit signing and IronClaw integration' does not provide specific entry/exit rules or market behavior patterns to act upon. Additionally, the current market conditions show 0% 24h change and low volatility, with funding rates suggesting a slight short bias. However, without clear strategic directives or high-confidence signals, holding is prudent.",
+      "stopLoss": null,
+      "takeProfit": null
+    },
+    "executed": false
+  },
+  {
+    "id": "3f1123c63a268e25",
+    "agentId": "b749ff158122fdec",
+    "timestamp": 1770761313879,
+    "decision": {
+      "action": "short",
+      "asset": "ETH",
+      "size": 0.5,
+      "leverage": 2,
+      "confidence": 0.7,
+      "reasoning": "Despite the 0% price change, the high positive funding rate on ETH suggests a potential short opportunity as longs are paying shorts. The strategy allows for moderate risk, and the funding rate signal aligns with a short position.",
+      "stopLoss": 2300,
+      "takeProfit": 2100
+    },
+    "executed": false
+  },
+  {
+    "id": "924c51816d2e46f9",
+    "agentId": "b749ff158122fdec",
+    "timestamp": 1770761316481,
+    "decision": {
+      "action": "short",
+      "asset": "ETH",
+      "size": 0.5,
+      "leverage": 2,
+      "confidence": 0.7,
+      "reasoning": "Despite the 0% price change, the high positive funding rate on ETH suggests a potential short opportunity as longs are paying shorts. The strategy allows for moderate risk, and the funding rate signal aligns with a short position.",
+      "stopLoss": 2300,
+      "takeProfit": 2100
+    },
+    "executed": false
+  },
+  {
+    "id": "8c081549f90f68b2",
+    "agentId": "aeefb87a856357de",
+    "timestamp": 1770761345904,
+    "decision": {
+      "action": "hold",
+      "asset": "BTC",
+      "size": 0,
+      "leverage": 1,
+      "confidence": 0,
+      "reasoning": "The strategy provided does not specify clear entry or exit rules, timeframes, or market behavior patterns to act upon. Additionally, the current market data shows 0% 24h change and a very low funding rate, indicating a lack of strong directional movement. Given the moderate risk level and max leverage constraint, there is insufficient basis for a confident trade at this time.",
+      "stopLoss": null,
+      "takeProfit": null
+    },
+    "executed": false
+  },
+  {
+    "id": "3b1f69ddd1849d06",
+    "agentId": "b749ff158122fdec",
+    "timestamp": 1770761348615,
+    "decision": {
+      "action": "short",
+      "asset": "ETH",
+      "size": 0.5,
+      "leverage": 2,
+      "confidence": 0.7,
+      "reasoning": "The strategy focuses on funding rate direction as a key signal. With ETH's positive funding rate, it suggests a short position. Despite the 24h price stability, the high funding rate indicates potential downward pressure.",
+      "stopLoss": 2300,
+      "takeProfit": 2100
+    },
+    "executed": false
+  },
+  {
+    "id": "6e502d8dd547d380",
+    "agentId": "aeefb87a856357de",
+    "timestamp": 1770761366528,
+    "decision": {
+      "action": "hold",
+      "asset": "BTC",
+      "size": 0,
+      "leverage": 1,
+      "confidence": 0,
+      "reasoning": "The strategy 'Validate Lit signing and IronClaw integration' does not provide specific entry/exit rules or market behavior patterns to act upon. Additionally, the current market conditions show 0% 24h change and low volatility, with funding rates suggesting a slight short bias. However, without clear strategic directives or high-confidence signals, holding is prudent.",
+      "stopLoss": null,
+      "takeProfit": null
+    },
+    "executed": false
+  },
+  {
+    "id": "f2229df209886fcd",
+    "agentId": "b749ff158122fdec",
+    "timestamp": 1770761373794,
+    "decision": {
+      "action": "short",
+      "asset": "ETH",
+      "size": 0.5,
+      "leverage": 2,
+      "confidence": 0.7,
+      "reasoning": "Despite the 0% price change, the high positive funding rate on ETH suggests a potential short opportunity as longs are paying shorts. The strategy allows for moderate risk, and the funding rate signal aligns with a short position.",
+      "stopLoss": 2300,
+      "takeProfit": 2100
+    },
+    "executed": false
+  },
+  {
+    "id": "cbbebfd5c56d8b32",
+    "agentId": "aeefb87a856357de",
+    "timestamp": 1770761405907,
+    "decision": {
+      "action": "hold",
+      "asset": "BTC",
+      "size": 0,
+      "leverage": 1,
+      "confidence": 0,
+      "reasoning": "The strategy provided does not specify clear entry or exit rules, timeframes, or market behavior patterns to act upon. Additionally, the current market data shows 0% 24h change and a very low funding rate, indicating a lack of strong directional movement. Given the moderate risk level and max leverage constraint, there is insufficient basis for a confident trade at this time.",
+      "stopLoss": null,
+      "takeProfit": null
+    },
+    "executed": false
+  },
+  {
+    "id": "d7887bb0d123c34f",
+    "agentId": "b749ff158122fdec",
+    "timestamp": 1770761409082,
+    "decision": {
+      "action": "short",
+      "asset": "ETH",
+      "size": 0.5,
+      "leverage": 2,
+      "confidence": 0.7,
+      "reasoning": "The strategy focuses on funding rate direction as a key signal. With ETH's positive funding rate, it suggests a short position. Despite the 24h price stability, the high funding rate indicates potential downward pressure.",
+      "stopLoss": 2300,
+      "takeProfit": 2100
+    },
+    "executed": false
+  },
+  {
+    "id": "cf2460f7138234a2",
+    "agentId": "aeefb87a856357de",
+    "timestamp": 1770761426522,
+    "decision": {
+      "action": "hold",
+      "asset": "BTC",
+      "size": 0,
+      "leverage": 1,
+      "confidence": 0,
+      "reasoning": "The strategy 'Validate Lit signing and IronClaw integration' does not provide specific entry/exit rules or market behavior patterns to act upon. Additionally, the current market conditions show 0% 24h change and low volatility, with funding rates suggesting a slight short bias. However, without clear strategic directives or high-confidence signals, holding is prudent.",
+      "stopLoss": null,
+      "takeProfit": null
+    },
+    "executed": false
+  },
+  {
+    "id": "9ce235d1940a50c8",
+    "agentId": "b749ff158122fdec",
+    "timestamp": 1770761432672,
+    "decision": {
+      "action": "short",
+      "asset": "ETH",
+      "size": 0.5,
+      "leverage": 2,
+      "confidence": 0.7,
+      "reasoning": "Despite the 0% price change, the high positive funding rate on ETH suggests a potential short opportunity as longs are paying shorts. The strategy allows for moderate risk, and the funding rate signal aligns with a short position.",
+      "stopLoss": 2300,
+      "takeProfit": 2100
+    },
+    "executed": false
+  },
+  {
+    "id": "28bc2244d5cbcea2",
+    "agentId": "aeefb87a856357de",
+    "timestamp": 1770761465901,
+    "decision": {
+      "action": "hold",
+      "asset": "BTC",
+      "size": 0,
+      "leverage": 1,
+      "confidence": 0,
+      "reasoning": "The strategy provided does not specify clear entry or exit rules, timeframes, or market behavior patterns to act upon. Additionally, the current market data shows 0% 24h change and a very low funding rate, indicating a lack of strong directional movement. Given the moderate risk level and max leverage constraint, there is insufficient basis for a confident trade at this time.",
+      "stopLoss": null,
+      "takeProfit": null
+    },
+    "executed": false
+  },
+  {
+    "id": "eb4ffd135e0c74e9",
+    "agentId": "b749ff158122fdec",
+    "timestamp": 1770761473845,
+    "decision": {
+      "action": "short",
+      "asset": "ETH",
+      "size": 0.5,
+      "leverage": 2,
+      "confidence": 0.7,
+      "reasoning": "The strategy focuses on funding rate direction as a key signal. With ETH's positive funding rate, it suggests a short position. Despite the 24h price stability, the high funding rate indicates potential downward pressure.",
+      "stopLoss": 2300,
+      "takeProfit": 2100
+    },
+    "executed": false
+  },
+  {
+    "id": "453492fcd0be028d",
+    "agentId": "aeefb87a856357de",
+    "timestamp": 1770761486524,
+    "decision": {
+      "action": "hold",
+      "asset": "BTC",
+      "size": 0,
+      "leverage": 1,
+      "confidence": 0,
+      "reasoning": "The strategy 'Validate Lit signing and IronClaw integration' does not provide specific entry/exit rules or market behavior patterns to act upon. Additionally, the current market conditions show 0% 24h change and low volatility, with funding rates suggesting a slight short bias. However, without clear strategic directives or high-confidence signals, holding is prudent.",
+      "stopLoss": null,
+      "takeProfit": null
+    },
+    "executed": false
+  },
+  {
+    "id": "90ee1c28709b0eef",
+    "agentId": "b749ff158122fdec",
+    "timestamp": 1770761492329,
+    "decision": {
+      "action": "short",
+      "asset": "ETH",
+      "size": 0.5,
+      "leverage": 2,
+      "confidence": 0.7,
+      "reasoning": "Despite the 0% price change, the high positive funding rate on ETH suggests a potential short opportunity as longs are paying shorts. The strategy allows for moderate risk, and the funding rate signal aligns with a short position.",
+      "stopLoss": 2300,
+      "takeProfit": 2100
+    },
+    "executed": false
+  },
+  {
+    "id": "9376f8bd1f4b1a9c",
+    "agentId": "aeefb87a856357de",
+    "timestamp": 1770761525910,
+    "decision": {
+      "action": "hold",
+      "asset": "BTC",
+      "size": 0,
+      "leverage": 1,
+      "confidence": 0,
+      "reasoning": "The strategy provided does not specify clear entry or exit rules, timeframes, or market behavior patterns to act upon. Additionally, the current market data shows 0% 24h change and a very low funding rate, indicating a lack of strong directional movement. Given the moderate risk level and max leverage constraint, there is insufficient basis for a confident trade at this time.",
+      "stopLoss": null,
+      "takeProfit": null
+    },
+    "executed": false
+  },
+  {
+    "id": "af94fd566288206c",
+    "agentId": "b749ff158122fdec",
+    "timestamp": 1770761527797,
+    "decision": {
+      "action": "short",
+      "asset": "ETH",
+      "size": 0.5,
+      "leverage": 2,
+      "confidence": 0.7,
+      "reasoning": "The strategy focuses on funding rate direction as a key signal. With ETH's positive funding rate, it suggests a short position. Despite the 24h price stability, the high funding rate indicates potential downward pressure.",
+      "stopLoss": 2300,
+      "takeProfit": 2100
+    },
+    "executed": false
+  },
+  {
+    "id": "49fc0962ba789659",
+    "agentId": "aeefb87a856357de",
+    "timestamp": 1770761546529,
+    "decision": {
+      "action": "hold",
+      "asset": "BTC",
+      "size": 0,
+      "leverage": 1,
+      "confidence": 0,
+      "reasoning": "The strategy 'Validate Lit signing and IronClaw integration' does not provide specific entry/exit rules or market behavior patterns to act upon. Additionally, the current market conditions show 0% 24h change and low volatility, with funding rates suggesting a slight short bias. However, without clear strategic directives or high-confidence signals, holding is prudent.",
+      "stopLoss": null,
+      "takeProfit": null
+    },
+    "executed": false
+  },
+  {
+    "id": "ed22b523b87b5f0e",
+    "agentId": "b749ff158122fdec",
+    "timestamp": 1770761552167,
+    "decision": {
+      "action": "short",
+      "asset": "ETH",
+      "size": 0.5,
+      "leverage": 2,
+      "confidence": 0.7,
+      "reasoning": "Despite the 0% price change, the high positive funding rate on ETH suggests a potential short opportunity as longs are paying shorts. The strategy allows for moderate risk, and the funding rate signal aligns with a short position.",
+      "stopLoss": 2300,
+      "takeProfit": 2100
+    },
+    "executed": false
+  },
+  {
+    "id": "be250ff10c655f91",
+    "agentId": "aeefb87a856357de",
+    "timestamp": 1770761585910,
+    "decision": {
+      "action": "hold",
+      "asset": "BTC",
+      "size": 0,
+      "leverage": 1,
+      "confidence": 0,
+      "reasoning": "The strategy provided does not specify clear entry or exit rules, timeframes, or market behavior patterns to act upon. Additionally, the current market data shows 0% 24h change and a very low funding rate, indicating a lack of strong directional movement. Given the moderate risk level and max leverage constraint, there is insufficient basis for a confident trade at this time.",
+      "stopLoss": null,
+      "takeProfit": null
+    },
+    "executed": false
+  },
+  {
+    "id": "390aa431d0f941d0",
+    "agentId": "b749ff158122fdec",
+    "timestamp": 1770761587766,
+    "decision": {
+      "action": "short",
+      "asset": "ETH",
+      "size": 0.5,
+      "leverage": 2,
+      "confidence": 0.7,
+      "reasoning": "The strategy focuses on funding rate direction as a key signal. With ETH's positive funding rate, it suggests a short position. Despite the 24h price stability, the high funding rate indicates potential downward pressure.",
+      "stopLoss": 2300,
+      "takeProfit": 2100
+    },
+    "executed": false
+  },
+  {
+    "id": "7f6ee90067430f6a",
+    "agentId": "aeefb87a856357de",
+    "timestamp": 1770761606532,
+    "decision": {
+      "action": "hold",
+      "asset": "BTC",
+      "size": 0,
+      "leverage": 1,
+      "confidence": 0,
+      "reasoning": "The strategy 'Validate Lit signing and IronClaw integration' does not provide specific entry/exit rules or market behavior patterns to act upon. Additionally, the current market conditions show 0% 24h change and low volatility, with funding rates suggesting a slight short bias. However, without clear strategic directives or high-confidence signals, holding is prudent.",
+      "stopLoss": null,
+      "takeProfit": null
+    },
+    "executed": false
+  },
+  {
+    "id": "a296708cac607650",
+    "agentId": "b749ff158122fdec",
+    "timestamp": 1770761612299,
+    "decision": {
+      "action": "short",
+      "asset": "ETH",
+      "size": 0.5,
+      "leverage": 2,
+      "confidence": 0.7,
+      "reasoning": "Despite the 0% price change, the high positive funding rate on ETH suggests a potential short opportunity as longs are paying shorts. The strategy allows for moderate risk, and the funding rate signal aligns with a short position.",
+      "stopLoss": 2300,
+      "takeProfit": 2100
+    },
+    "executed": false
+  },
+  {
+    "id": "e1fb21b19caecb36",
+    "agentId": "aeefb87a856357de",
+    "timestamp": 1770761645912,
+    "decision": {
+      "action": "hold",
+      "asset": "BTC",
+      "size": 0,
+      "leverage": 1,
+      "confidence": 0,
+      "reasoning": "The strategy provided does not specify clear entry or exit rules, timeframes, or market behavior patterns to act upon. Additionally, the current market data shows 0% 24h change and a very low funding rate, indicating a lack of strong directional movement. Given the moderate risk level and max leverage constraint, there is insufficient basis for a confident trade at this time.",
+      "stopLoss": null,
+      "takeProfit": null
+    },
+    "executed": false
+  },
+  {
+    "id": "52b5f1ec930e094f",
+    "agentId": "b749ff158122fdec",
+    "timestamp": 1770761647869,
+    "decision": {
+      "action": "short",
+      "asset": "ETH",
+      "size": 0.5,
+      "leverage": 2,
+      "confidence": 0.7,
+      "reasoning": "The strategy focuses on funding rate direction as a key signal. With ETH's positive funding rate, it suggests a short position. Despite the 24h price stability, the high funding rate indicates potential downward pressure.",
+      "stopLoss": 2300,
+      "takeProfit": 2100
+    },
+    "executed": false
+  },
+  {
+    "id": "91fcf248573968d4",
+    "agentId": "aeefb87a856357de",
+    "timestamp": 1770761666530,
+    "decision": {
+      "action": "hold",
+      "asset": "BTC",
+      "size": 0,
+      "leverage": 1,
+      "confidence": 0,
+      "reasoning": "The strategy 'Validate Lit signing and IronClaw integration' does not provide specific entry/exit rules or market behavior patterns to act upon. Additionally, the current market conditions show 0% 24h change and low volatility, with funding rates suggesting a slight short bias. However, without clear strategic directives or high-confidence signals, holding is prudent.",
+      "stopLoss": null,
+      "takeProfit": null
+    },
+    "executed": false
+  },
+  {
+    "id": "4abafd23f4d6f87c",
+    "agentId": "b749ff158122fdec",
+    "timestamp": 1770761672096,
+    "decision": {
+      "action": "short",
+      "asset": "ETH",
+      "size": 0.5,
+      "leverage": 2,
+      "confidence": 0.7,
+      "reasoning": "Despite the 0% price change, the high positive funding rate on ETH suggests a potential short opportunity as longs are paying shorts. The strategy allows for moderate risk, and the funding rate signal aligns with a short position.",
+      "stopLoss": 2300,
+      "takeProfit": 2100
+    },
+    "executed": false
+  },
+  {
+    "id": "a544d98e98c91bc6",
+    "agentId": "aeefb87a856357de",
+    "timestamp": 1770761705935,
+    "decision": {
+      "action": "hold",
+      "asset": "BTC",
+      "size": 0,
+      "leverage": 1,
+      "confidence": 0,
+      "reasoning": "The strategy provided does not specify clear entry or exit rules, timeframes, or market behavior patterns to act upon. Additionally, the current market data shows 0% 24h change and a very low funding rate, indicating a lack of strong directional movement. Given the moderate risk level and max leverage constraint, there is insufficient basis for a confident trade at this time.",
+      "stopLoss": null,
+      "takeProfit": null
+    },
+    "executed": false
+  },
+  {
+    "id": "d7d50d0d04de9c4d",
+    "agentId": "b749ff158122fdec",
+    "timestamp": 1770761707788,
+    "decision": {
+      "action": "short",
+      "asset": "ETH",
+      "size": 0.5,
+      "leverage": 2,
+      "confidence": 0.7,
+      "reasoning": "The strategy focuses on funding rate direction as a key signal. With ETH's positive funding rate, it suggests a short position. Despite the 24h price stability, the high funding rate indicates potential downward pressure.",
+      "stopLoss": 2300,
+      "takeProfit": 2100
+    },
+    "executed": false
+  },
+  {
+    "id": "59b4efb1ce111966",
+    "agentId": "aeefb87a856357de",
+    "timestamp": 1770761726537,
+    "decision": {
+      "action": "hold",
+      "asset": "BTC",
+      "size": 0,
+      "leverage": 1,
+      "confidence": 0,
+      "reasoning": "The strategy 'Validate Lit signing and IronClaw integration' does not provide specific entry/exit rules or market behavior patterns to act upon. Additionally, the current market conditions show 0% 24h change and low volatility, with funding rates suggesting a slight short bias. However, without clear strategic directives or high-confidence signals, holding is prudent.",
+      "stopLoss": null,
+      "takeProfit": null
+    },
+    "executed": false
+  },
+  {
+    "id": "e5d9f3441f949453",
+    "agentId": "b749ff158122fdec",
+    "timestamp": 1770761732522,
+    "decision": {
+      "action": "short",
+      "asset": "ETH",
+      "size": 0.5,
+      "leverage": 2,
+      "confidence": 0.7,
+      "reasoning": "Despite the 0% price change, the high positive funding rate on ETH suggests a potential short opportunity as longs are paying shorts. The strategy allows for moderate risk, and the funding rate signal aligns with a short position.",
+      "stopLoss": 2300,
+      "takeProfit": 2100
+    },
+    "executed": false
+  },
+  {
+    "id": "09072efd22392c18",
+    "agentId": "aeefb87a856357de",
+    "timestamp": 1770761765941,
+    "decision": {
+      "action": "hold",
+      "asset": "BTC",
+      "size": 0,
+      "leverage": 1,
+      "confidence": 0,
+      "reasoning": "The strategy provided does not specify clear entry or exit rules, timeframes, or market behavior patterns to act upon. Additionally, the current market data shows 0% 24h change and a very low funding rate, indicating a lack of strong directional movement. Given the moderate risk level and max leverage constraint, there is insufficient basis for a confident trade at this time.",
+      "stopLoss": null,
+      "takeProfit": null
+    },
+    "executed": false
+  },
+  {
+    "id": "489b683fe14c977f",
+    "agentId": "b749ff158122fdec",
+    "timestamp": 1770761769295,
+    "decision": {
+      "action": "short",
+      "asset": "ETH",
+      "size": 0.5,
+      "leverage": 2,
+      "confidence": 0.7,
+      "reasoning": "The strategy focuses on funding rate direction as a key signal. With ETH's positive funding rate, it suggests a short position. Despite the 24h price stability, the high funding rate indicates potential downward pressure.",
+      "stopLoss": 2300,
+      "takeProfit": 2100
+    },
+    "executed": false
+  },
+  {
+    "id": "bf60527ce404bc65",
+    "agentId": "aeefb87a856357de",
+    "timestamp": 1770761786536,
+    "decision": {
+      "action": "hold",
+      "asset": "BTC",
+      "size": 0,
+      "leverage": 1,
+      "confidence": 0,
+      "reasoning": "The strategy 'Validate Lit signing and IronClaw integration' does not provide specific entry/exit rules or market behavior patterns to act upon. Additionally, the current market conditions show 0% 24h change and low volatility, with funding rates suggesting a slight short bias. However, without clear strategic directives or high-confidence signals, holding is prudent.",
+      "stopLoss": null,
+      "takeProfit": null
+    },
+    "executed": false
+  },
+  {
+    "id": "d14d72c05417ae7b",
+    "agentId": "b749ff158122fdec",
+    "timestamp": 1770761793443,
+    "decision": {
+      "action": "short",
+      "asset": "ETH",
+      "size": 0.5,
+      "leverage": 2,
+      "confidence": 0.7,
+      "reasoning": "Despite the 0% price change, the high positive funding rate on ETH suggests a potential short opportunity as longs are paying shorts. The strategy allows for moderate risk, and the funding rate signal aligns with a short position.",
+      "stopLoss": 2300,
+      "takeProfit": 2100
+    },
+    "executed": false
+  },
+  {
+    "id": "0f7c50f3f1616a0f",
+    "agentId": "aeefb87a856357de",
+    "timestamp": 1770761825931,
+    "decision": {
+      "action": "hold",
+      "asset": "BTC",
+      "size": 0,
+      "leverage": 1,
+      "confidence": 0,
+      "reasoning": "The strategy provided does not specify clear entry or exit rules, timeframes, or market behavior patterns to act upon. Additionally, the current market data shows 0% 24h change and a very low funding rate, indicating a lack of strong directional movement. Given the moderate risk level and max leverage constraint, there is insufficient basis for a confident trade at this time.",
+      "stopLoss": null,
+      "takeProfit": null
+    },
+    "executed": false
+  },
+  {
+    "id": "1ffd436403339427",
+    "agentId": "b749ff158122fdec",
+    "timestamp": 1770761829035,
+    "decision": {
+      "action": "short",
+      "asset": "ETH",
+      "size": 0.5,
+      "leverage": 2,
+      "confidence": 0.7,
+      "reasoning": "The strategy focuses on funding rate direction as a key signal. With ETH's positive funding rate, it suggests a short position. Despite the 24h price stability, the high funding rate indicates potential downward pressure.",
+      "stopLoss": 2300,
+      "takeProfit": 2100
+    },
+    "executed": false
+  },
+  {
+    "id": "359b2b6133dac5cd",
+    "agentId": "aeefb87a856357de",
+    "timestamp": 1770761885933,
+    "decision": {
+      "action": "hold",
+      "asset": "BTC",
+      "size": 0,
+      "leverage": 1,
+      "confidence": 0,
+      "reasoning": "The strategy provided does not specify clear entry or exit rules, timeframes, or market behavior patterns to act upon. Additionally, the current market data shows 0% 24h change and a very low funding rate, indicating a lack of strong directional movement. Given the moderate risk level and max leverage constraint, there is insufficient basis for a confident trade at this time.",
+      "stopLoss": null,
+      "takeProfit": null
+    },
+    "executed": false
+  },
+  {
+    "id": "6bb83c11c4f424d6",
+    "agentId": "b749ff158122fdec",
+    "timestamp": 1770761888900,
+    "decision": {
+      "action": "short",
+      "asset": "ETH",
+      "size": 0.5,
+      "leverage": 2,
+      "confidence": 0.7,
+      "reasoning": "The strategy focuses on funding rate direction as a key signal. With ETH's positive funding rate, it suggests a short position. Despite the 24h price stability, the high funding rate indicates potential downward pressure.",
+      "stopLoss": 2300,
+      "takeProfit": 2100
+    },
+    "executed": false
+  },
+  {
+    "id": "328eb07fe7ba9644",
+    "agentId": "aeefb87a856357de",
+    "timestamp": 1770761945916,
+    "decision": {
+      "action": "hold",
+      "asset": "BTC",
+      "size": 0,
+      "leverage": 1,
+      "confidence": 0,
+      "reasoning": "The strategy provided does not specify clear entry or exit rules, timeframes, or market behavior patterns to act upon. Additionally, the current market data shows 0% 24h change and a very low funding rate, indicating a lack of strong directional movement. Given the moderate risk level and max leverage constraint, there is insufficient basis for a confident trade at this time.",
+      "stopLoss": null,
+      "takeProfit": null
+    },
+    "executed": false
+  },
+  {
+    "id": "3296046b7a8df1a5",
+    "agentId": "b749ff158122fdec",
+    "timestamp": 1770761948990,
+    "decision": {
+      "action": "short",
+      "asset": "ETH",
+      "size": 0.5,
+      "leverage": 2,
+      "confidence": 0.7,
+      "reasoning": "The strategy focuses on funding rate direction as a key signal. With ETH's positive funding rate, it suggests a short position. Despite the 24h price stability, the high funding rate indicates potential downward pressure.",
+      "stopLoss": 2300,
+      "takeProfit": 2100
+    },
+    "executed": false
+  },
+  {
+    "id": "9b549530e1cf2c7f",
+    "agentId": "aeefb87a856357de",
+    "timestamp": 1770762005938,
+    "decision": {
+      "action": "hold",
+      "asset": "BTC",
+      "size": 0,
+      "leverage": 1,
+      "confidence": 0,
+      "reasoning": "The strategy provided does not specify clear entry or exit rules, timeframes, or market behavior patterns to act upon. Additionally, the current market data shows 0% 24h change and a very low funding rate, indicating a lack of strong directional movement. Given the moderate risk level and max leverage constraint, there is insufficient basis for a confident trade at this time.",
+      "stopLoss": null,
+      "takeProfit": null
+    },
+    "executed": false
+  },
+  {
+    "id": "a23d05ba3b8a8818",
+    "agentId": "b749ff158122fdec",
+    "timestamp": 1770762009039,
+    "decision": {
+      "action": "short",
+      "asset": "ETH",
+      "size": 0.5,
+      "leverage": 2,
+      "confidence": 0.7,
+      "reasoning": "The strategy focuses on funding rate direction as a key signal. With ETH's positive funding rate, it suggests a short position. Despite the 24h price stability, the high funding rate indicates potential downward pressure.",
+      "stopLoss": 2300,
+      "takeProfit": 2100
+    },
+    "executed": false
+  },
+  {
+    "id": "380885146ddf3f1f",
+    "agentId": "aeefb87a856357de",
+    "timestamp": 1770762065918,
+    "decision": {
+      "action": "hold",
+      "asset": "BTC",
+      "size": 0,
+      "leverage": 1,
+      "confidence": 0,
+      "reasoning": "The strategy provided does not specify clear entry or exit rules, timeframes, or market behavior patterns to act upon. Additionally, the current market data shows 0% 24h change and a very low funding rate, indicating a lack of strong directional movement. Given the moderate risk level and max leverage constraint, there is insufficient basis for a confident trade at this time.",
+      "stopLoss": null,
+      "takeProfit": null
+    },
+    "executed": false
+  },
+  {
+    "id": "f8d5ac5b5f9b97db",
+    "agentId": "b749ff158122fdec",
+    "timestamp": 1770762073503,
+    "decision": {
+      "action": "short",
+      "asset": "ETH",
+      "size": 0.5,
+      "leverage": 2,
+      "confidence": 0.7,
+      "reasoning": "The strategy focuses on funding rate direction as a key signal. With ETH's positive funding rate, it suggests a short position. Despite the 24h price stability, the high funding rate indicates potential downward pressure.",
+      "stopLoss": 2300,
+      "takeProfit": 2100
+    },
+    "executed": false
+  },
+  {
+    "id": "841a872a458f4bf7",
+    "agentId": "aeefb87a856357de",
+    "timestamp": 1770762125938,
+    "decision": {
+      "action": "hold",
+      "asset": "BTC",
+      "size": 0,
+      "leverage": 1,
+      "confidence": 0,
+      "reasoning": "The strategy provided does not specify clear entry or exit rules, timeframes, or market behavior patterns to act upon. Additionally, the current market data shows 0% 24h change and a very low funding rate, indicating a lack of strong directional movement. Given the moderate risk level and max leverage constraint, there is insufficient basis for a confident trade at this time.",
+      "stopLoss": null,
+      "takeProfit": null
+    },
+    "executed": false
+  },
+  {
+    "id": "e85e912c593142b4",
+    "agentId": "b749ff158122fdec",
+    "timestamp": 1770762128697,
+    "decision": {
+      "action": "short",
+      "asset": "ETH",
+      "size": 0.5,
+      "leverage": 2,
+      "confidence": 0.7,
+      "reasoning": "The strategy focuses on funding rate direction as a key signal. With ETH's positive funding rate, it suggests a short position. Despite the 24h price stability, the high funding rate indicates potential downward pressure.",
+      "stopLoss": 2300,
+      "takeProfit": 2100
+    },
+    "executed": false
+  },
+  {
+    "id": "6da8848257a4969d",
+    "agentId": "aeefb87a856357de",
+    "timestamp": 1770762185945,
+    "decision": {
+      "action": "hold",
+      "asset": "BTC",
+      "size": 0,
+      "leverage": 1,
+      "confidence": 0,
+      "reasoning": "The strategy provided does not specify clear entry or exit rules, timeframes, or market behavior patterns to act upon. Additionally, the current market data shows 0% 24h change and a very low funding rate, indicating a lack of strong directional movement. Given the moderate risk level and max leverage constraint, there is insufficient basis for a confident trade at this time.",
+      "stopLoss": null,
+      "takeProfit": null
+    },
+    "executed": false
+  },
+  {
+    "id": "e41a0beef1d56ea8",
+    "agentId": "b749ff158122fdec",
+    "timestamp": 1770762188657,
+    "decision": {
+      "action": "short",
+      "asset": "ETH",
+      "size": 0.5,
+      "leverage": 2,
+      "confidence": 0.7,
+      "reasoning": "The strategy focuses on funding rate direction as a key signal. With ETH's positive funding rate, it suggests a short position. Despite the 24h price stability, the high funding rate indicates potential downward pressure.",
+      "stopLoss": 2300,
+      "takeProfit": 2100
+    },
+    "executed": false
+  },
+  {
+    "id": "ffb1db2ab42dc3dc",
+    "agentId": "aeefb87a856357de",
+    "timestamp": 1770762245946,
+    "decision": {
+      "action": "hold",
+      "asset": "BTC",
+      "size": 0,
+      "leverage": 1,
+      "confidence": 0,
+      "reasoning": "The strategy provided does not specify clear entry or exit rules, timeframes, or market behavior patterns to act upon. Additionally, the current market data shows 0% 24h change and a very low funding rate, indicating a lack of strong directional movement. Given the moderate risk level and max leverage constraint, there is insufficient basis for a confident trade at this time.",
+      "stopLoss": null,
+      "takeProfit": null
+    },
+    "executed": false
+  },
+  {
+    "id": "431535560789b8c5",
+    "agentId": "b749ff158122fdec",
+    "timestamp": 1770762249013,
+    "decision": {
+      "action": "short",
+      "asset": "ETH",
+      "size": 0.5,
+      "leverage": 2,
+      "confidence": 0.7,
+      "reasoning": "The strategy focuses on funding rate direction as a key signal. With ETH's positive funding rate, it suggests a short position. Despite the 24h price stability, the high funding rate indicates potential downward pressure.",
+      "stopLoss": 2300,
+      "takeProfit": 2100
+    },
+    "executed": false
+  },
+  {
+    "id": "ad51ad447070378e",
+    "agentId": "aeefb87a856357de",
+    "timestamp": 1770762305947,
+    "decision": {
+      "action": "hold",
+      "asset": "BTC",
+      "size": 0,
+      "leverage": 1,
+      "confidence": 0,
+      "reasoning": "The strategy provided does not specify clear entry or exit rules, timeframes, or market behavior patterns to act upon. Additionally, the current market data shows 0% 24h change and a very low funding rate, indicating a lack of strong directional movement. Given the moderate risk level and max leverage constraint, there is insufficient basis for a confident trade at this time.",
+      "stopLoss": null,
+      "takeProfit": null
+    },
+    "executed": false
+  },
+  {
+    "id": "3a6281547ae15667",
+    "agentId": "b749ff158122fdec",
+    "timestamp": 1770762308635,
+    "decision": {
+      "action": "short",
+      "asset": "ETH",
+      "size": 0.5,
+      "leverage": 2,
+      "confidence": 0.7,
+      "reasoning": "The strategy focuses on funding rate direction as a key signal. With ETH's positive funding rate, it suggests a short position. Despite the 24h price stability, the high funding rate indicates potential downward pressure.",
+      "stopLoss": 2300,
+      "takeProfit": 2100
+    },
+    "executed": false
+  },
+  {
+    "id": "b3f941a137a1aba5",
+    "agentId": "aeefb87a856357de",
+    "timestamp": 1770762365960,
+    "decision": {
+      "action": "hold",
+      "asset": "BTC",
+      "size": 0,
+      "leverage": 1,
+      "confidence": 0,
+      "reasoning": "The strategy provided does not specify clear entry or exit rules, timeframes, or market behavior patterns to act upon. Additionally, the current market data shows 0% 24h change and a very low funding rate, indicating a lack of strong directional movement. Given the moderate risk level and max leverage constraint, there is insufficient basis for a confident trade at this time.",
+      "stopLoss": null,
+      "takeProfit": null
+    },
+    "executed": false
+  },
+  {
+    "id": "c84fa2b66d210924",
+    "agentId": "b749ff158122fdec",
+    "timestamp": 1770762368965,
+    "decision": {
+      "action": "short",
+      "asset": "ETH",
+      "size": 0.5,
+      "leverage": 2,
+      "confidence": 0.7,
+      "reasoning": "The strategy focuses on funding rate direction as a key signal. With ETH's positive funding rate, it suggests a short position. Despite the 24h price stability, the high funding rate indicates potential downward pressure.",
+      "stopLoss": 2300,
+      "takeProfit": 2100
+    },
+    "executed": false
+  },
+  {
+    "id": "8aebd6d48e94ee41",
+    "agentId": "aeefb87a856357de",
+    "timestamp": 1770762425948,
+    "decision": {
+      "action": "hold",
+      "asset": "BTC",
+      "size": 0,
+      "leverage": 1,
+      "confidence": 0,
+      "reasoning": "The strategy provided does not specify clear entry or exit rules, timeframes, or market behavior patterns to act upon. Additionally, the current market data shows 0% 24h change and a very low funding rate, indicating a lack of strong directional movement. Given the moderate risk level and max leverage constraint, there is insufficient basis for a confident trade at this time.",
+      "stopLoss": null,
+      "takeProfit": null
+    },
+    "executed": false
+  },
+  {
+    "id": "0762391fac671e97",
+    "agentId": "b749ff158122fdec",
+    "timestamp": 1770762429280,
+    "decision": {
+      "action": "short",
+      "asset": "ETH",
+      "size": 0.5,
+      "leverage": 2,
+      "confidence": 0.7,
+      "reasoning": "The strategy focuses on funding rate direction as a key signal. With ETH's positive funding rate, it suggests a short position. Despite the 24h price stability, the high funding rate indicates potential downward pressure.",
+      "stopLoss": 2300,
+      "takeProfit": 2100
+    },
+    "executed": false
+  },
+  {
+    "id": "c40619ad88065e44",
+    "agentId": "aeefb87a856357de",
+    "timestamp": 1770762485951,
+    "decision": {
+      "action": "hold",
+      "asset": "BTC",
+      "size": 0,
+      "leverage": 1,
+      "confidence": 0,
+      "reasoning": "The strategy provided does not specify clear entry or exit rules, timeframes, or market behavior patterns to act upon. Additionally, the current market data shows 0% 24h change and a very low funding rate, indicating a lack of strong directional movement. Given the moderate risk level and max leverage constraint, there is insufficient basis for a confident trade at this time.",
+      "stopLoss": null,
+      "takeProfit": null
+    },
+    "executed": false
+  },
+  {
+    "id": "eef97503c01f74ae",
+    "agentId": "b749ff158122fdec",
+    "timestamp": 1770762488932,
+    "decision": {
+      "action": "short",
+      "asset": "ETH",
+      "size": 0.5,
+      "leverage": 2,
+      "confidence": 0.7,
+      "reasoning": "The strategy focuses on funding rate direction as a key signal. With ETH's positive funding rate, it suggests a short position. Despite the 24h price stability, the high funding rate indicates potential downward pressure.",
+      "stopLoss": 2300,
+      "takeProfit": 2100
+    },
+    "executed": false
+  },
+  {
+    "id": "8d0fd947aa6e3c69",
+    "agentId": "aeefb87a856357de",
+    "timestamp": 1770762545951,
+    "decision": {
+      "action": "hold",
+      "asset": "BTC",
+      "size": 0,
+      "leverage": 1,
+      "confidence": 0,
+      "reasoning": "The strategy provided does not specify clear entry or exit rules, timeframes, or market behavior patterns to act upon. Additionally, the current market data shows 0% 24h change and a very low funding rate, indicating a lack of strong directional movement. Given the moderate risk level and max leverage constraint, there is insufficient basis for a confident trade at this time.",
+      "stopLoss": null,
+      "takeProfit": null
+    },
+    "executed": false
+  },
+  {
+    "id": "3874a44f7135700d",
+    "agentId": "b749ff158122fdec",
+    "timestamp": 1770762548677,
+    "decision": {
+      "action": "short",
+      "asset": "ETH",
+      "size": 0.5,
+      "leverage": 2,
+      "confidence": 0.7,
+      "reasoning": "The strategy focuses on funding rate direction as a key signal. With ETH's positive funding rate, it suggests a short position. Despite the 24h price stability, the high funding rate indicates potential downward pressure.",
+      "stopLoss": 2300,
+      "takeProfit": 2100
+    },
+    "executed": false
+  },
+  {
+    "id": "daf553121a06c07b",
+    "agentId": "aeefb87a856357de",
+    "timestamp": 1770762605955,
+    "decision": {
+      "action": "hold",
+      "asset": "BTC",
+      "size": 0,
+      "leverage": 1,
+      "confidence": 0,
+      "reasoning": "The strategy provided does not specify clear entry or exit rules, timeframes, or market behavior patterns to act upon. Additionally, the current market data shows 0% 24h change and a very low funding rate, indicating a lack of strong directional movement. Given the moderate risk level and max leverage constraint, there is insufficient basis for a confident trade at this time.",
+      "stopLoss": null,
+      "takeProfit": null
+    },
+    "executed": false
+  },
+  {
+    "id": "8dedc905a2c36c09",
+    "agentId": "b749ff158122fdec",
+    "timestamp": 1770762608750,
+    "decision": {
+      "action": "short",
+      "asset": "ETH",
+      "size": 0.5,
+      "leverage": 2,
+      "confidence": 0.7,
+      "reasoning": "The strategy focuses on funding rate direction as a key signal. With ETH's positive funding rate, it suggests a short position. Despite the 24h price stability, the high funding rate indicates potential downward pressure.",
+      "stopLoss": 2300,
+      "takeProfit": 2100
+    },
+    "executed": false
+  },
+  {
+    "id": "293dd0bfdfec1b24",
+    "agentId": "d927f6684d521fec",
+    "timestamp": 1770911906692,
+    "decision": {
+      "action": "hold",
+      "asset": "BTC",
+      "size": 0,
+      "leverage": 1,
+      "confidence": 0,
+      "reasoning": "AI unavailable (Connection error....); holding position. Set ANTHROPIC_API_KEY or GEMINI_API_KEY in Railway."
     },
     "executed": false
   }
